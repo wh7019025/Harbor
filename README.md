@@ -40,6 +40,12 @@ npm run tauri build -- --bundles deb
 
 产物：`src-tauri/target/release/bundle/deb/Harbor_*_amd64.deb`
 
+## CI
+
+GitHub Actions（`.github/workflows/build.yml`）会在 `main` / PR / 手动触发时构建 Linux `.deb`，并上传为 workflow artifact。
+
+推送 `v*` tag（例如 `v0.1.0`）时，会额外创建 draft Release 并挂上 `.deb`。
+
 ## 数据
 
 - Task / Group：默认 `~/.harbor/st_taskcfg/{tasks,groups,log}`
