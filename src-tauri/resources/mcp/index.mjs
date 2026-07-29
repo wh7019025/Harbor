@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * SuperTerm MCP Resources (zero-deps).
- * Exposes ~/.superterm/agent_doc/** as superterm://agent_doc/<relpath>
+ * Harbor MCP Resources (zero-deps).
+ * Exposes ~/.harbor/agent_doc/** as harbor://agent_doc/<relpath>
  */
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const DOC_ROOT = path.join(os.homedir(), ".superterm", "agent_doc");
+const DOC_ROOT = path.join(os.homedir(), ".harbor", "agent_doc");
 
 function mimeFor(file) {
   if (file.endsWith(".md")) return "text/markdown";
@@ -74,7 +74,7 @@ async function handle(message) {
       result: {
         protocolVersion: params?.protocolVersion || "2024-11-05",
         capabilities: { resources: { listChanged: false } },
-        serverInfo: { name: "superterm", version: "0.1.0" },
+        serverInfo: { name: "harbor", version: "0.1.0" },
       },
     };
   }
@@ -91,7 +91,7 @@ async function handle(message) {
       id,
       result: {
         resources: files.map((file) => ({
-          uri: `superterm://agent_doc/${file}`,
+          uri: `harbor://agent_doc/${file}`,
           name: file,
           mimeType: mimeFor(file),
         })),
@@ -100,7 +100,7 @@ async function handle(message) {
   }
   if (method === "resources/read") {
     const uri = params?.uri || "";
-    const prefix = "superterm://agent_doc/";
+    const prefix = "harbor://agent_doc/";
     if (!uri.startsWith(prefix)) {
       return {
         jsonrpc: "2.0",

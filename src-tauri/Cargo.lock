@@ -1428,6 +1428,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "harbor"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "nvml-wrapper",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3226,22 +3242,6 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
-
-[[package]]
-name = "superterm"
-version = "0.1.0"
-dependencies = [
- "libc",
- "nvml-wrapper",
- "parking_lot",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
-]
 
 [[package]]
 name = "swift-rs"

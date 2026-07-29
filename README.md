@@ -1,4 +1,4 @@
-# SuperTerm
+# Harbor
 
 桌面控制台：Launcher 打开 SystemPanel / TaskClick / Setting。
 
@@ -38,10 +38,10 @@ npm run tauri dev
 npm run tauri build -- --bundles deb
 ```
 
-产物：`src-tauri/target/release/bundle/deb/SuperTerm_*_amd64.deb`
+产物：`src-tauri/target/release/bundle/deb/Harbor_*_amd64.deb`
 
 ## 数据
 
-- Task / Group：默认 `~/.superterm/st_taskcfg/{tasks,groups,log}`
+- Task / Group：默认 `~/.harbor/st_taskcfg/{tasks,groups,log}`
 - 项目内：`<项目>/st_taskcfg/{tasks,groups}`
-- 设置：`~/.superterm/settings.json`
+- 设置：`~/.harbor/settings.json`

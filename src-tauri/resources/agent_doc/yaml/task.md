@@ -4,7 +4,7 @@
 version: 1
 id: demo-ping
 name: Demo Ping
-workdir: /home/se/SuperTerm
+workdir: /home/se/Harbor
 command:
   shell: sh
   script: |

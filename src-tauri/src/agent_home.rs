@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::settings::home_dir;
+use crate::settings::config_dir;
 
 const BUNDLED_DOCS: &[(&str, &str)] = &[
     (
@@ -43,16 +43,16 @@ pub struct AgentHelpInfo {
     pub mcp_example: String,
 }
 
-pub fn superterm_home() -> PathBuf {
-    home_dir().join(".superterm")
+pub fn harbor_home() -> PathBuf {
+    config_dir()
 }
 
 pub fn agent_doc_dir() -> PathBuf {
-    superterm_home().join("agent_doc")
+    harbor_home().join("agent_doc")
 }
 
 pub fn sync_agent_doc() -> Result<AgentHelpInfo, String> {
-    let home = superterm_home();
+    let home = harbor_home();
     let doc_dir = agent_doc_dir();
     let mcp_dir = home.join("mcp");
     fs::create_dir_all(&doc_dir).map_err(|e| format!("create {} failed: {e}", doc_dir.display()))?;
@@ -76,15 +76,15 @@ pub fn sync_agent_doc() -> Result<AgentHelpInfo, String> {
 }
 
 pub fn agent_help_info() -> AgentHelpInfo {
-    let home = superterm_home();
+    let home = harbor_home();
     let doc_dir = agent_doc_dir();
     let files = list_doc_files(&doc_dir);
     let mcp_script = home.join("mcp").join("index.mjs");
     let prompt = format!(
-        "请先阅读 SuperTerm Agent 文档目录：{}\n\
+        "请先阅读 Harbor Agent 文档目录：{}\n\
 优先打开 AgentDoc.md（结构树索引），再按需打开子文档（如 yaml/task.md、taskcard/paths.md）。\n\
-该目录在 SuperTerm 每次启动时会自动更新。\n\
-若已配置 SuperTerm MCP，可通过 resources 读取 superterm://agent_doc/<相对路径> 。",
+该目录在 Harbor 每次启动时会自动更新。\n\
+若已配置 Harbor MCP，可通过 resources 读取 harbor://agent_doc/<相对路径> 。",
         doc_dir.display()
     );
     AgentHelpInfo {
@@ -132,7 +132,7 @@ fn write_text(path: &Path, content: &str) -> Result<(), String> {
 fn mcp_example_json(script: &Path) -> String {
     serde_json::to_string_pretty(&serde_json::json!({
         "mcpServers": {
-            "superterm": {
+            "harbor": {
                 "command": "node",
                 "args": [script.display().to_string()]
             }

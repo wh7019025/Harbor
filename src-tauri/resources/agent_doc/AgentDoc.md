@@ -1,8 +1,8 @@
-# SuperTerm AgentHelp
+# Harbor AgentHelp
 
 给 Agent / 自动化助手用的操作说明。修改任务、搜索路径、日志时按本文约定执行。
 
-先读本索引，再按需打开子文档。文档目录在 `~/.superterm/agent_doc/`（SuperTerm 每次启动会刷新）。
+先读本索引，再按需打开子文档。文档目录在 `~/.harbor/agent_doc/`（Harbor 每次启动会刷新）。
 
 ## 结构树
 

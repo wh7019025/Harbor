@@ -11,7 +11,7 @@ tasks:
     # 未写 prefix_path → 按短 id 取第一个命中的 task
     wait_after_sec: 0
   - task: demo-ping
-    prefix_path: /home/se/SuperTerm
+    prefix_path: /home/se/Harbor
     wait_after_sec: 0
 ```
 

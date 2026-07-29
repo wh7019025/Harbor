@@ -1,6 +1,6 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
-const STORAGE_KEY = "superterm.uiZoom";
+const STORAGE_KEY = "harbor.uiZoom";
 const MIN = 0.7;
 const MAX = 2;
 const STEP = 0.1;

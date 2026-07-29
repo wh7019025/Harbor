@@ -119,7 +119,7 @@ function folderLabel(folder: string) {
 
 function loadCollapsedTaskFolders() {
   try {
-    const raw = localStorage.getItem("superterm.collapsedTaskFolders");
+    const raw = localStorage.getItem("harbor.collapsedTaskFolders");
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
     return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
   } catch {
@@ -136,7 +136,7 @@ function toggleTaskFolder(folder: string) {
   if (next.has(folder)) next.delete(folder);
   else next.add(folder);
   collapsedTaskFolders.value = next;
-  localStorage.setItem("superterm.collapsedTaskFolders", JSON.stringify([...next]));
+  localStorage.setItem("harbor.collapsedTaskFolders", JSON.stringify([...next]));
 }
 
 function instanceKey(prefixPath: string, id: string) {
@@ -206,7 +206,7 @@ function editFolderDisplay(kind: "task" | "group", prefixPath: string, id: strin
       : snapshot.value?.groups.find((group) => group.id === id && group.prefix_path === prefixPath);
   const category = item?.folder || relativeFolder;
   if (!category) {
-    return `Root (${snapshot.value?.root || "~/.superterm/st_taskcfg"})`;
+    return `Root (${snapshot.value?.root || "~/.harbor/st_taskcfg"})`;
   }
   return category;
 }
@@ -220,7 +220,7 @@ function pathLabel(path: string) {
 const folderOptions = computed(() => [
   {
     value: "",
-    label: `Root (${snapshot.value?.root || "~/.superterm/st_taskcfg"})`,
+    label: `Root (${snapshot.value?.root || "~/.harbor/st_taskcfg"})`,
   },
   ...searchPaths.value.map((path) => ({
     value: path,
@@ -497,7 +497,7 @@ onBeforeUnmount(() => {
   <section class="st-shell flex h-full flex-col gap-2 px-3 py-2">
     <header class="flex flex-wrap items-center justify-between gap-2">
       <p class="readout truncate text-[11px] text-[var(--muted)]">
-        {{ snapshot?.root || "~/.superterm/st_taskcfg" }}
+        {{ snapshot?.root || "~/.harbor/st_taskcfg" }}
       </p>
       <div class="flex items-center gap-1">
         <button

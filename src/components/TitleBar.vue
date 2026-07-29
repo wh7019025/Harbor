@@ -8,7 +8,7 @@ const props = withDefaults(
     resizable?: boolean;
   }>(),
   {
-    title: "SuperTerm",
+    title: "Harbor",
     resizable: true,
   },
 );

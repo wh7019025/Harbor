@@ -28,27 +28,17 @@ pub fn settings_path() -> PathBuf {
 }
 
 pub fn config_dir() -> PathBuf {
-    home_dir().join(".superterm")
-}
-
-pub fn legacy_settings_path() -> PathBuf {
-    home_dir().join(".config").join("superterm").join("settings.json")
+    home_dir().join(".harbor")
 }
 
 pub fn default_taskcard_root() -> PathBuf {
-    home_dir().join(".superterm").join("st_taskcfg")
+    config_dir().join("st_taskcfg")
 }
 
 pub fn load_settings() -> Settings {
     let path = settings_path();
     if let Ok(raw) = fs::read_to_string(&path) {
         return serde_json::from_str(&raw).unwrap_or_default();
-    }
-    let legacy = legacy_settings_path();
-    if let Ok(raw) = fs::read_to_string(&legacy) {
-        let settings = serde_json::from_str(&raw).unwrap_or_default();
-        let _ = save_settings(&settings);
-        return settings;
     }
     Settings::default()
 }

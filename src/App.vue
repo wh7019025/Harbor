@@ -22,7 +22,7 @@ const title = computed(() => {
     case "agent-help":
       return "AgentHelp";
     default:
-      return "SuperTerm";
+      return "Harbor";
   }
 });
 

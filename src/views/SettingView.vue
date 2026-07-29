@@ -3,7 +3,7 @@ import { onMounted, ref } from "vue";
 import { getAppVersion, getSettings, updateSettings, type Settings } from "../api/settings";
 
 const form = ref<Settings>({
-  taskcard_root: "~/.superterm/st_taskcfg",
+  taskcard_root: "~/.harbor/st_taskcfg",
   search_paths: [],
   metrics_fast_ms: 1000,
   metrics_slow_ms: 10000,
@@ -89,8 +89,8 @@ async function save() {
     </form>
 
     <div class="mt-auto border-t border-[var(--line)] pt-4">
-      <p class="readout text-xs text-[var(--muted)]">SuperTerm {{ version }}</p>
-      <p class="readout mt-1 text-xs text-[var(--faint)]">~/.superterm/settings.json</p>
+      <p class="readout text-xs text-[var(--muted)]">Harbor {{ version }}</p>
+      <p class="readout mt-1 text-xs text-[var(--faint)]">~/.harbor/settings.json</p>
     </div>
   </section>
 </template>

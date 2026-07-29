@@ -1,8 +1,8 @@
 [package]
-name = "superterm"
+name = "harbor"
 version = "0.1.0"
-description = "SuperTerm desktop console"
-authors = ["SuperTerm"]
+description = "Harbor desktop console"
+authors = ["Harbor"]
 edition = "2021"
 
 [lib]

@@ -451,5 +451,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running SuperTerm");
+        .expect("error while running Harbor");
 }

@@ -64,7 +64,7 @@ onBeforeUnmount(() => {
       <div class="flex items-center gap-2.5">
         <span class="h-2 w-2 rounded-full bg-[var(--accent)] shadow-[0_0_0_3px_var(--accent-soft)]" />
         <h1 class="text-[1.85rem] font-semibold tracking-[-0.03em] text-[var(--ink-bright)]">
-          SuperTerm
+          Harbor
         </h1>
       </div>
     </header>

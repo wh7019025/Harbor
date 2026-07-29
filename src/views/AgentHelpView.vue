@@ -66,7 +66,7 @@ onMounted(() => {
     <div class="rounded-md border border-[var(--line-soft)] bg-[var(--bg-1)] px-3 py-2">
       <div class="flex items-center gap-1.5 text-[11px] text-[var(--faint)]">
         <FolderOpen class="h-3.5 w-3.5" />
-        <span class="readout truncate">{{ info?.agent_doc_dir || "~/.superterm/agent_doc" }}</span>
+        <span class="readout truncate">{{ info?.agent_doc_dir || "~/.harbor/agent_doc" }}</span>
       </div>
       <p v-if="info?.files?.length" class="readout mt-1.5 text-[11px] text-[var(--muted)]">
         {{ info.files.join(" · ") }}
@@ -110,7 +110,7 @@ onMounted(() => {
         info?.mcp_example || ""
       }}</pre>
       <p class="mt-1.5 text-[11px] text-[var(--faint)]">
-        合并进 Cursor MCP 配置后，Agent 可通过 resources 读取 superterm://agent_doc/*
+        合并进 Cursor MCP 配置后，Agent 可通过 resources 读取 harbor://agent_doc/*
       </p>
     </div>
   </section>

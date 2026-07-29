@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SuperTerm",
+  "productName": "Harbor",
   "version": "0.1.0",
-  "identifier": "com.superterm.desktop",
+  "identifier": "com.harbor.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "launcher",
-        "title": "SuperTerm",
+        "title": "Harbor",
         "width": 420,
         "height": 640,
         "resizable": false,
