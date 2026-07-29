@@ -1,0 +1,14 @@
+version: 1
+id: demo-ping
+name: Demo Ping
+workdir: /home/se/SuperTerm
+command:
+  shell: sh
+  script: |
+    i=0
+    while [ "$i" -lt 20 ]; do
+      i=$((i + 1))
+      echo "demo-ping #$i $(date '+%H:%M:%S')"
+      sleep 1
+    done
+    echo "demo-ping done"
