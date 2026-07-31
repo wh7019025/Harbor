@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X } from "lucide-vue-next";
+import { Fullscreen, Minimize2, Minus, Square, X } from "lucide-vue-next";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = withDefaults(
   defineProps<{
@@ -14,6 +15,12 @@ const props = withDefaults(
 );
 
 const appWindow = getCurrentWindow();
+const isFullscreen = ref(false);
+let unlistenResized: (() => void) | null = null;
+
+async function syncFullscreen() {
+  isFullscreen.value = await appWindow.isFullscreen();
+}
 
 async function drag() {
   await appWindow.startDragging();
@@ -28,9 +35,27 @@ async function toggleMaximize() {
   await appWindow.toggleMaximize();
 }
 
+async function toggleFullscreen() {
+  if (!props.resizable) return;
+  const next = !isFullscreen.value;
+  await appWindow.setFullscreen(next);
+  isFullscreen.value = next;
+}
+
 async function close() {
   await appWindow.close();
 }
+
+onMounted(async () => {
+  await syncFullscreen();
+  unlistenResized = await appWindow.onResized(() => {
+    void syncFullscreen();
+  });
+});
+
+onBeforeUnmount(() => {
+  unlistenResized?.();
+});
 </script>
 
 <template>
@@ -61,6 +86,17 @@ async function close() {
         @click="toggleMaximize"
       >
         <Square class="h-3 w-3" stroke-width="1.75" />
+      </button>
+      <button
+        v-if="resizable"
+        type="button"
+        class="flex h-full w-11 items-center justify-center text-[var(--muted)] transition-colors duration-150 hover:bg-[var(--surface-hover)] hover:text-[var(--ink-bright)]"
+        :aria-label="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+        :title="isFullscreen ? '退出全屏' : '全屏'"
+        @click="toggleFullscreen"
+      >
+        <Minimize2 v-if="isFullscreen" class="h-3.5 w-3.5" stroke-width="1.75" />
+        <Fullscreen v-else class="h-3.5 w-3.5" stroke-width="1.75" />
       </button>
       <button
         type="button"
