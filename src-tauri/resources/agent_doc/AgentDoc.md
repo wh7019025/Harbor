@@ -10,6 +10,7 @@
 agent_doc/
 ├── AgentDoc.md      ← 你在这里
 ├── windows.md
+├── settings.md
 ├── taskcard/
 │   ├── paths.md
 │   └── create.md
@@ -25,7 +26,8 @@ agent_doc/
 
 | 路径 | 内容 |
 |------|------|
-| [windows.md](windows.md) | 各功能窗口用途 |
+| [windows.md](windows.md) | 主界面与 TaskClick 区域说明 |
+| [settings.md](settings.md) | `~/.harbor/settings.json` 格式；Search paths 配置与 research |
 | [taskcard/paths.md](taskcard/paths.md) | TaskCard 目录约定、search path、research |
 | [taskcard/create.md](taskcard/create.md) | 新建任务流程 |
 | [yaml/task.md](yaml/task.md) | Task YAML 格式与规则 |

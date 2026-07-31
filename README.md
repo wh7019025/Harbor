@@ -1,6 +1,6 @@
 # Harbor
 
-桌面控制台：Launcher 打开 SystemPanel / TaskClick / Setting。
+Harbor 桌面控制台：启动即 TaskClick 主界面；Setting / AgentHelp 在顶栏弹层内。
 
 ## 系统依赖（Linux）
 
@@ -50,4 +50,4 @@ GitHub Actions（`.github/workflows/build.yml`）会在 `main` / PR / 手动触�
 
 - Task / Group：默认 `~/.harbor/st_taskcfg/{tasks,groups,log}`
 - 项目内：`<项目>/st_taskcfg/{tasks,groups}`
-- 设置：`~/.harbor/settings.json`
+- 设置：`~/.harbor/settings.json`（含 `search_paths`；Agent 可直接编辑，见 `agent_doc/settings.md`）

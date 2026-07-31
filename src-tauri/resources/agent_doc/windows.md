@@ -1,9 +1,9 @@
 # 窗口
 
-| 窗口 | 用途 |
+Harbor 启动即 TaskClick 主窗口（标题栏显示 Harbor）。
+
+| 区域 | 用途 |
 |------|------|
-| Launcher | 入口，打开各功能窗 |
-| SystemPanel | CPU / 内存 / 磁盘 / 网络监控；有 NVIDIA 时额外显示 GPU（无设备则不显示） |
 | TaskClick | TaskCard / TaskGroup 启停与日志 |
-| Setting | `taskcard_root`、search paths、轮询间隔 |
-| AgentHelp | 复制一段话，告诉 Agent 文档在 `~/.harbor/agent_doc/` |
+| 顶栏弹层 | Setting（`~/.harbor/settings.json`，含 search paths）、AgentHelp（Agent 文档与 MCP） |
+| 底部栏 | CPU / 内存 / 磁盘 / 网络 / GPU 指标 |

@@ -10,15 +10,20 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Settings,
+  Bot,
   Square,
   Terminal,
   Trash2,
   X,
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import AgentHelpPanel from "../components/AgentHelpPanel.vue";
 import HistoricalLogViewer from "../components/HistoricalLogViewer.vue";
 import LiveLogViewer from "../components/LiveLogViewer.vue";
 import MonacoEditor from "../components/MonacoEditor.vue";
+import SettingPanel from "../components/SettingPanel.vue";
+import TaskMetricsFooter from "../components/TaskMetricsFooter.vue";
 import SelectField from "../components/SelectField.vue";
 import {
   addSearchPath,
@@ -57,6 +62,8 @@ const loading = ref(true);
 const refreshing = ref(false);
 const researching = ref(false);
 const pathsPanelOpen = ref(false);
+const settingsPanelOpen = ref(false);
+const agentHelpPanelOpen = ref(false);
 const newSearchPath = ref("");
 const error = ref("");
 const pending = ref<{ key: string; label: string } | null>(null);
@@ -524,6 +531,12 @@ onBeforeUnmount(() => {
         >
           <Square class="h-3.5 w-3.5" />
         </button>
+        <button class="btn !px-2 !py-1" type="button" title="settings" @click="settingsPanelOpen = true">
+          <Settings class="h-3.5 w-3.5" />
+        </button>
+        <button class="btn !px-2 !py-1" type="button" title="agent help" @click="agentHelpPanelOpen = true">
+          <Bot class="h-3.5 w-3.5" />
+        </button>
       </div>
     </header>
 
@@ -535,7 +548,7 @@ onBeforeUnmount(() => {
     </p>
 
     <div
-      class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-2 xl:grid-cols-[2fr_3fr] xl:grid-rows-1"
+      class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-2 xl:grid-cols-[3fr_7fr] xl:grid-rows-1"
     >
       <aside
         v-if="pathsPanelOpen"
@@ -897,6 +910,44 @@ onBeforeUnmount(() => {
             </p>
           </div>
         </div>
+      </div>
+    </div>
+
+    <TaskMetricsFooter />
+
+    <div
+      v-if="settingsPanelOpen"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      @click.self="settingsPanelOpen = false"
+    >
+      <div
+        class="flex h-[min(640px,calc(100vh-2rem))] w-[min(520px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--bg-1)]"
+      >
+        <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
+          <h3 class="text-sm font-medium">Setting</h3>
+          <button class="btn !px-2 !py-1" type="button" @click="settingsPanelOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <SettingPanel @close="settingsPanelOpen = false" @saved="load" />
+      </div>
+    </div>
+
+    <div
+      v-if="agentHelpPanelOpen"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      @click.self="agentHelpPanelOpen = false"
+    >
+      <div
+        class="flex h-[min(720px,calc(100vh-2rem))] w-[min(820px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--bg-1)]"
+      >
+        <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
+          <h3 class="text-sm font-medium">AgentHelp</h3>
+          <button class="btn !px-2 !py-1" type="button" @click="agentHelpPanelOpen = false">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <AgentHelpPanel @close="agentHelpPanelOpen = false" />
       </div>
     </div>
 

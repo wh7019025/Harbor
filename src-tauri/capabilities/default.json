@@ -2,22 +2,14 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for Harbor windows",
-  "windows": ["launcher", "system-panel", "task-click", "setting", "agent-help"],
+  "windows": ["task-click"],
   "permissions": [
     "core:default",
-    "core:webview:allow-create-webview-window",
     "core:webview:allow-set-webview-zoom",
-    "core:window:allow-create",
-    "core:window:allow-show",
-    "core:window:allow-set-focus",
-    "core:window:allow-close",
-    "core:window:allow-center",
-    "core:window:allow-set-size",
-    "core:window:allow-set-title",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
-    "core:window:allow-set-decorations",
+    "core:window:allow-close",
     "opener:default"
   ]
 }

@@ -16,9 +16,16 @@ const container = ref<HTMLElement | null>(null);
 let instance: editor.IStandaloneCodeEditor | null = null;
 let subscription: { dispose(): void } | null = null;
 
+async function loadMonaco() {
+  const monaco = await import("monaco-editor/esm/vs/editor/editor.api.js");
+  await import("monaco-editor/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js");
+  await import("monaco-editor/esm/vs/editor/contrib/clipboard/browser/clipboard.js");
+  return monaco;
+}
+
 onMounted(async () => {
   const language = props.language ?? "yaml";
-  const monaco = await import("monaco-editor/esm/vs/editor/editor.api.js");
+  const monaco = await loadMonaco();
   if (language === "yaml") {
     await import("monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js");
   }
@@ -35,6 +42,7 @@ onMounted(async () => {
     tabSize: 2,
     fontSize: 13,
     lineHeight: 20,
+    contextmenu: true,
   });
   subscription = instance.onDidChangeModelContent(() => {
     emit("update:modelValue", instance?.getValue() ?? "");

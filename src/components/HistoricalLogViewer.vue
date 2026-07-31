@@ -9,17 +9,24 @@ const props = defineProps<{
 const container = ref<HTMLElement | null>(null);
 let instance: editor.IStandaloneCodeEditor | null = null;
 
+function hasSelectionInEditor() {
+  if (!instance) return false;
+  const selection = instance.getSelection();
+  return selection != null && !selection.isEmpty();
+}
+
 function scrollToBottom() {
   if (!instance) return;
   const model = instance.getModel();
   if (!model) return;
-  const lastLine = model.getLineCount();
-  instance.revealLine(lastLine);
+  instance.revealLine(model.getLineCount());
   instance.setScrollTop(instance.getScrollHeight());
 }
 
 onMounted(async () => {
   const monaco = await import("monaco-editor/esm/vs/editor/editor.api.js");
+  await import("monaco-editor/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js");
+  await import("monaco-editor/esm/vs/editor/contrib/clipboard/browser/clipboard.js");
   if (!container.value) return;
   instance = monaco.editor.create(container.value, {
     value: props.content,
@@ -30,10 +37,11 @@ onMounted(async () => {
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
     wordWrap: "on",
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 17,
     renderLineHighlight: "none",
     overviewRulerLanes: 0,
+    contextmenu: true,
   });
   scrollToBottom();
 });
@@ -42,8 +50,9 @@ watch(
   () => props.content,
   (content) => {
     if (instance?.getValue() === content) return;
+    const keepScroll = hasSelectionInEditor();
     instance?.setValue(content);
-    scrollToBottom();
+    if (!keepScroll) scrollToBottom();
   },
 );
 

@@ -12,11 +12,11 @@
   "app": {
     "windows": [
       {
-        "label": "launcher",
+        "label": "task-click",
         "title": "Harbor",
-        "width": 420,
-        "height": 640,
-        "resizable": false,
+        "width": 1180,
+        "height": 820,
+        "resizable": true,
         "decorations": false,
         "center": true
       }

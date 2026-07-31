@@ -440,7 +440,7 @@ pub fn run() {
             refresh_agent_doc,
         ])
         .setup(|app| {
-            if let Some(window) = app.get_webview_window("launcher") {
+            if let Some(window) = app.get_webview_window("task-click") {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {

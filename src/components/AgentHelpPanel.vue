@@ -3,6 +3,10 @@ import { Check, Copy, FolderOpen, RefreshCw } from "lucide-vue-next";
 import { onMounted, ref } from "vue";
 import { getAgentHelp, refreshAgentDoc, type AgentHelpInfo } from "../api/agentHelp";
 
+defineEmits<{
+  close: [];
+}>();
+
 const info = ref<AgentHelpInfo | null>(null);
 const error = ref("");
 const copied = ref<"prompt" | "mcp" | null>(null);
@@ -47,19 +51,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="st-shell mx-auto flex h-full max-w-2xl flex-col gap-3 px-5 py-4">
-    <header class="flex items-start justify-between gap-3">
-      <div>
-        <p class="kicker">agent</p>
-        <h2 class="text-lg font-medium text-[var(--ink-bright)]">AgentHelp</h2>
-        <p class="mt-1 text-[12px] text-[var(--muted)]">
-          复制下面这段话发给 Agent，告诉它文档在哪。
-        </p>
-      </div>
-      <button class="btn !px-2 !py-1" type="button" title="refresh docs" :disabled="refreshing" @click="refresh">
-        <RefreshCw :class="['h-3.5 w-3.5', refreshing ? 'animate-spin' : '']" />
-      </button>
-    </header>
+  <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-4 py-3">
+    <p class="text-[12px] text-[var(--muted)]">复制下面这段话发给 Agent，告诉它文档在哪。</p>
 
     <p v-if="error" class="text-sm text-[#f48771]">{{ error }}</p>
 
@@ -76,16 +69,20 @@ onMounted(() => {
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--surface-2)]">
       <div class="flex items-center justify-between border-b border-[var(--line-soft)] px-3 py-1.5">
         <span class="kicker">copy for agent</span>
-        <button
-          class="btn !px-2 !py-1"
-          type="button"
-          :disabled="!info?.prompt"
-          @click="info && copyText('prompt', info.prompt)"
-        >
-          <Check v-if="copied === 'prompt'" class="h-3.5 w-3.5 text-[var(--running)]" />
-          <Copy v-else class="h-3.5 w-3.5" />
-          <span class="text-[11px]">{{ copied === "prompt" ? "copied" : "copy" }}</span>
-        </button>
+        <div class="flex items-center gap-1">
+          <button class="btn !px-2 !py-1" type="button" title="refresh docs" :disabled="refreshing" @click="refresh">
+            <RefreshCw :class="['h-3.5 w-3.5', refreshing ? 'animate-spin' : '']" />
+          </button>
+          <button
+            class="btn !px-2 !py-1"
+            type="button"
+            :disabled="!info?.prompt"
+            @click="info && copyText('prompt', info.prompt)"
+          >
+            <Check v-if="copied === 'prompt'" class="h-3.5 w-3.5 text-[var(--running)]" />
+            <Copy v-else class="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
       <pre class="min-h-0 flex-1 overflow-auto p-3 font-mono text-[12px] leading-relaxed text-[var(--ink)]">{{
         info?.prompt || "loading…"
@@ -103,7 +100,6 @@ onMounted(() => {
         >
           <Check v-if="copied === 'mcp'" class="h-3.5 w-3.5 text-[var(--running)]" />
           <Copy v-else class="h-3.5 w-3.5" />
-          <span class="text-[11px]">{{ copied === "mcp" ? "copied" : "copy" }}</span>
         </button>
       </div>
       <pre class="max-h-36 overflow-auto font-mono text-[11px] leading-relaxed text-[var(--muted)]">{{
@@ -113,5 +109,5 @@ onMounted(() => {
         合并进 Cursor MCP 配置后，Agent 可通过 resources 读取 harbor://agent_doc/*
       </p>
     </div>
-  </section>
+  </div>
 </template>

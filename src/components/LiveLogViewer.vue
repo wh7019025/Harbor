@@ -91,7 +91,7 @@ onBeforeUnmount(() => {
   <div class="relative flex min-h-0 flex-1 flex-col">
     <pre
       ref="viewport"
-      class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
+      class="log-viewport min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
       @scroll="onScroll"
     />
     <button
@@ -104,3 +104,9 @@ onBeforeUnmount(() => {
     </button>
   </div>
 </template>
+
+<style scoped>
+.log-viewport::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+</style>
