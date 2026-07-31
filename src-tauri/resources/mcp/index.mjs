@@ -74,7 +74,7 @@ async function handle(message) {
       result: {
         protocolVersion: params?.protocolVersion || "2024-11-05",
         capabilities: { resources: { listChanged: false } },
-        serverInfo: { name: "harbor", version: "0.1.0" },
+        serverInfo: { name: "harbor", version: "0.1.1" },
       },
     };
   }
