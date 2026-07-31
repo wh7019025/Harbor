@@ -9,6 +9,15 @@ const props = defineProps<{
 const container = ref<HTMLElement | null>(null);
 let instance: editor.IStandaloneCodeEditor | null = null;
 
+function scrollToBottom() {
+  if (!instance) return;
+  const model = instance.getModel();
+  if (!model) return;
+  const lastLine = model.getLineCount();
+  instance.revealLine(lastLine);
+  instance.setScrollTop(instance.getScrollHeight());
+}
+
 onMounted(async () => {
   const monaco = await import("monaco-editor/esm/vs/editor/editor.api.js");
   if (!container.value) return;
@@ -20,18 +29,21 @@ onMounted(async () => {
     automaticLayout: true,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
-    wordWrap: "off",
+    wordWrap: "on",
     fontSize: 12,
     lineHeight: 18,
     renderLineHighlight: "none",
     overviewRulerLanes: 0,
   });
+  scrollToBottom();
 });
 
 watch(
   () => props.content,
   (content) => {
-    if (instance?.getValue() !== content) instance?.setValue(content);
+    if (instance?.getValue() === content) return;
+    instance?.setValue(content);
+    scrollToBottom();
   },
 );
 

@@ -17,6 +17,7 @@ import {
 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import HistoricalLogViewer from "../components/HistoricalLogViewer.vue";
+import LiveLogViewer from "../components/LiveLogViewer.vue";
 import MonacoEditor from "../components/MonacoEditor.vue";
 import SelectField from "../components/SelectField.vue";
 import {
@@ -533,7 +534,9 @@ onBeforeUnmount(() => {
       {{ error }}
     </p>
 
-    <div class="relative grid min-h-0 flex-1 gap-2 xl:grid-cols-[minmax(480px,1fr)_minmax(0,1.1fr)]">
+    <div
+      class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-2 xl:grid-cols-[2fr_3fr] xl:grid-rows-1"
+    >
       <aside
         v-if="pathsPanelOpen"
         class="absolute inset-x-0 top-0 z-20 mx-auto w-full max-w-xl rounded-md border border-[var(--line)] bg-[var(--bg-1)] shadow-lg"
@@ -602,7 +605,9 @@ onBeforeUnmount(() => {
           </p>
         </div>
       </aside>
-      <div class="grid min-h-0 grid-cols-2 gap-2">
+      <div
+        class="grid min-h-0 grid-cols-2 gap-2 xl:grid-cols-1 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]"
+      >
         <div class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[var(--line-soft)]">
           <div class="flex items-center justify-between border-b border-[var(--line-soft)] bg-[var(--bg-1)] px-2 py-1">
             <div class="flex min-w-0 items-center gap-1.5">
@@ -876,10 +881,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <div class="flex min-h-0 flex-col bg-[var(--surface-2)]">
-            <pre
-              v-if="selectedLogActive"
-              class="min-h-0 flex-1 overflow-auto p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
-            >{{ logText }}</pre>
+            <LiveLogViewer v-if="selectedLogActive" :content="logText" />
             <HistoricalLogViewer v-else-if="selectedLog" :content="historicalContent" />
             <div
               v-else
