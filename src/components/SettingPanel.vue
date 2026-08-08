@@ -8,7 +8,7 @@ const emit = defineEmits<{
 }>();
 
 const form = ref<Settings>({
-  taskcard_root: "~/.harbor/st_taskcfg",
+  taskcard_root: "~/.harbor/harbor_taskcfg",
   search_paths: [],
   metrics_fast_ms: 1000,
   metrics_slow_ms: 10000,
@@ -61,7 +61,7 @@ async function save() {
       <textarea
         v-model="searchPathsText"
         class="field mt-2 h-28 text-xs leading-relaxed"
-        placeholder="一行一个目录；每个最多向下搜 5 层 st_taskcfg"
+        placeholder="一行一个目录；每个最多向下搜 5 层 harbor_taskcfg"
       />
     </label>
     <label class="block">

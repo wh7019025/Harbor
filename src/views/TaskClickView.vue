@@ -153,7 +153,7 @@ function instanceKey(prefixPath: string, id: string) {
 
 function projectPrefixFromTaskDir(dir: string) {
   const normalized = dir.replace(/\\/g, "/").replace(/\/+$/, "");
-  const marker = "/st_taskcfg/tasks";
+  const marker = "/harbor_taskcfg/tasks";
   if (normalized.endsWith(marker)) {
     return normalized.slice(0, -marker.length);
   }
@@ -214,7 +214,7 @@ function editFolderDisplay(kind: "task" | "group", prefixPath: string, id: strin
       : snapshot.value?.groups.find((group) => group.id === id && group.prefix_path === prefixPath);
   const category = item?.folder || relativeFolder;
   if (!category) {
-    return `Root (${snapshot.value?.root || "~/.harbor/st_taskcfg"})`;
+    return `Root (${snapshot.value?.root || "~/.harbor/harbor_taskcfg"})`;
   }
   return category;
 }
@@ -228,7 +228,7 @@ function pathLabel(path: string) {
 const folderOptions = computed(() => [
   {
     value: "",
-    label: `Root (${snapshot.value?.root || "~/.harbor/st_taskcfg"})`,
+    label: `Root (${snapshot.value?.root || "~/.harbor/harbor_taskcfg"})`,
   },
   ...searchPaths.value.map((path) => ({
     value: path,
@@ -505,7 +505,7 @@ onBeforeUnmount(() => {
   <section class="st-shell flex h-full flex-col gap-2 px-3 py-2">
     <header class="flex flex-wrap items-center justify-between gap-2">
       <p class="readout truncate text-[11px] text-[var(--muted)]">
-        {{ snapshot?.root || "~/.harbor/st_taskcfg" }}
+        {{ snapshot?.root || "~/.harbor/harbor_taskcfg" }}
       </p>
       <div class="flex items-center gap-1">
         <button
@@ -558,7 +558,7 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-2">
             <span class="kicker">search paths</span>
             <span class="readout text-[10px] text-[var(--faint)]">
-              ≤5 layers · st_taskcfg tasks {{ discoveredSummary.tasks }} · groups {{ discoveredSummary.groups }}
+              ≤5 layers · harbor_taskcfg tasks {{ discoveredSummary.tasks }} · groups {{ discoveredSummary.groups }}
             </span>
           </div>
           <div class="flex items-center gap-1">
@@ -614,7 +614,7 @@ onBeforeUnmount(() => {
             </li>
           </ul>
           <p v-else class="px-0.5 text-[11px] text-[var(--faint)]">
-            可添加多个目录；每个目录最多向下搜索 5 层，查找 st_taskcfg/tasks 与 st_taskcfg/groups
+            可添加多个目录；每个目录最多向下搜索 5 层，查找 harbor_taskcfg/tasks 与 harbor_taskcfg/groups
           </p>
         </div>
       </aside>

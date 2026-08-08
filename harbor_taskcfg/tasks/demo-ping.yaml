@@ -1,7 +1,8 @@
-version: 1
+version: "0.1.1"
 id: demo-ping
 name: Demo Ping
-workdir: /home/se/Harbor
+description: Periodic demo ping task
+workdir: $(harbor_taskcfg_dir)/..
 command:
   shell: sh
   script: |

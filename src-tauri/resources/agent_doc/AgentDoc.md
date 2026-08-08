@@ -1,37 +1,26 @@
-# Harbor AgentHelp
+# Harbor Task / Group 配置手册
 
-给 Agent / 自动化助手用的操作说明。修改任务、搜索路径、日志时按本文约定执行。
+本文档只帮助 Agent 创建和维护 Harbor 的 Task、Group 配置。界面布局、按钮位置、运行监控等其他产品功能不属于 Agent 需要了解的范围。
 
-先读本索引，再按需打开子文档。文档目录在 `~/.harbor/agent_doc/`（Harbor 每次启动会刷新）。
+## Agent 工作流
 
-## 结构树
+1. 运行 `harbor --version`，取得 YAML 要写入的 `version`。
+2. 确认配置属于当前项目还是全局环境，按 [taskcard/paths.md](taskcard/paths.md) 选择目录。
+3. 按 [taskcard/create.md](taskcard/create.md) 直接创建文件，并遵循 [yaml/task.md](yaml/task.md) 的格式。
+4. 需要组合任务时，按 [yaml/group.md](yaml/group.md) 创建或修改 Group。
+5. 若项目配置尚未被发现，只修改 [settings.md](settings.md) 中与配置发现有关的字段。
+6. 检查 YAML、Task 引用、路径和命令；不要写入 Harbor 自动生成的字段。
 
-```text
-agent_doc/
-├── AgentDoc.md      ← 你在这里
-├── windows.md
-├── settings.md
-├── taskcard/
-│   ├── paths.md
-│   └── create.md
-├── yaml/
-│   ├── task.md
-│   └── group.md
-├── logs.md
-├── tips.md
-└── MCP.md
-```
+文档发布到 `~/.harbor/agent_doc/`，Harbor 启动时会刷新。
 
 ## 文档索引
 
 | 路径 | 内容 |
 |------|------|
-| [windows.md](windows.md) | 主界面与 TaskClick 区域说明 |
-| [settings.md](settings.md) | `~/.harbor/settings.json` 格式；Search paths 配置与 research |
-| [taskcard/paths.md](taskcard/paths.md) | TaskCard 目录约定、search path、research |
-| [taskcard/create.md](taskcard/create.md) | 新建任务流程 |
+| [version.md](version.md) | 获取并维护 YAML `version` |
+| [settings.md](settings.md) | 配置根目录和项目发现路径 |
+| [taskcard/paths.md](taskcard/paths.md) | Task / Group 的存放与发现规则 |
+| [taskcard/create.md](taskcard/create.md) | Agent 直接创建 Task / Group 的流程 |
 | [yaml/task.md](yaml/task.md) | Task YAML 格式与规则 |
 | [yaml/group.md](yaml/group.md) | Group YAML 格式与规则 |
-| [logs.md](logs.md) | 运行日志与历史查看 |
-| [tips.md](tips.md) | 给 Agent 的建议 |
-| [MCP.md](MCP.md) | Cursor MCP 配置与 resource URI |
+| [tips.md](tips.md) | 修改配置时的安全检查 |

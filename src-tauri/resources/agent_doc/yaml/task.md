@@ -1,10 +1,15 @@
 # Task YAML
 
+完整示例（Agent 直接写文件时，`version` 需手动设为 `harbor --version` 的输出）：
+
 ```yaml
-version: 1
+version: "0.1.1"
 id: demo-ping
 name: Demo Ping
-workdir: /home/se/Harbor
+description: Periodic hello ping for demo
+workdir: $(harbor_taskcfg_dir)/..
+env: {}
+sudo: false
 command:
   shell: sh
   script: |
@@ -15,22 +20,51 @@ command:
 或 argv 形式：
 
 ```yaml
-version: 1
+version: "0.1.1"
 id: uname-kernel
 name: Uname Kernel
+description: ""
 workdir: ~
+env: {}
+sudo: false
 command:
   argv:
     - uname
     - -a
 ```
 
-规则：
+## 字段
 
-- `version` 必须为 `1`
-- `id`：字母数字、`-`、`_`（短 id；YAML 内不写工程路径）
-- 跨工程允许同名 `id`；同一 `st_taskcfg/tasks/`（或 Root `tasks/`）目录内短 id 仍唯一
-- 运行时身份为 `(prefix_path, id)`：`prefix_path` 为工程绝对路径（Root 为 `taskcard_root`；项目为 `st_taskcfg` 的父目录）
-- `workdir`：工作目录，可用 `~`
-- `sudo: true` 时启动需输入密码
-- 不要把 `folder` / `prefix_path` 写进 YAML（由存放位置决定）
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `version` | 是 | Harbor 应用版本（`harbor --version`）。**通过 Harbor API 保存时自动维护**；**Agent 直接编辑 YAML 文件时须手动写入当前版本**。详见 [version.md](../version.md) |
+| `id` | 是 | 字母数字、`-`、`_`；同一 `tasks/` 目录内唯一 |
+| `name` | 否 | 显示名；省略或空时 UI 显示 `id` |
+| `description` | 否 | 任务说明（可为 `""`） |
+| `workdir` | 是 | 启动时工作目录，不可为空。见下文 |
+| `env` | 否 | 环境变量 map，默认 `{}` |
+| `sudo` | 否 | 默认 `false`；为 `true` 时启动需输入密码 |
+| `command` | 是 | 执行方式：`argv` **或** `shell` + `script` 二选一 |
+
+## command
+
+- **argv**：直接执行，第一项为可执行文件
+- **shell + script**：等价于 `{shell} -lc {script}`
+
+二者不可同时为空。
+
+## workdir
+
+- `~` 或 `~/...`：当前用户 HOME
+- 绝对路径
+- 相对路径：相对于**项目根**（该 YAML 所在 `harbor_taskcfg` 的**父目录**）
+- `$(harbor_taskcfg_dir)`：当前 `harbor_taskcfg` 目录；项目任务常用 `$(harbor_taskcfg_dir)/..` 指向仓库根
+
+## 运行时身份
+
+- 跨工程允许同名 `id`；同一 `tasks/` 目录内短 id 仍唯一
+- 运行时身份为 `(prefix_path, id)`
+
+## 不要写入 YAML
+
+`folder`、`prefix_path`、`taskcfg_dir` 由 Harbor 根据文件位置自动填充。

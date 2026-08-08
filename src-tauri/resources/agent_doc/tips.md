@@ -1,9 +1,9 @@
-# 给 Agent 的建议
+# 配置维护检查
 
-1. 改仓库内任务时，优先写到项目下的 `st_taskcfg/tasks/` / `st_taskcfg/groups/`，并把**项目根**加入 `search_paths`（格式见 [settings.md](settings.md)）
-2. 跨工程可复制同名短 `id`；启停与编辑按 `(prefix_path, id)` 定位。Group 条目可用可选 `prefix_path` 指定工程，未写则取第一个命中
-3. 改完 YAML 后让用户在 TaskClick 点 research，或重启窗口
-4. 不要手改正在 running 的任务定义文件；先 stop 再 edit
-5. 配置与知识目录：`~/.harbor/`（设置：[settings.json](settings.md)；任务配置：`st_taskcfg/`；文档：`agent_doc/`；MCP：`mcp/`）
-6. Harbor 每次启动会刷新 `~/.harbor/agent_doc/`
-7. 可选：配置 Cursor MCP，读取 `harbor://agent_doc/*` resources（见 [MCP.md](MCP.md)）
+1. 仓库相关配置优先写入项目的 `harbor_taskcfg/tasks/` 和 `harbor_taskcfg/groups/`。
+2. 跨工程可复用同名短 `id`，但定位时使用 `(prefix_path, id)`。
+3. 新增或修改 YAML 后，告知用户重新加载配置或重启 Harbor；无需指导界面操作。
+4. 不要修改正在运行的 Task 定义；应先停止任务。
+5. 修改已有文件时保留用户未要求变更的字段、命令和环境变量。
+6. 创建 Group 前确认每个 Task 已存在；同名 Task 必须用 `prefix_path` 明确指向。
+7. 检查 `version`、`id`、`workdir`、命令二选一规则，并确认 YAML 可解析。

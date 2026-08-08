@@ -1,5 +1,12 @@
 # Harbor
 
+[![Build](https://github.com/wh7019025/Harbor/actions/workflows/build.yml/badge.svg)](https://github.com/wh7019025/Harbor/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/wh7019025/Harbor)](https://github.com/wh7019025/Harbor/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux-blue)](https://github.com/wh7019025/Harbor)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
+[![Vue](https://img.shields.io/badge/Vue-3-42b883?logo=vue.js&logoColor=white)](https://vuejs.org)
+[![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
+
 Harbor 桌面控制台：启动即 TaskClick 主界面；Setting / AgentHelp 在顶栏弹层内。
 
 ## 系统依赖（Linux）
@@ -48,6 +55,6 @@ GitHub Actions（`.github/workflows/build.yml`）会在 `main` / PR / 手动触�
 
 ## 数据
 
-- Task / Group：默认 `~/.harbor/st_taskcfg/{tasks,groups,log}`
-- 项目内：`<项目>/st_taskcfg/{tasks,groups}`
+- Task / Group：默认 `~/.harbor/harbor_taskcfg/{tasks,groups,log}`
+- 项目内：`<项目>/harbor_taskcfg/{tasks,groups}`
 - 设置：`~/.harbor/settings.json`（含 `search_paths`；Agent 可直接编辑，见 `agent_doc/settings.md`）

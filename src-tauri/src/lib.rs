@@ -2,6 +2,11 @@ mod agent_home;
 mod settings;
 mod system_metrics;
 mod taskcard;
+pub mod version;
+
+pub fn handle_cli_args() -> bool {
+    version::handle_cli_args()
+}
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -108,11 +113,14 @@ fn taskcard_add_search_path(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Settings, String> {
-    let expanded = expand_path(&path);
+    let trimmed = path.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("path cannot be empty".into());
+    }
+    let expanded = expand_path(trimmed.as_str());
     if !expanded.is_dir() {
         return Err(format!("path is not a directory: {}", expanded.display()));
     }
-    let display = expanded.display().to_string();
     let mut settings = state.settings.lock().clone();
     if settings
         .search_paths
@@ -121,7 +129,7 @@ fn taskcard_add_search_path(
     {
         return Ok(settings);
     }
-    settings.search_paths.push(display);
+    settings.search_paths.push(trimmed);
     save_settings(&settings)?;
     *state.settings.lock() = settings.clone();
     let service = state.taskcard.lock();
@@ -376,7 +384,7 @@ fn taskcard_read_log_chunk(
 
 #[tauri::command]
 fn app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    version::APP_VERSION.to_string()
 }
 
 #[tauri::command]

@@ -26,6 +26,7 @@ URI 形式：`harbor://agent_doc/<相对路径>`（POSIX `/`，含子目录）�
 示例：
 
 - `harbor://agent_doc/AgentDoc.md` — 结构树索引
+- `harbor://agent_doc/version.md` — 应用版本与 YAML version 规则
 - `harbor://agent_doc/yaml/task.md`
 - `harbor://agent_doc/taskcard/paths.md`
 - `harbor://agent_doc/MCP.md`

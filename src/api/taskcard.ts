@@ -24,7 +24,7 @@ export interface TaskCardGroupTask {
 }
 
 export interface TaskCardGroup {
-  version: number;
+  version: string;
   id: string;
   prefix_path: string;
   name: string;

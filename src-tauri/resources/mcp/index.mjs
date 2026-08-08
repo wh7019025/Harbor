@@ -7,7 +7,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const DOC_ROOT = path.join(os.homedir(), ".harbor", "agent_doc");
+const HARBOR_HOME = path.join(os.homedir(), ".harbor");
+const DOC_ROOT = path.join(HARBOR_HOME, "agent_doc");
+const VERSION_FILE = path.join(HARBOR_HOME, "version.json");
 
 function mimeFor(file) {
   if (file.endsWith(".md")) return "text/markdown";
@@ -18,6 +20,15 @@ function mimeFor(file) {
 
 function toPosix(rel) {
   return rel.split(path.sep).join("/");
+}
+
+async function loadVersions() {
+  try {
+    const raw = await fs.readFile(VERSION_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { app: "0.0.0" };
+  }
 }
 
 async function walkDocs(dir, base = DOC_ROOT) {
@@ -68,13 +79,17 @@ function send(message) {
 async function handle(message) {
   const { id, method, params } = message;
   if (method === "initialize") {
+    const versions = await loadVersions();
     return {
       jsonrpc: "2.0",
       id,
       result: {
         protocolVersion: params?.protocolVersion || "2024-11-05",
         capabilities: { resources: { listChanged: false } },
-        serverInfo: { name: "harbor", version: "0.1.1" },
+        serverInfo: {
+          name: "harbor",
+          version: versions.app || "0.0.0",
+        },
       },
     };
   }
