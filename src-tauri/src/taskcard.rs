@@ -452,8 +452,22 @@ impl TaskCardService {
             .get(key.as_str())
             .ok_or_else(|| format!("group not found: {id} @ {prefix_path}"))?
             .clone();
-        for item in &group.tasks {
-            let task = self.resolve_task_ref(item.task.as_str(), item.prefix_path.as_str())?;
+        // Stage 1: resolve every reference before starting anything.
+        let resolved = group
+            .tasks
+            .iter()
+            .map(|item| {
+                self.resolve_group_task_ref(
+                    group.prefix_path.as_str(),
+                    item.task.as_str(),
+                    item.prefix_path.as_str(),
+                )
+                .map(|task| (item, task))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Stage 2: execute only after the complete group passes resolution checks.
+        for (item, task) in resolved {
             self.start_task(
                 task.prefix_path.as_str(),
                 task.id.as_str(),
@@ -475,7 +489,11 @@ impl TaskCardService {
             .get(key.as_str())
             .ok_or_else(|| format!("group not found: {id} @ {prefix_path}"))?;
         for item in group.tasks.iter().rev() {
-            let task = self.resolve_task_ref(item.task.as_str(), item.prefix_path.as_str())?;
+            let task = self.resolve_group_task_ref(
+                group.prefix_path.as_str(),
+                item.task.as_str(),
+                item.prefix_path.as_str(),
+            )?;
             self.stop_task(task.prefix_path.as_str(), task.id.as_str())?;
         }
         Ok(())
@@ -584,8 +602,9 @@ impl TaskCardService {
     }
 
     pub fn create_group_yaml(&self, content: &str, folder: &str) -> Result<String, String> {
-        let group = self.validate_group_yaml(content)?;
         let dir = self.resolve_create_dir(folder, "groups")?;
+        let group_prefix = self.prefix_path_for_dir(&dir);
+        let group = self.validate_group_yaml(content, group_prefix.as_str())?;
         if definition_path(&dir, group.id.as_str()).is_some() {
             return Err(format!("definition already exists: {}", group.id));
         }
@@ -610,11 +629,11 @@ impl TaskCardService {
         folder: &str,
     ) -> Result<(), String> {
         validate_id(id)?;
-        let group = self.validate_group_yaml(content)?;
-        let new_id = group.id.as_str();
         let (dir, old_path) = self
             .find_group_definition(prefix_path, id)
             .ok_or_else(|| format!("definition not found: {id} @ {prefix_path}"))?;
+        let group = self.validate_group_yaml(content, prefix_path)?;
+        let new_id = group.id.as_str();
         if new_id != id && definition_path(&dir, new_id).is_some() {
             return Err(format!("definition already exists: {new_id}"));
         }
@@ -871,24 +890,48 @@ impl TaskCardService {
         None
     }
 
-    fn resolve_task_ref(&self, task_id: &str, prefix_path: &str) -> Result<TaskDefinition, String> {
+    fn resolve_group_task_ref(
+        &self,
+        group_prefix_path: &str,
+        task_id: &str,
+        legacy_prefix_path: &str,
+    ) -> Result<TaskDefinition, String> {
         validate_id(task_id)?;
         let tasks = self.load_tasks().0;
-        if !prefix_path.is_empty() {
-            let key = instance_key(prefix_path, task_id);
+
+        // Legacy compatibility: an explicit prefix remains an exact reference.
+        if !legacy_prefix_path.is_empty() {
+            let key = instance_key(legacy_prefix_path, task_id);
             return tasks
                 .get(key.as_str())
                 .cloned()
-                .ok_or_else(|| format!("task not found: {task_id} @ {prefix_path}"));
+                .ok_or_else(|| format!("task not found: {task_id} @ {legacy_prefix_path}"));
         }
-        for (dir, _) in self.task_source_dirs() {
-            let pp = self.prefix_path_for_dir(&dir);
-            let key = instance_key(&pp, task_id);
-            if let Some(task) = tasks.get(key.as_str()) {
-                return Ok(task.clone());
-            }
+
+        // Local-first: a group always prefers a task from its own project/root.
+        let local_key = instance_key(group_prefix_path, task_id);
+        if let Some(task) = tasks.get(local_key.as_str()) {
+            return Ok(task.clone());
         }
-        Err(format!("task not found: {task_id}"))
+
+        // Cross-project fallback is safe only when exactly one candidate exists.
+        let mut candidates = tasks
+            .into_values()
+            .filter(|task| task.id == task_id)
+            .collect::<Vec<_>>();
+        candidates.sort_by(|a, b| a.prefix_path.cmp(&b.prefix_path));
+        match candidates.len() {
+            0 => Err(format!("task not found: {task_id}")),
+            1 => Ok(candidates.remove(0)),
+            _ => Err(format!(
+                "ambiguous task reference '{task_id}' from group @ {group_prefix_path}; candidates: {}",
+                candidates
+                    .iter()
+                    .map(|task| task.prefix_path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
     }
 
     fn group_references_task(&self, group: &GroupDefinition, prefix_path: &str, id: &str) -> bool {
@@ -896,14 +939,14 @@ impl TaskCardService {
             if item.task != id {
                 continue;
             }
-            if item.prefix_path.is_empty() {
-                if let Ok(resolved) = self.resolve_task_ref(id, "") {
-                    if resolved.prefix_path == prefix_path {
-                        return true;
-                    }
+            if let Ok(resolved) = self.resolve_group_task_ref(
+                group.prefix_path.as_str(),
+                id,
+                item.prefix_path.as_str(),
+            ) {
+                if resolved.prefix_path == prefix_path {
+                    return true;
                 }
-            } else if item.prefix_path == prefix_path {
-                return true;
             }
         }
         false
@@ -961,12 +1004,19 @@ impl TaskCardService {
         Ok(())
     }
 
-    fn validate_group_yaml(&self, content: &str) -> Result<GroupDefinition, String> {
+    fn validate_group_yaml(
+        &self,
+        content: &str,
+        group_prefix_path: &str,
+    ) -> Result<GroupDefinition, String> {
         let group = serde_yaml::from_str::<GroupDefinition>(content).map_err(|e| e.to_string())?;
         validate_id(group.id.as_str())?;
         for item in &group.tasks {
-            validate_id(item.task.as_str())?;
-            self.resolve_task_ref(item.task.as_str(), item.prefix_path.as_str())?;
+            self.resolve_group_task_ref(
+                group_prefix_path,
+                item.task.as_str(),
+                item.prefix_path.as_str(),
+            )?;
         }
         Ok(group)
     }
@@ -1357,7 +1407,7 @@ fn default_uc_info_task() -> String {
 id: uc-info
 name: unicom Info
 description: ""
-workdir: ~
+workdir: "~"
 command:
   argv:
     - uc_info
@@ -1372,7 +1422,7 @@ fn default_uname_task() -> String {
 id: uname-kernel
 name: Kernel Version
 description: ""
-workdir: ~
+workdir: "~"
 command:
   argv:
     - uname
@@ -1388,7 +1438,7 @@ fn default_hello_world_loop_task() -> String {
 id: hello-world-loop
 name: Hello World Loop
 description: ""
-workdir: ~
+workdir: "~"
 command:
   shell: sh
   script: while true; do echo helloworld; sleep 1; done
@@ -1611,7 +1661,11 @@ fn expand_workdir(workdir: &str, taskcfg_dir: &str) -> Result<PathBuf, String> {
         .parent()
         .map(|path| path.to_path_buf())
         .unwrap_or_else(|| taskcfg.clone());
-    let replaced = workdir.replace(HARBOR_TASKCFG_DIR_VAR, taskcfg.to_string_lossy().as_ref());
+    let replaced = if workdir.trim() == "null" {
+        taskcfg.to_string_lossy().into_owned()
+    } else {
+        workdir.replace(HARBOR_TASKCFG_DIR_VAR, taskcfg.to_string_lossy().as_ref())
+    };
     Ok(normalize_path(crate::settings::expand_path_with_base(
         replaced.as_str(),
         project_root.as_path(),
@@ -1655,6 +1709,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(workdir, project);
+    }
+
+    #[test]
+    fn expand_workdir_maps_null_to_harbor_taskcfg_dir() {
+        let taskcfg = std::env::temp_dir().join("harbor-test-taskcfg");
+        let workdir = expand_workdir("null", taskcfg.to_string_lossy().as_ref()).unwrap();
+        assert_eq!(workdir, taskcfg);
     }
 
     #[test]
@@ -2024,29 +2085,71 @@ tasks:
     wait_after_sec: 0
 "#
         );
-        service.create_group_yaml(&first_group, "").unwrap();
+        let ambiguity = service.create_group_yaml(&first_group, "").unwrap_err();
+        assert!(ambiguity.contains("ambiguous task reference 'demo-ping'"));
+        assert!(ambiguity.contains(prefix_a.as_str()));
+        assert!(ambiguity.contains(prefix_b.as_str()));
+
+        // The same id resolves locally when the group belongs to that project.
+        service
+            .create_group_yaml(&first_group, proj_a.display().to_string().as_str())
+            .unwrap();
+        // Explicit prefixes remain readable for legacy group files.
         service.create_group_yaml(&exact_group, "").unwrap();
 
         assert_eq!(
             service
-                .resolve_task_ref("demo-ping", "")
+                .resolve_group_task_ref(prefix_a.as_str(), "demo-ping", "")
                 .unwrap()
                 .prefix_path,
             prefix_a
         );
+        assert!(service
+            .resolve_group_task_ref(root_prefix.as_str(), "demo-ping", "")
+            .unwrap_err()
+            .contains("ambiguous task reference"));
         assert_eq!(
             service
-                .resolve_task_ref("demo-ping", prefix_b.as_str())
+                .resolve_group_task_ref(root_prefix.as_str(), "demo-ping", prefix_b.as_str())
                 .unwrap()
                 .prefix_path,
             prefix_b
         );
 
         service.stop_all();
+
+        // Group execution preflights every reference before starting the first task.
+        let starter = task_yaml.replace("demo-ping", "starter");
+        fs::write(root.join("tasks/starter.yaml"), starter).unwrap();
+        fs::write(
+            root.join("groups/preflight.yaml"),
+            r#"version: 1
+id: preflight
+tasks:
+  - task: starter
+  - task: demo-ping
+"#,
+        )
+        .unwrap();
+        let error = service
+            .start_group(root_prefix.as_str(), "preflight", None)
+            .await
+            .unwrap_err();
+        assert!(error.contains("ambiguous task reference 'demo-ping'"));
+        assert_eq!(
+            service
+                .snapshot()
+                .tasks
+                .iter()
+                .find(|task| task.id == "starter")
+                .unwrap()
+                .status,
+            "stopped"
+        );
+
         assert!(service
             .create_task_yaml(task_yaml, proj_a.display().to_string().as_str())
             .is_err());
-        let _ = root_prefix;
         fs::remove_dir_all(root).unwrap();
     }
 

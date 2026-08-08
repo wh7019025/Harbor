@@ -24,7 +24,7 @@ version: "0.1.1"
 id: uname-kernel
 name: Uname Kernel
 description: ""
-workdir: ~
+workdir: "~"
 env: {}
 sudo: false
 command:
@@ -55,7 +55,8 @@ command:
 
 ## workdir
 
-- `~` 或 `~/...`：当前用户 HOME
+- `"~"` 或 `"~/..."`：当前用户 HOME。必须加引号；YAML 会把未加引号的 `~` 解析为 `null`
+- `null`：等价于 `$(harbor_taskcfg_dir)`，表示当前 Task 所属的 `harbor_taskcfg` 目录
 - 绝对路径
 - 相对路径：相对于**项目根**（该 YAML 所在 `harbor_taskcfg` 的**父目录**）
 - `$(harbor_taskcfg_dir)`：当前 `harbor_taskcfg` 目录；项目任务常用 `$(harbor_taskcfg_dir)/..` 指向仓库根

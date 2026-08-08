@@ -1,7 +1,7 @@
 version: 1
 id: hello-world-loop
 name: Hello World Loop
-workdir: ~
+workdir: "~"
 command:
   shell: sh
   script: while true; do echo helloworld; sleep 1; done

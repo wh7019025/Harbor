@@ -151,29 +151,19 @@ function instanceKey(prefixPath: string, id: string) {
   return `${prefixPath}\0${id}`;
 }
 
-function projectPrefixFromTaskDir(dir: string) {
-  const normalized = dir.replace(/\\/g, "/").replace(/\/+$/, "");
-  const marker = "/harbor_taskcfg/tasks";
-  if (normalized.endsWith(marker)) {
-    return normalized.slice(0, -marker.length);
-  }
-  return normalized;
-}
-
-function resolveTaskRef(taskId: string, prefixPath = ""): TaskCardTask | undefined {
+function resolveTaskRef(
+  taskId: string,
+  groupPrefixPath: string,
+  legacyPrefixPath = "",
+): TaskCardTask | undefined {
   const tasks = snapshot.value?.tasks ?? [];
-  if (prefixPath) {
-    return tasks.find((task) => task.id === taskId && task.prefix_path === prefixPath);
+  if (legacyPrefixPath) {
+    return tasks.find((task) => task.id === taskId && task.prefix_path === legacyPrefixPath);
   }
-  const root = snapshot.value?.root ?? "";
-  const rootHit = tasks.find((task) => task.id === taskId && task.prefix_path === root);
-  if (rootHit) return rootHit;
-  for (const dir of snapshot.value?.discovered_task_dirs ?? []) {
-    const prefix = projectPrefixFromTaskDir(dir);
-    const hit = tasks.find((task) => task.id === taskId && task.prefix_path === prefix);
-    if (hit) return hit;
-  }
-  return tasks.find((task) => task.id === taskId);
+  const local = tasks.find((task) => task.id === taskId && task.prefix_path === groupPrefixPath);
+  if (local) return local;
+  const candidates = tasks.filter((task) => task.id === taskId);
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function truncatePath(path: string) {
@@ -186,7 +176,6 @@ function truncatePath(path: string) {
 function groupTaskSnippet(task: TaskCardTask) {
   return [
     `  - task: ${task.id}`,
-    `    prefix_path: ${task.prefix_path}`,
     "    wait_after_sec: 0",
   ].join("\n");
 }
@@ -236,7 +225,7 @@ const folderOptions = computed(() => [
   })),
 ]);
 
-async function load() {
+async function load(options: { preserveError?: boolean } = {}) {
   refreshing.value = true;
   try {
     const [nextSnapshot, nextLogs] = await Promise.all([fetchTaskCard(), fetchLogs()]);
@@ -245,9 +234,11 @@ async function load() {
     if (!selectedLog.value && nextLogs[0]) {
       await selectLog(nextLogs[0].file);
     }
-    error.value = "";
+    if (!options.preserveError) error.value = "";
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
+    if (!options.preserveError || !error.value) {
+      error.value = err instanceof Error ? err.message : String(err);
+    }
   } finally {
     loading.value = false;
     refreshing.value = false;
@@ -297,8 +288,8 @@ function isPending(key: string) {
   return pending.value?.key === key;
 }
 
-function resolvedGroupTask(item: TaskCardGroupTask) {
-  return resolveTaskRef(item.task, item.prefix_path ?? "");
+function resolvedGroupTask(group: TaskCardGroup, item: TaskCardGroupTask) {
+  return resolveTaskRef(item.task, group.prefix_path, item.prefix_path ?? "");
 }
 
 function taskRunning(task: TaskCardTask | undefined) {
@@ -306,24 +297,24 @@ function taskRunning(task: TaskCardTask | undefined) {
 }
 
 function groupHasRunningTask(group: TaskCardGroup) {
-  return group.tasks.some((item) => taskRunning(resolvedGroupTask(item)));
+  return group.tasks.some((item) => taskRunning(resolvedGroupTask(group, item)));
 }
 
 function groupRunStatus(group: TaskCardGroup): "STOP" | "Full" | "Partial" {
   const total = group.tasks.length;
   if (total === 0) return "STOP";
-  const running = group.tasks.filter((item) => taskRunning(resolvedGroupTask(item))).length;
+  const running = group.tasks.filter((item) => taskRunning(resolvedGroupTask(group, item))).length;
   if (running === 0) return "STOP";
   if (running >= total) return "Full";
   return "Partial";
 }
 
 function groupRunningCount(group: TaskCardGroup) {
-  return group.tasks.filter((item) => taskRunning(resolvedGroupTask(item))).length;
+  return group.tasks.filter((item) => taskRunning(resolvedGroupTask(group, item))).length;
 }
 
 function groupRequiresSudo(group: TaskCardGroup) {
-  return group.tasks.some((item) => resolvedGroupTask(item)?.requires_sudo);
+  return group.tasks.some((item) => resolvedGroupTask(group, item)?.requires_sudo);
 }
 
 function runWithSudo(
@@ -487,7 +478,7 @@ watch(selectedLogActive, (active, wasActive) => {
 onMounted(() => {
   void load();
   timer = window.setInterval(() => {
-    void load();
+    void load({ preserveError: true });
   }, 2500);
   logTimer = window.setInterval(() => {
     void pollLog();
@@ -519,7 +510,7 @@ onBeforeUnmount(() => {
           <span class="readout text-[11px]">{{ searchPaths.length }}</span>
           <ChevronDown :class="['h-3 w-3 transition', pathsPanelOpen ? 'rotate-180' : '']" />
         </button>
-        <button class="btn !px-2 !py-1" type="button" title="refresh" :disabled="refreshing" @click="load">
+        <button class="btn !px-2 !py-1" type="button" title="refresh" :disabled="refreshing" @click="load()">
           <RefreshCw :class="['h-3.5 w-3.5', refreshing ? 'animate-spin' : '']" />
         </button>
         <button
@@ -540,12 +531,15 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <p
+    <div
       v-if="error"
-      class="border border-[color-mix(in_srgb,var(--danger)_40%,var(--line))] px-2 py-1 text-xs text-[#f48771]"
+      class="flex items-start justify-between gap-2 border border-[color-mix(in_srgb,var(--danger)_40%,var(--line))] px-2 py-1 text-xs text-[#f48771]"
     >
-      {{ error }}
-    </p>
+      <span class="min-w-0 whitespace-pre-wrap break-words">{{ error }}</span>
+      <button type="button" title="关闭提示" class="shrink-0" @click="error = ''">
+        <X class="h-3.5 w-3.5" />
+      </button>
+    </div>
 
     <div
       class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-2 xl:grid-cols-[3fr_7fr] xl:grid-rows-1"

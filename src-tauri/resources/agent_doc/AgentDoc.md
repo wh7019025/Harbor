@@ -6,9 +6,9 @@
 
 1. 运行 `harbor --version`，取得 YAML 要写入的 `version`。
 2. 确认配置属于当前项目还是全局环境，按 [taskcard/paths.md](taskcard/paths.md) 选择目录。
-3. 按 [taskcard/create.md](taskcard/create.md) 直接创建文件，并遵循 [yaml/task.md](yaml/task.md) 的格式。
-4. 需要组合任务时，按 [yaml/group.md](yaml/group.md) 创建或修改 Group。
-5. 若项目配置尚未被发现，只修改 [settings.md](settings.md) 中与配置发现有关的字段。
+3. 项目配置必须检查 Search Paths 覆盖情况；未覆盖时由 Agent 按 [settings.md](settings.md) 直接维护 `search_paths`。
+4. 用户要求 Task 时，按 [taskcard/create.md](taskcard/create.md) 的 Task 工作流创建，并遵循 [yaml/task.md](yaml/task.md)。
+5. 仅当用户明确要求 Group、组合或编排时，才按独立的 Group 工作流和 [yaml/group.md](yaml/group.md) 创建 Group。
 6. 检查 YAML、Task 引用、路径和命令；不要写入 Harbor 自动生成的字段。
 
 文档发布到 `~/.harbor/agent_doc/`，Harbor 启动时会刷新。

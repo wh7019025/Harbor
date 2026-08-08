@@ -21,4 +21,4 @@
 - 项目配置的 `prefix_path` 是该项目下 `harbor_taskcfg` 的父目录。
 - 跨工程可存在同名 id；同一 `tasks/` 或 `groups/` 源目录内的 id 必须唯一。
 
-Agent 不应在 YAML 中写顶层 `prefix_path`；它由 Harbor 根据文件位置生成。Group 的任务条目在消除跨项目同名歧义时可以写 `prefix_path`。
+Agent 不应在 YAML 中写顶层 `prefix_path`；它由 Harbor 根据文件位置生成。Group 使用 Task `id` 引用任务，并按“同目录优先、跨目录唯一匹配”的规则解析。
