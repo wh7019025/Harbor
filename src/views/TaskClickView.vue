@@ -296,6 +296,11 @@ function taskRunning(task: TaskCardTask | undefined) {
   return task?.status === "running";
 }
 
+function taskHoverTitle(task: TaskCardTask) {
+  const description = task.description.trim();
+  return description ? `${description}\n\n双击复制到 group YAML` : "双击复制到 group YAML";
+}
+
 function groupHasRunningTask(group: TaskCardGroup) {
   return group.tasks.some((item) => taskRunning(resolvedGroupTask(group, item)));
 }
@@ -660,7 +665,7 @@ onBeforeUnmount(() => {
                 >
                   <div
                     class="flex min-w-0 flex-1 cursor-copy items-center gap-1.5"
-                    title="双击复制到 group YAML"
+                    :title="taskHoverTitle(task)"
                     @dblclick="copyGroupTaskSnippet(task)"
                   >
                     <h3 class="truncate text-[13px] font-medium text-[var(--ink-bright)]">{{ task.name }}</h3>

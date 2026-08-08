@@ -14,7 +14,7 @@ const form = ref<Settings>({
   metrics_slow_ms: 10000,
 });
 const searchPathsText = ref("");
-const version = ref("0.1.1");
+const version = ref("0.1.2");
 const saving = ref(false);
 const message = ref("");
 const error = ref("");

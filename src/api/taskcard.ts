@@ -5,6 +5,7 @@ export interface TaskCardTask {
   id: string;
   prefix_path: string;
   name: string;
+  description: string;
   workdir: string;
   command: string;
   env_count: number;

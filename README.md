@@ -7,7 +7,7 @@
 [![Vue](https://img.shields.io/badge/Vue-3-42b883?logo=vue.js&logoColor=white)](https://vuejs.org)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
 
-Harbor 桌面控制台：启动即 TaskClick 主界面；Setting / AgentHelp 在顶栏弹层内。
+Harbor 是一个面向开发者与 AI Agent 的本地任务管理工具，用统一配置组织、编排和运行工作流。
 
 ## 系统依赖（Linux）
 
