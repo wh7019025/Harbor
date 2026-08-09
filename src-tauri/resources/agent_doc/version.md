@@ -2,13 +2,13 @@
 
 | 名称 | 当前值 | 命令行 |
 |------|--------|--------|
-| 应用版本 | 0.1.2-rc1 | `harbor --version` |
+| 应用版本 | 0.1.2-rc2 | `harbor --version` |
 
 机器可读：`~/.harbor/version.json`（Harbor 启动时更新）
 
 ## Task / Group YAML 中的 `version`
 
-YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` 相同，例如 `"0.1.2-rc1"`）。
+YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` 相同，例如 `"0.1.2-rc2"`）。
 
 ### 谁维护 `version`？
 
@@ -23,7 +23,7 @@ Agent 改文件前请先运行：
 harbor --version
 ```
 
-并将结果写入 YAML，例如 `version: "0.1.2-rc1"`（建议加引号）。
+并将结果写入 YAML，例如 `version: "0.1.2-rc2"`（建议加引号）。
 
 旧文件若仍为 `version: 1` 等历史值，Harbor 仍可加载；Agent 更新文件时应一并改为当前应用版本。
 

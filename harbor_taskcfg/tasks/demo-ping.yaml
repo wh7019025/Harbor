@@ -1,4 +1,4 @@
-version: "0.1.2-rc1"
+version: "0.1.2-rc2"
 id: demo-ping
 name: Demo Ping
 description: Periodic demo ping task

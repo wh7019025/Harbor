@@ -22,7 +22,7 @@ const form = ref<Settings>({
   metrics_slow_ms: 10000,
 });
 const searchPathsText = ref("");
-const version = ref("0.1.2-rc1");
+const version = ref("0.1.2-rc2");
 const updateInfo = ref<AppUpdateInfo | null>(null);
 const checkingUpdate = ref(false);
 const saving = ref(false);
