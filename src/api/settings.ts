@@ -15,6 +15,18 @@ export function updateSettings(next: Settings) {
   return invoke<Settings>("update_settings", { next });
 }
 
+export interface AppUpdateInfo {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
+  checkError: string | null;
+}
+
 export function getAppVersion() {
   return invoke<string>("app_version");
+}
+
+export function checkAppUpdate() {
+  return invoke<AppUpdateInfo>("check_app_update");
 }

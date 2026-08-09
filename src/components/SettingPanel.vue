@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { getAppVersion, getSettings, updateSettings, type Settings } from "../api/settings";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  checkAppUpdate,
+  getAppVersion,
+  getSettings,
+  updateSettings,
+  type AppUpdateInfo,
+  type Settings,
+} from "../api/settings";
 
 const emit = defineEmits<{
   saved: [];
@@ -15,6 +23,8 @@ const form = ref<Settings>({
 });
 const searchPathsText = ref("");
 const version = ref("0.1.2-rc1");
+const updateInfo = ref<AppUpdateInfo | null>(null);
+const checkingUpdate = ref(false);
 const saving = ref(false);
 const message = ref("");
 const error = ref("");
@@ -27,7 +37,22 @@ onMounted(async () => {
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   }
+
+  checkingUpdate.value = true;
+  try {
+    updateInfo.value = await checkAppUpdate();
+  } catch {
+    updateInfo.value = null;
+  } finally {
+    checkingUpdate.value = false;
+  }
 });
+
+async function openRelease() {
+  const url = updateInfo.value?.releaseUrl;
+  if (!url) return;
+  await openUrl(url);
+}
 
 async function save() {
   saving.value = true;
@@ -91,6 +116,23 @@ async function save() {
     <div class="mt-auto flex items-center justify-between gap-3 border-t border-[var(--line-soft)] pt-3">
       <div>
         <p class="readout text-xs text-[var(--muted)]">Harbor {{ version }}</p>
+        <p v-if="checkingUpdate" class="readout mt-1 text-xs text-[var(--faint)]">正在检查更新…</p>
+        <p
+          v-else-if="updateInfo?.updateAvailable && updateInfo.latest"
+          class="readout mt-1 text-xs text-[var(--accent)]"
+        >
+          新版本 {{ updateInfo.latest }} 可用
+          <button
+            class="ml-2 underline decoration-[var(--accent)]/60 underline-offset-2 hover:text-white"
+            type="button"
+            @click="openRelease"
+          >
+            查看 Release
+          </button>
+        </p>
+        <p v-else-if="updateInfo && !updateInfo.checkError" class="readout mt-1 text-xs text-[var(--faint)]">
+          已是最新版本
+        </p>
         <p class="readout mt-1 text-xs text-[var(--faint)]">~/.harbor/settings.json</p>
       </div>
       <div class="flex gap-2">

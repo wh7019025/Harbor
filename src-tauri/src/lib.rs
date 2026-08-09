@@ -2,6 +2,7 @@ mod agent_home;
 mod settings;
 mod system_metrics;
 mod taskcard;
+pub mod update;
 pub mod version;
 
 pub fn handle_cli_args() -> bool {
@@ -388,6 +389,11 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
+fn check_app_update() -> update::AppUpdateInfo {
+    update::check_app_update()
+}
+
+#[tauri::command]
 fn get_agent_help() -> AgentHelpInfo {
     agent_help_info()
 }
@@ -450,6 +456,7 @@ pub fn run() {
             taskcard_read_log,
             taskcard_read_log_chunk,
             app_version,
+            check_app_update,
             get_agent_help,
             refresh_agent_doc,
         ])
