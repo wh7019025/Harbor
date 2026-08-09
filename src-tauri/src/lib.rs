@@ -450,8 +450,12 @@ pub fn run() {
         .setup(|app| {
             if let Some(window) = app.get_webview_window("task-click") {
                 let handle = app.handle().clone();
+                let state = app.state::<Arc<AppState>>().inner().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        for error in state.taskcard.lock().stop_all() {
+                            eprintln!("stop task on exit failed: {error}");
+                        }
                         handle.exit(0);
                     }
                 });
