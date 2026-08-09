@@ -51,7 +51,7 @@ npm run tauri build -- --bundles deb
 
 GitHub Actions（`.github/workflows/build.yml`）会在 `main` / PR / 手动触发时构建 Linux `.deb`，并上传为 workflow artifact。
 
-推送 `v*` tag（例如 `v0.1.1`）时，会额外创建并公开 Release，挂上 `.deb`。
+推送 `v*` tag（例如 `v0.1.2-rc1`）时，会额外创建并公开 Release，挂上 `.deb`。
 
 ## 数据
 

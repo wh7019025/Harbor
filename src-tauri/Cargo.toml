@@ -1,6 +1,6 @@
 [package]
 name = "harbor"
-version = "0.1.2"
+version = "0.1.2-rc1"
 description = "Harbor desktop console"
 authors = ["Harbor"]
 edition = "2021"

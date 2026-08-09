@@ -30,7 +30,7 @@ struct AppState {
     taskcard: Mutex<TaskCardService>,
 }
 
-fn make_taskcard(settings: &Settings) -> TaskCardService {
+fn make_taskcard(settings: &Settings) -> Result<TaskCardService, String> {
     let search_paths = settings
         .search_paths
         .iter()
@@ -64,7 +64,7 @@ fn update_settings(state: State<'_, Arc<AppState>>, next: Settings) -> Result<Se
 
     save_settings(&next)?;
     *state.settings.lock() = next.clone();
-    *state.taskcard.lock() = make_taskcard(&next);
+    *state.taskcard.lock() = make_taskcard(&next)?;
     Ok(next)
 }
 
@@ -403,7 +403,13 @@ pub fn run() {
         eprintln!("sync agent_doc failed: {error}");
     }
     let settings = load_settings();
-    let taskcard = make_taskcard(&settings);
+    let taskcard = match make_taskcard(&settings) {
+        Ok(taskcard) => taskcard,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
     let state = Arc::new(AppState {
         settings: Mutex::new(settings),
         metrics: Mutex::new(SystemMetricsSampler::default()),

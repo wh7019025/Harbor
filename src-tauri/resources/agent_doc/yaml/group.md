@@ -1,7 +1,7 @@
 # Group YAML
 
 ```yaml
-version: "0.1.2"
+version: "0.1.2-rc1"
 id: system-info
 name: System Info
 description: Collect basic system information

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fs;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -155,6 +157,16 @@ struct RunningTask {
     log_file: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct RunningTaskRecord {
+    prefix_path: String,
+    id: String,
+    pid: u32,
+    pgid: i32,
+    started_at_ms: u128,
+    log_file: String,
+}
+
 #[derive(Default)]
 struct RuntimeState {
     running: HashMap<String, RunningTask>,
@@ -167,12 +179,17 @@ pub struct TaskCardService {
     discovered_task_dirs: Arc<Mutex<Vec<PathBuf>>>,
     discovered_group_dirs: Arc<Mutex<Vec<PathBuf>>>,
     state: Arc<Mutex<RuntimeState>>,
+    _instance_lock: Arc<File>,
 }
 
 impl TaskCardService {
-    pub fn new(root: PathBuf, search_paths: Vec<PathBuf>) -> Self {
+    pub fn new(root: PathBuf, search_paths: Vec<PathBuf>) -> Result<Self, String> {
         if let Err(error) = initialize_root(&root) {
             eprintln!("initialize TaskCard root {} failed: {error}", root.display());
+        }
+        let instance_lock = acquire_instance_lock(root.join("run").as_path())?;
+        if let Err(error) = cleanup_orphan_tasks(root.as_path()) {
+            eprintln!("cleanup orphan tasks failed: {error}");
         }
         let service = Self {
             root,
@@ -180,9 +197,10 @@ impl TaskCardService {
             discovered_task_dirs: Arc::new(Mutex::new(Vec::new())),
             discovered_group_dirs: Arc::new(Mutex::new(Vec::new())),
             state: Arc::new(Mutex::new(RuntimeState::default())),
+            _instance_lock: Arc::new(instance_lock),
         };
         let _ = service.research();
-        service
+        Ok(service)
     }
 
     pub fn set_search_paths(&self, paths: Vec<PathBuf>) {
@@ -391,6 +409,8 @@ impl TaskCardService {
                 log_file,
             },
         );
+        drop(state);
+        let _ = self.sync_running_registry();
         Ok(())
     }
 
@@ -400,7 +420,9 @@ impl TaskCardService {
         let Some(mut running) = self.state.lock().running.remove(key.as_str()) else {
             return Ok(());
         };
-        terminate_task(id, &mut running.child)
+        terminate_task(id, &mut running.child)?;
+        let _ = self.sync_running_registry();
+        Ok(())
     }
 
     pub fn stop_all(&self) -> Vec<String> {
@@ -410,13 +432,15 @@ impl TaskCardService {
             .running
             .drain()
             .collect::<Vec<_>>();
-        running
+        let errors = running
             .into_iter()
             .filter_map(|(key, mut running)| {
                 let id = key.rsplit('\0').next().unwrap_or(key.as_str());
                 terminate_task(id, &mut running.child).err()
             })
-            .collect()
+            .collect::<Vec<_>>();
+        let _ = self.sync_running_registry();
+        errors
     }
 
     pub fn restart_task(
@@ -748,12 +772,41 @@ impl TaskCardService {
     }
 
     fn refresh_processes(&self) {
-        let mut state = self.state.lock();
-        state.running.retain(|_, running| match running.child.try_wait() {
-            Ok(Some(_)) => false,
-            Ok(None) => true,
-            Err(_) => false,
-        });
+        let changed = {
+            let mut state = self.state.lock();
+            let before = state.running.len();
+            state.running.retain(|_, running| match running.child.try_wait() {
+                Ok(Some(_)) => false,
+                Ok(None) => true,
+                Err(_) => false,
+            });
+            before != state.running.len()
+        };
+        if changed {
+            let _ = self.sync_running_registry();
+        }
+    }
+
+    fn sync_running_registry(&self) -> Result<(), String> {
+        let records = {
+            let state = self.state.lock();
+            state
+                .running
+                .iter()
+                .filter_map(|(key, running)| {
+                    let (prefix_path, id) = split_instance_key(key)?;
+                    Some(RunningTaskRecord {
+                        prefix_path,
+                        id,
+                        pid: running.child.id(),
+                        pgid: running.child.id() as i32,
+                        started_at_ms: running.started_at_ms,
+                        log_file: running.log_file.clone(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        write_running_registry(self.root.as_path(), &records)
     }
 
     fn load_tasks(&self) -> (HashMap<String, TaskDefinition>, Vec<String>) {
@@ -1255,25 +1308,113 @@ fn definition_path(dir: &Path, id: &str) -> Option<PathBuf> {
     })
 }
 
+fn split_instance_key(key: &str) -> Option<(String, String)> {
+    let (prefix_path, id) = key.split_once('\0')?;
+    Some((prefix_path.to_string(), id.to_string()))
+}
+
+fn running_registry_path(root: &Path) -> PathBuf {
+    root.join("run/tasks.json")
+}
+
+fn write_running_registry(root: &Path, records: &[RunningTaskRecord]) -> Result<(), String> {
+    let run_dir = root.join("run");
+    fs::create_dir_all(&run_dir).map_err(|e| format!("create {} failed: {e}", run_dir.display()))?;
+    let path = running_registry_path(root);
+    let temporary = run_dir.join(format!(".tasks.json.tmp-{}", std::process::id()));
+    let raw = serde_json::to_string_pretty(records).map_err(|e| e.to_string())?;
+    fs::write(&temporary, raw).map_err(|e| format!("write {} failed: {e}", temporary.display()))?;
+    fs::rename(&temporary, &path)
+        .map_err(|e| format!("save {} failed: {e}", path.display()))
+}
+
+fn acquire_instance_lock(run_dir: &Path) -> Result<File, String> {
+    fs::create_dir_all(run_dir).map_err(|e| format!("create {} failed: {e}", run_dir.display()))?;
+    let lock_path = run_dir.join("harbor.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|e| format!("open {} failed: {e}", lock_path.display()))?;
+    let fd = file.as_raw_fd();
+    let rc = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        return Err(format!(
+            "another Harbor instance is using {}",
+            run_dir.parent().unwrap_or(run_dir).display()
+        ));
+    }
+    Ok(file)
+}
+
+fn cleanup_orphan_tasks(root: &Path) -> Result<(), String> {
+    let path = running_registry_path(root);
+    if !path.is_file() {
+        return Ok(());
+    }
+    let raw = fs::read_to_string(&path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
+    let records: Vec<RunningTaskRecord> = serde_json::from_str(&raw).unwrap_or_default();
+    for record in records {
+        if let Err(error) = terminate_orphan(record.id.as_str(), record.pid as i32, record.pgid) {
+            eprintln!(
+                "cleanup orphan task {} (pid {}): {error}",
+                record.id, record.pid
+            );
+        }
+    }
+    write_running_registry(root, &[])
+}
+
+fn process_alive(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+fn process_group_id(pid: i32) -> Option<i32> {
+    let pgid = unsafe { libc::getpgid(pid) };
+    if pgid < 0 {
+        None
+    } else {
+        Some(pgid)
+    }
+}
+
+fn terminate_orphan(id: &str, pid: i32, pgid: i32) -> Result<(), String> {
+    if !process_alive(pid) {
+        return Ok(());
+    }
+    if process_group_id(pid) != Some(pgid) {
+        return Ok(());
+    }
+    signal_process_group(id, pid, libc::SIGTERM)?;
+    std::thread::sleep(Duration::from_millis(100));
+    if process_alive(pid) {
+        signal_process_group(id, pid, libc::SIGKILL)?;
+    }
+    Ok(())
+}
+
+fn signal_process_group(id: &str, pid: i32, signal: i32) -> Result<(), String> {
+    if unsafe { libc::killpg(pid, signal) } != 0 {
+        if unsafe { libc::kill(pid, signal) } != 0 {
+            return Err(format!("signal task {id} (pid {pid}) failed"));
+        }
+    }
+    Ok(())
+}
+
 fn terminate_task(id: &str, child: &mut Child) -> Result<(), String> {
     let pid = child.id() as i32;
-    let rc = unsafe { libc::killpg(pid, libc::SIGTERM) };
-    if rc != 0 {
-        child
-            .kill()
-            .map_err(|e| format!("stop task {id} failed: {e}"))?;
-    }
+    signal_process_group(id, pid, libc::SIGTERM)?;
     for _ in 0..20 {
         if child.try_wait().map_err(|e| e.to_string())?.is_some() {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    if unsafe { libc::killpg(pid, libc::SIGKILL) } != 0 {
-        child
-            .kill()
-            .map_err(|e| format!("kill task {id} failed: {e}"))?;
-    }
+    signal_process_group(id, pid, libc::SIGKILL)?;
     child.wait().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1363,6 +1504,7 @@ fn initialize_root(root: &Path) -> Result<(), String> {
     fs::create_dir_all(root.join("tasks")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("groups")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("log")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(root.join("run")).map_err(|e| e.to_string())?;
     if !is_new {
         return Ok(());
     }
@@ -1774,7 +1916,7 @@ tasks:
         )
         .unwrap();
 
-        let service = TaskCardService::new(root.clone(), Vec::new());
+        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
         let snapshot = service.snapshot();
         assert_eq!(snapshot.tasks.len(), 1);
         assert_eq!(snapshot.groups.len(), 1);
@@ -1835,7 +1977,7 @@ tasks:
             fs::remove_dir_all(&root).unwrap();
         }
 
-        let service = TaskCardService::new(root.clone(), Vec::new());
+        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
         let snapshot = service.snapshot();
         assert_eq!(snapshot.tasks.len(), 3);
         assert_eq!(snapshot.groups.len(), 1);
@@ -1856,7 +1998,7 @@ tasks:
 
         let search = root.join("workspace");
         fs::create_dir_all(&search).unwrap();
-        let service = TaskCardService::new(root.clone(), vec![search.clone()]);
+        let service = TaskCardService::new(root.clone(), vec![search.clone()]).unwrap();
         let task = r#"version: 1
 id: editable-task
 name: Editable Task
@@ -2039,7 +2181,7 @@ command:
         fs::write(proj_a.join("harbor_taskcfg/tasks/demo-ping.yaml"), task_yaml).unwrap();
         fs::write(proj_b.join("harbor_taskcfg/tasks/demo-ping.yaml"), task_yaml).unwrap();
 
-        let service = TaskCardService::new(root.clone(), vec![proj_a.clone(), proj_b.clone()]);
+        let service = TaskCardService::new(root.clone(), vec![proj_a.clone(), proj_b.clone()]).unwrap();
         let _ = service.research();
         let snapshot = service.snapshot();
         let root_prefix = snapshot.root.clone();
@@ -2186,7 +2328,7 @@ tasks:
         )
         .unwrap();
 
-        let service = TaskCardService::new(root.clone(), vec![search.clone()]);
+        let service = TaskCardService::new(root.clone(), vec![search.clone()]).unwrap();
         let result = service.research();
         assert_eq!(result.discovered_task_dirs.len(), 1);
         assert_eq!(result.discovered_group_dirs.len(), 1);
@@ -2244,7 +2386,7 @@ command:
         )
         .unwrap();
 
-        let service = TaskCardService::new(root.clone(), vec![search]);
+        let service = TaskCardService::new(root.clone(), vec![search]).unwrap();
         let result = service.research();
         assert_eq!(result.discovered_task_dirs.len(), 1);
         let snapshot = service.snapshot();
@@ -2255,7 +2397,7 @@ command:
 
     #[test]
     fn new_templates_use_current_app_version() {
-        let service = TaskCardService::new(PathBuf::from("/tmp"), Vec::new());
+        let service = TaskCardService::new(PathBuf::from("/tmp"), Vec::new()).unwrap();
         let task = service.new_task_template();
         assert!(task.contains(&format!("version: \"{}\"", APP_VERSION)));
         assert!(task.contains("description: \"\""));
@@ -2264,5 +2406,44 @@ command:
         let group = service.new_group_template();
         assert!(group.contains(&format!("version: \"{}\"", APP_VERSION)));
         assert!(group.contains("description: \"\""));
+    }
+
+    #[test]
+    fn running_registry_roundtrips() {
+        let root = std::env::temp_dir().join(format!("harbor-run-registry-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(root.join("run")).unwrap();
+        let records = vec![RunningTaskRecord {
+            prefix_path: "/tmp/project".into(),
+            id: "demo".into(),
+            pid: 4242,
+            pgid: 4242,
+            started_at_ms: 1,
+            log_file: "demo.log".into(),
+        }];
+        write_running_registry(&root, &records).unwrap();
+        let raw = fs::read_to_string(running_registry_path(&root)).unwrap();
+        let parsed: Vec<RunningTaskRecord> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "demo");
+        cleanup_orphan_tasks(&root).unwrap();
+        assert_eq!(fs::read_to_string(running_registry_path(&root)).unwrap(), "[]");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_second_instance_on_same_taskcard_root() {
+        let root = std::env::temp_dir().join(format!("harbor-single-instance-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        let first = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        let second = TaskCardService::new(root.clone(), Vec::new());
+        assert!(second.is_err());
+        drop(first);
+        TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }
