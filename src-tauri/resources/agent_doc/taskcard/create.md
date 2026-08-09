@@ -19,7 +19,8 @@ Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 1. 运行 `harbor --version` 获取当前版本。
 2. 创建 `harbor_taskcfg/tasks/` 目录（若不存在）。
 3. 按 [../yaml/task.md](../yaml/task.md) 写入 `{id}.yaml`。
-4. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
+4. 填写 `description` 时**尽量用中文**简要说明任务用途；无说明可留 `""`。
+5. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
 
 文件名建议与 Task `id` 一致，例如：
 
@@ -36,7 +37,8 @@ harbor_taskcfg/tasks/build-assets.yaml
 1. 先确认 Group 引用的所有 Task 均已存在；不要为了填充 Group 而自行创建用户未要求的 Task。
 2. 创建 `harbor_taskcfg/groups/` 目录（若不存在）。
 3. 按 [../yaml/group.md](../yaml/group.md) 写入 `{id}.yaml`。
-4. Group 仅填写 Task `id`；若跨目录搜索得到多个同名 Task，Harbor 会拒绝保存并列出候选位置。
+4. 填写 `description` 时**尽量用中文**说明编排目的。
+5. Group 仅填写 Task `id`；若跨目录搜索得到多个同名 Task，Harbor 会拒绝保存并列出候选位置。
 
 文件名建议与 Group `id` 一致，例如：
 

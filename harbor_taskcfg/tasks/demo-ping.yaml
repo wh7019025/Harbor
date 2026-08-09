@@ -1,7 +1,7 @@
 version: "0.1.2-rc2"
 id: demo-ping
 name: Demo Ping
-description: Periodic demo ping task
+description: 演示用的周期性 ping 任务
 workdir: $(harbor_taskcfg_dir)/..
 command:
   shell: sh

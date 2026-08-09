@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { logToHtml } from "../lib/logText";
 
 const props = defineProps<{
   content: string;
@@ -7,10 +8,9 @@ const props = defineProps<{
 
 const viewport = ref<HTMLElement | null>(null);
 const stickToBottom = ref(true);
-let renderedLength = 0;
 
-const pendingChars = computed(() => Math.max(0, props.content.length - renderedLength));
-const isPaused = computed(() => pendingChars.value > 0 || !stickToBottom.value);
+const displayHtml = computed(() => logToHtml(props.content));
+const isPaused = computed(() => !stickToBottom.value || hasSelectionInside());
 
 function isNearBottom(el: HTMLElement, threshold = 32) {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
@@ -34,29 +34,17 @@ function shouldFollowLive() {
   return stickToBottom.value && !hasSelectionInside();
 }
 
-function syncContent(reset = false) {
+function syncContent(force = false) {
   const el = viewport.value;
   if (!el) return;
-
-  const next = props.content;
-  if (reset || next.length < renderedLength) {
-    el.textContent = next;
-    renderedLength = next.length;
-    if (shouldFollowLive()) scrollToBottom();
-    return;
-  }
-
-  if (next.length === renderedLength) return;
-  if (!shouldFollowLive()) return;
-
-  el.append(document.createTextNode(next.slice(renderedLength)));
-  renderedLength = next.length;
-  scrollToBottom();
+  if (!force && !shouldFollowLive()) return;
+  el.innerHTML = displayHtml.value;
+  if (shouldFollowLive()) scrollToBottom();
 }
 
 function resumeLive() {
   stickToBottom.value = true;
-  syncContent();
+  syncContent(true);
   scrollToBottom();
 }
 
@@ -72,7 +60,7 @@ function onSelectionChange() {
 }
 
 watch(
-  () => props.content,
+  () => displayHtml.value,
   () => syncContent(),
 );
 
@@ -89,7 +77,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative flex min-h-0 flex-1 flex-col">
-    <pre
+    <div
       ref="viewport"
       class="log-viewport min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
       @scroll="onScroll"
@@ -106,7 +94,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.log-viewport::selection {
+.log-viewport::selection,
+.log-viewport :deep(*)::selection {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 </style>

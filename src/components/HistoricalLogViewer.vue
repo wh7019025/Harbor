@@ -1,66 +1,45 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { editor } from "monaco-editor";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { logToHtml } from "../lib/logText";
 
 const props = defineProps<{
   content: string;
 }>();
 
-const container = ref<HTMLElement | null>(null);
-let instance: editor.IStandaloneCodeEditor | null = null;
-
-function hasSelectionInEditor() {
-  if (!instance) return false;
-  const selection = instance.getSelection();
-  return selection != null && !selection.isEmpty();
-}
+const viewport = ref<HTMLElement | null>(null);
+const displayHtml = computed(() => logToHtml(props.content));
 
 function scrollToBottom() {
-  if (!instance) return;
-  const model = instance.getModel();
-  if (!model) return;
-  instance.revealLine(model.getLineCount());
-  instance.setScrollTop(instance.getScrollHeight());
+  const el = viewport.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
 }
 
-onMounted(async () => {
-  const monaco = await import("monaco-editor/esm/vs/editor/editor.api.js");
-  await import("monaco-editor/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js");
-  await import("monaco-editor/esm/vs/editor/contrib/clipboard/browser/clipboard.js");
-  if (!container.value) return;
-  instance = monaco.editor.create(container.value, {
-    value: props.content,
-    language: "plaintext",
-    theme: "vs-dark",
-    readOnly: true,
-    automaticLayout: true,
-    minimap: { enabled: false },
-    scrollBeyondLastLine: false,
-    wordWrap: "on",
-    fontSize: 11,
-    lineHeight: 17,
-    renderLineHighlight: "none",
-    overviewRulerLanes: 0,
-    contextmenu: true,
-  });
-  scrollToBottom();
-});
-
 watch(
-  () => props.content,
-  (content) => {
-    if (instance?.getValue() === content) return;
-    const keepScroll = hasSelectionInEditor();
-    instance?.setValue(content);
-    if (!keepScroll) scrollToBottom();
+  () => displayHtml.value,
+  async () => {
+    await nextTick();
+    scrollToBottom();
   },
 );
 
-onBeforeUnmount(() => {
-  instance?.dispose();
+onMounted(async () => {
+  await nextTick();
+  scrollToBottom();
 });
 </script>
 
 <template>
-  <div ref="container" class="min-h-0 flex-1" />
+  <div
+    ref="viewport"
+    class="log-viewport min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
+    v-html="displayHtml"
+  />
 </template>
+
+<style scoped>
+.log-viewport::selection,
+.log-viewport :deep(*)::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+</style>

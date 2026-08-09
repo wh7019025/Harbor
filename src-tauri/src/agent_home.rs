@@ -138,7 +138,8 @@ pub fn agent_help_info() -> AgentHelpInfo {
         "请先阅读 Harbor Task / Group 配置手册：{}\n\
 优先打开 AgentDoc.md，再按需读取 yaml/task.md、yaml/group.md 和 taskcard/paths.md。\n\
 这里只包含创建和维护 Task / Group 配置所需的知识；界面和其他产品功能不需要关注。\n\
-Agent 直接修改 YAML 时，须将 version 设为 `harbor --version` 的输出；详见 version.md。",
+Agent 直接修改 YAML 时，须将 version 设为 `harbor --version` 的输出；详见 version.md。\n\
+Task / Group 的 description 尽量用中文简要说明用途。",
         doc_dir.display()
     );
     AgentHelpInfo {

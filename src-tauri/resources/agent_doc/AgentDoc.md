@@ -10,6 +10,7 @@
 4. 用户要求 Task 时，按 [taskcard/create.md](taskcard/create.md) 的 Task 工作流创建，并遵循 [yaml/task.md](yaml/task.md)。
 5. 仅当用户明确要求 Group、组合或编排时，才按独立的 Group 工作流和 [yaml/group.md](yaml/group.md) 创建 Group。
 6. 检查 YAML、Task 引用、路径和命令；不要写入 Harbor 自动生成的字段。
+7. 编写 Task / Group 时，`description` **尽量用中文**（详见 [yaml/task.md](yaml/task.md)、[yaml/group.md](yaml/group.md)）。
 
 文档发布到 `~/.harbor/agent_doc/`，Harbor 启动时会刷新。
 

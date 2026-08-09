@@ -29,6 +29,7 @@ export interface TaskCardGroup {
   id: string;
   prefix_path: string;
   name: string;
+  description: string;
   tasks: TaskCardGroupTask[];
   folder: string;
 }

@@ -4,7 +4,7 @@
 version: "0.1.2-rc2"
 id: system-info
 name: System Info
-description: Collect basic system information
+description: 收集基础系统信息
 tasks:
   - task: uc-info
     wait_after_sec: 0
@@ -22,11 +22,16 @@ tasks:
 | `version` | 是 | `harbor --version` 的输出；Agent 直接编辑时须手动更新 |
 | `id` | 是 | 字母数字、`-`、`_`；同一 `groups/` 目录内唯一 |
 | `name` | 否 | 显示名 |
-| `description` | 否 | 组说明 |
+| `description` | 否 | 组说明。**Agent 编写时尽量用中文**，简要说明组的编排目的 |
 | `tasks` | 是 | 按顺序执行的 Task 条目列表 |
 | `tasks[].task` | 是 | 已存在的 Task `id` |
 | `tasks[].wait_after_sec` | 否 | 当前 Task 后等待的秒数，默认 `0` |
 | `tasks[].env` | 否 | 对此次组内执行追加或覆盖的环境变量，默认 `{}` |
+
+## description
+
+- **尽量用中文**写一句简短说明，描述该 Group 串联哪些任务、解决什么问题。
+- 不要用英文占位；无实质说明时可写 `""`。
 
 ## Task 引用规则
 

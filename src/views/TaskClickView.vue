@@ -301,6 +301,10 @@ function taskHoverTitle(task: TaskCardTask) {
   return description ? `${description}\n\n双击复制到 group YAML` : "双击复制到 group YAML";
 }
 
+function groupHoverTitle(group: TaskCardGroup) {
+  return group.description.trim() || group.name || group.id;
+}
+
 function groupHasRunningTask(group: TaskCardGroup) {
   return group.tasks.some((item) => taskRunning(resolvedGroupTask(group, item)));
 }
@@ -790,7 +794,7 @@ onBeforeUnmount(() => {
                 :key="instanceKey(group.prefix_path, group.id)"
                 class="flex items-center gap-2 border-b border-[var(--line-soft)] px-2 py-1.5"
               >
-                <div class="flex min-w-0 flex-1 items-center gap-1.5">
+                <div class="flex min-w-0 flex-1 items-center gap-1.5" :title="groupHoverTitle(group)">
                   <h3 class="truncate text-[13px] font-medium text-[var(--ink-bright)]">
                     {{ group.name || group.id }}
                   </h3>
