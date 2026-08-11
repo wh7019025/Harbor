@@ -1,45 +1,72 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { logToHtml } from "../lib/logText";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { editor } from "monaco-editor";
+import { sanitizeLogText } from "../lib/logText";
 
 const props = defineProps<{
   content: string;
 }>();
 
-const viewport = ref<HTMLElement | null>(null);
-const displayHtml = computed(() => logToHtml(props.content));
+const container = ref<HTMLElement | null>(null);
+let instance: editor.IStandaloneCodeEditor | null = null;
 
-function scrollToBottom() {
-  const el = viewport.value;
-  if (!el) return;
-  el.scrollTop = el.scrollHeight;
+function displayText(content: string) {
+  return sanitizeLogText(content);
 }
 
+function hasSelectionInEditor() {
+  if (!instance) return false;
+  const selection = instance.getSelection();
+  return selection != null && !selection.isEmpty();
+}
+
+function scrollToBottom() {
+  if (!instance) return;
+  const model = instance.getModel();
+  if (!model) return;
+  instance.revealLine(model.getLineCount());
+  instance.setScrollTop(instance.getScrollHeight());
+}
+
+onMounted(async () => {
+  const monaco = await import("monaco-editor/esm/vs/editor/editor.api.js");
+  await import("monaco-editor/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js");
+  await import("monaco-editor/esm/vs/editor/contrib/clipboard/browser/clipboard.js");
+  if (!container.value) return;
+  instance = monaco.editor.create(container.value, {
+    value: displayText(props.content),
+    language: "plaintext",
+    theme: "vs-dark",
+    readOnly: true,
+    automaticLayout: true,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    wordWrap: "on",
+    fontSize: 11,
+    lineHeight: 17,
+    renderLineHighlight: "none",
+    overviewRulerLanes: 0,
+    contextmenu: true,
+  });
+  scrollToBottom();
+});
+
 watch(
-  () => displayHtml.value,
-  async () => {
-    await nextTick();
-    scrollToBottom();
+  () => props.content,
+  (content) => {
+    const text = displayText(content);
+    if (instance?.getValue() === text) return;
+    const keepScroll = hasSelectionInEditor();
+    instance?.setValue(text);
+    if (!keepScroll) scrollToBottom();
   },
 );
 
-onMounted(async () => {
-  await nextTick();
-  scrollToBottom();
+onBeforeUnmount(() => {
+  instance?.dispose();
 });
 </script>
 
 <template>
-  <div
-    ref="viewport"
-    class="log-viewport min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
-    v-html="displayHtml"
-  />
+  <div ref="container" class="min-h-0 flex-1" />
 </template>
-
-<style scoped>
-.log-viewport::selection,
-.log-viewport :deep(*)::selection {
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
-}
-</style>

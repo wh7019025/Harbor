@@ -118,6 +118,7 @@ pub struct TaskLogSummary {
     pub file: String,
     pub task_id: String,
     pub started_at_ms: u128,
+    pub modified_at_ms: u128,
     pub bytes: u64,
     pub active: bool,
 }
@@ -702,17 +703,30 @@ impl TaskCardService {
                 let path = entry.path();
                 let file = path.file_name()?.to_str()?.to_string();
                 let (task_id, started_at_ms) = parse_log_file(file.as_str())?;
-                let bytes = entry.metadata().ok()?.len();
+                let metadata = entry.metadata().ok()?;
+                let bytes = metadata.len();
+                let modified_at_ms = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_millis())
+                    .unwrap_or(started_at_ms);
                 Some(TaskLogSummary {
                     active: active.contains(file.as_str()),
                     file,
                     task_id,
                     started_at_ms,
+                    modified_at_ms,
                     bytes,
                 })
             })
             .collect::<Vec<_>>();
-        logs.sort_by(|a, b| b.started_at_ms.cmp(&a.started_at_ms));
+        logs.sort_by(|a, b| match (a.active, b.active) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            (true, true) => b.started_at_ms.cmp(&a.started_at_ms),
+            (false, false) => b.modified_at_ms.cmp(&a.modified_at_ms),
+        });
         const MAX_LOGS: usize = 50;
         if logs.len() > MAX_LOGS {
             let log_dir = self.root.join("log");

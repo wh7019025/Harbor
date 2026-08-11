@@ -1,4 +1,4 @@
-version: "0.1.2-rc2"
+version: "0.1.2-rc3"
 id: demo-ping
 name: Demo Ping
 description: 演示用的周期性 ping 任务

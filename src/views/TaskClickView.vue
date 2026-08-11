@@ -98,7 +98,15 @@ let copyFlashTimer: number | null = null;
 
 const taskFolders = computed(() => groupByFolder(snapshot.value?.tasks ?? []));
 const groupFolders = computed(() => groupByFolder(snapshot.value?.groups ?? []));
-const listedLogs = computed(() => logs.value.slice(0, 50));
+const listedLogs = computed(() =>
+  [...logs.value]
+    .sort((left, right) => {
+      if (left.active !== right.active) return left.active ? -1 : 1;
+      if (left.active) return right.started_at_ms - left.started_at_ms;
+      return right.modified_at_ms - left.modified_at_ms;
+    })
+    .slice(0, 50),
+);
 const searchPaths = computed(() => snapshot.value?.search_paths ?? []);
 const discoveredSummary = computed(() => {
   const tasks = snapshot.value?.discovered_task_dirs.length ?? 0;
@@ -231,8 +239,9 @@ async function load(options: { preserveError?: boolean } = {}) {
     const [nextSnapshot, nextLogs] = await Promise.all([fetchTaskCard(), fetchLogs()]);
     snapshot.value = nextSnapshot;
     logs.value = nextLogs;
-    if (!selectedLog.value && nextLogs[0]) {
-      await selectLog(nextLogs[0].file);
+    if (!selectedLog.value && nextLogs.length > 0) {
+      const preferred = nextLogs.find((item) => item.active) ?? nextLogs[0];
+      await selectLog(preferred.file);
     }
     if (!options.preserveError) error.value = "";
   } catch (err) {
@@ -878,35 +887,72 @@ onBeforeUnmount(() => {
       <div class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[var(--line-soft)]">
         <div class="flex items-center justify-between border-b border-[var(--line-soft)] bg-[var(--bg-1)] px-2 py-1">
           <span class="kicker">logs</span>
-          <span v-if="selectedLogItem" class="readout text-[10px] text-[var(--faint)]">
-            {{ selectedLogActive ? "live" : "history" }}
-          </span>
         </div>
-        <div class="grid min-h-0 flex-1 grid-cols-[minmax(160px,0.35fr)_minmax(0,1fr)]">
-          <div class="min-h-0 overflow-auto border-r border-[var(--line-soft)]">
-            <button
-              v-for="item in listedLogs"
-              :key="item.file"
-              type="button"
-              class="flex w-full items-center justify-between gap-1 px-2 py-1.5 text-left text-[11px] transition hover:bg-[var(--surface-hover)]"
-              :class="selectedLog === item.file ? 'bg-[var(--accent-soft)] text-[var(--ink-bright)]' : 'text-[var(--muted)]'"
-              @click="selectLog(item.file)"
-            >
-              <span class="readout min-w-0 truncate">{{ item.file }}</span>
-              <span v-if="item.active" class="readout shrink-0 text-[var(--running)]">live</span>
-            </button>
+        <div class="grid min-h-0 flex-1 grid-cols-[minmax(168px,0.34fr)_3px_minmax(0,1fr)]">
+          <div class="flex min-h-0 flex-col overflow-hidden bg-[var(--bg-1)]">
+            <div class="shrink-0 border-b border-[var(--line-soft)] px-2 py-1">
+              <span class="kicker text-[10px] text-[var(--faint)]">files</span>
+            </div>
+            <div class="min-h-0 flex-1 overflow-auto">
+              <button
+                v-for="item in listedLogs"
+                :key="item.file"
+                type="button"
+                class="flex w-full items-center gap-1.5 border-b border-[var(--line-soft)] px-2 py-1.5 text-left text-[11px] transition hover:bg-[var(--surface-hover)]"
+                :class="
+                  selectedLog === item.file
+                    ? 'bg-[var(--accent-soft)] text-[var(--ink-bright)]'
+                    : 'text-[var(--muted)]'
+                "
+                @click="selectLog(item.file)"
+              >
+                <span
+                  class="readout w-3 shrink-0 text-center text-[10px]"
+                  :class="item.active ? 'text-[var(--running)]' : 'text-transparent'"
+                  aria-hidden="true"
+                >
+                  ●
+                </span>
+                <span class="readout min-w-0 flex-1 truncate">{{ item.file }}</span>
+              </button>
+            </div>
           </div>
-          <div class="flex min-h-0 flex-col bg-[var(--surface-2)]">
+
+          <div class="bg-[var(--line)]" />
+
+          <div class="flex min-h-0 flex-col overflow-hidden bg-[var(--surface-2)]">
+            <div
+              class="flex shrink-0 items-center justify-between gap-2 border-b-2 border-[var(--line)] bg-[var(--bg-1)] px-2 py-1"
+            >
+              <span
+                v-if="selectedLogActive"
+                class="readout text-[10px] font-medium uppercase tracking-wide text-[var(--running)]"
+              >
+                live
+              </span>
+              <span
+                v-else-if="selectedLog"
+                class="readout text-[10px] font-medium uppercase tracking-wide text-[var(--faint)]"
+              >
+                history
+              </span>
+              <span v-else class="readout text-[10px] font-medium uppercase tracking-wide text-[var(--faint)]">
+                viewer
+              </span>
+              <span v-if="selectedLogItem" class="readout min-w-0 truncate text-[10px] text-[var(--muted)]">
+                {{ selectedLogItem.file }}
+              </span>
+            </div>
             <LiveLogViewer v-if="selectedLogActive" :content="logText" />
             <HistoricalLogViewer v-else-if="selectedLog" :content="historicalContent" />
             <div
               v-else
-              class="flex flex-1 items-center justify-center text-[11px] text-[var(--faint)]"
+              class="flex flex-1 items-center justify-center px-2 text-center text-[11px] text-[var(--faint)]"
             >
-              no log selected
+              选择左侧 log 文件
             </div>
             <p
-              v-if="logTruncated && !selectedLogActive"
+              v-if="logTruncated && selectedLog && !selectedLogActive"
               class="shrink-0 border-t border-[var(--line-soft)] px-2 py-1 text-[10px] text-[var(--warn)]"
             >
               showing last 1 MiB

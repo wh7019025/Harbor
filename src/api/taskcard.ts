@@ -54,6 +54,7 @@ export interface TaskLogSummary {
   file: string;
   task_id: string;
   started_at_ms: number;
+  modified_at_ms: number;
   bytes: number;
   active: boolean;
 }

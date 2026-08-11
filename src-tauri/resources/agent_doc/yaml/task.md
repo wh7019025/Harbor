@@ -3,7 +3,7 @@
 完整示例（Agent 直接写文件时，`version` 需手动设为 `harbor --version` 的输出）：
 
 ```yaml
-version: "0.1.2-rc2"
+version: "0.1.2-rc3"
 id: demo-ping
 name: Demo Ping
 description: 演示用的周期性 hello ping
@@ -20,7 +20,7 @@ command:
 或 argv 形式：
 
 ```yaml
-version: "0.1.2-rc2"
+version: "0.1.2-rc3"
 id: uname-kernel
 name: Uname Kernel
 description: ""

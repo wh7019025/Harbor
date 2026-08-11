@@ -1429,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "harbor"
-version = "0.1.2-rc2"
+version = "0.1.2-rc3"
 dependencies = [
  "libc",
  "nvml-wrapper",
