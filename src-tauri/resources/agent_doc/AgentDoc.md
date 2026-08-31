@@ -4,7 +4,7 @@
 
 ## Agent 工作流
 
-1. 运行 `harbor --version`，取得 YAML 要写入的 `version`。
+1. 新建 YAML 或需修正旧 `version` 时，运行 `harbor --version` 并**原样**写入；修改已有配置时若 `version` 已与当前应用一致则**不要改动**（禁止自行递增 rc 号，详见 [version.md](version.md)）。
 2. 确认配置属于当前项目还是全局环境，按 [taskcard/paths.md](taskcard/paths.md) 选择目录。
 3. 项目配置必须检查 Search Paths 覆盖情况；未覆盖时由 Agent 按 [settings.md](settings.md) 直接维护 `search_paths`。
 4. 用户要求 Task 时，按 [taskcard/create.md](taskcard/create.md) 的 Task 工作流创建，并遵循 [yaml/task.md](yaml/task.md)。

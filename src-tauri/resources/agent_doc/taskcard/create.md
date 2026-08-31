@@ -16,7 +16,7 @@ Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 
 仅在用户要求创建 Task 时执行：
 
-1. 运行 `harbor --version` 获取当前版本。
+1. 运行 `harbor --version`，将输出**原样**写入 `version`（勿自行递增 rc 号）。
 2. 创建 `harbor_taskcfg/tasks/` 目录（若不存在）。
 3. 按 [../yaml/task.md](../yaml/task.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**简要说明任务用途；无说明可留 `""`。

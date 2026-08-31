@@ -118,10 +118,12 @@ YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` �
 | 修改方式 | `version` 如何处理 |
 |----------|-------------------|
 | Harbor API 保存 | Harbor **自动**写入当前应用版本 |
-| Agent 直接编辑 YAML 文件 | Agent **须手动**设为 `harbor --version` 的输出 |
+| Agent 直接编辑 YAML 文件 | 仅在旧值或与当前应用不一致时，设为 `harbor --version` 的**原样输出** |
 
-- **版本来源**：仅 `harbor --version`，勿自行编造
-- **旧文件**：历史上 `version: 1` 等仍可加载；Agent 更新时应改为当前 `{app}`
+- **不是修订号**：YAML `version` 是应用版本，不是「改一次加一」；**禁止自行递增 rc 号**（如 rc3→rc4）
+- **版本来源**：仅 `harbor --version`，勿猜测或 +1
+- **已有文件**：若已是 `{app}` 则修改内容时**不要动** `version`
+- **旧文件**：历史上 `version: 1` 等仍可加载；应改为当前 `{app}`
 
 字段说明见 [yaml/task.md](yaml/task.md)、[yaml/group.md](yaml/group.md)。
 "#,
@@ -138,7 +140,7 @@ pub fn agent_help_info() -> AgentHelpInfo {
         "请先阅读 Harbor Task / Group 配置手册：{}\n\
 优先打开 AgentDoc.md，再按需读取 yaml/task.md、yaml/group.md 和 taskcard/paths.md。\n\
 这里只包含创建和维护 Task / Group 配置所需的知识；界面和其他产品功能不需要关注。\n\
-Agent 直接修改 YAML 时，须将 version 设为 `harbor --version` 的输出；详见 version.md。\n\
+Agent 直接修改 YAML 时，version 须原样等于 `harbor --version`；禁止自行递增 rc 号，已有正确 version 时不要改；详见 version.md。\n\
 Task / Group 的 description 尽量用中文简要说明用途。",
         doc_dir.display()
     );

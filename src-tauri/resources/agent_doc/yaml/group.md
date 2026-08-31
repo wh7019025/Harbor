@@ -19,7 +19,7 @@ tasks:
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `version` | 是 | `harbor --version` 的输出；Agent 直接编辑时须手动更新 |
+| `version` | 是 | Harbor **应用**版本（`harbor --version` 原样输出），不是配置修订号；Agent 直接编辑时仅在旧值或与应用不一致时更新，**禁止自行递增 rc 号**。详见 [version.md](../version.md) |
 | `id` | 是 | 字母数字、`-`、`_`；同一 `groups/` 目录内唯一 |
 | `name` | 否 | 显示名 |
 | `description` | 否 | 组说明。**Agent 编写时尽量用中文**，简要说明组的编排目的 |

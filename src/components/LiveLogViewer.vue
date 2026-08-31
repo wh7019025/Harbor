@@ -8,16 +8,15 @@ const props = defineProps<{
 
 const viewport = ref<HTMLElement | null>(null);
 const stickToBottom = ref(true);
-const interactPaused = ref(false);
 let renderedLength = 0;
+let ignoreScroll = false;
+let pointerSelecting = false;
 
 const displayContent = computed(() => sanitizeLogText(props.content));
-const pendingChars = computed(() => Math.max(0, displayContent.value.length - renderedLength));
-const isPaused = computed(
-  () => interactPaused.value || pendingChars.value > 0 || !stickToBottom.value || hasSelectionInside(),
-);
 
-function isNearBottom(el: HTMLElement, threshold = 32) {
+const isPaused = computed(() => !stickToBottom.value || hasSelectionInside());
+
+function isNearBottom(el: HTMLElement, threshold = 48) {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
 }
 
@@ -29,19 +28,29 @@ function hasSelectionInside() {
   return anchor != null && el.contains(anchor);
 }
 
+function shouldFollowLive() {
+  return stickToBottom.value && !hasSelectionInside() && !pointerSelecting;
+}
+
+function shouldFreezeDom() {
+  return pointerSelecting || hasSelectionInside();
+}
+
 function scrollToBottom() {
   const el = viewport.value;
   if (!el) return;
+  ignoreScroll = true;
   el.scrollTop = el.scrollHeight;
-}
-
-function shouldFollowLive() {
-  return stickToBottom.value && !interactPaused.value && !hasSelectionInside();
+  requestAnimationFrame(() => {
+    ignoreScroll = false;
+  });
 }
 
 function syncContent(reset = false) {
   const el = viewport.value;
   if (!el) return;
+
+  if (!reset && shouldFreezeDom()) return;
 
   const next = displayContent.value;
   if (reset || next.length < renderedLength) {
@@ -52,39 +61,61 @@ function syncContent(reset = false) {
   }
 
   if (next.length === renderedLength) return;
-  if (!shouldFollowLive()) return;
 
-  el.append(document.createTextNode(next.slice(renderedLength)));
+  if (shouldFollowLive()) {
+    el.append(document.createTextNode(next.slice(renderedLength)));
+    renderedLength = next.length;
+    scrollToBottom();
+    return;
+  }
+
+  const scrollTop = el.scrollTop;
+  el.textContent = next;
   renderedLength = next.length;
-  scrollToBottom();
-}
-
-function pauseForInteraction() {
-  interactPaused.value = true;
-  stickToBottom.value = false;
+  el.scrollTop = scrollTop;
 }
 
 function resumeLive() {
-  interactPaused.value = false;
+  pointerSelecting = false;
   stickToBottom.value = true;
   syncContent(true);
   scrollToBottom();
 }
 
+function onPointerDown() {
+  pointerSelecting = true;
+}
+
+function onPointerUp() {
+  pointerSelecting = false;
+  const el = viewport.value;
+  if (!el) return;
+  if (!hasSelectionInside()) {
+    stickToBottom.value = isNearBottom(el);
+  }
+  if (renderedLength < displayContent.value.length) {
+    syncContent(true);
+    if (shouldFollowLive()) scrollToBottom();
+    return;
+  }
+  syncContent();
+}
+
 function onScroll() {
+  if (ignoreScroll) return;
   const el = viewport.value;
   if (!el) return;
   stickToBottom.value = isNearBottom(el);
-  if (shouldFollowLive()) syncContent();
 }
 
 function onSelectionChange() {
   if (hasSelectionInside()) {
-    interactPaused.value = true;
     stickToBottom.value = false;
     return;
   }
-  if (shouldFollowLive()) syncContent();
+  const el = viewport.value;
+  if (el) stickToBottom.value = isNearBottom(el);
+  syncContent();
 }
 
 watch(
@@ -108,7 +139,9 @@ onBeforeUnmount(() => {
     <pre
       ref="viewport"
       class="log-viewport min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
-      @mousedown="pauseForInteraction"
+      @mousedown="onPointerDown"
+      @mouseup="onPointerUp"
+      @mouseleave="onPointerUp"
       @scroll="onScroll"
     />
     <button
@@ -123,6 +156,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.log-viewport {
+  user-select: text;
+}
+
 .log-viewport::selection {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }

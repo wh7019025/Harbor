@@ -909,6 +909,20 @@ impl TaskCardService {
         absolutize(cfg)
     }
 
+    pub fn resolve_config_base_path(&self, prefix_path: &str) -> String {
+        let path = PathBuf::from(prefix_path);
+        let base = if path
+            .file_name()
+            .and_then(|value| value.to_str())
+            == Some(TASK_CFG_DIR)
+        {
+            path.parent().unwrap_or(&path).to_path_buf()
+        } else {
+            path
+        };
+        crate::settings::collapse_path(base.as_path())
+    }
+
     fn resolve_create_dir(&self, target: &str, root_child: &str) -> Result<PathBuf, String> {
         let target = target.trim();
         if target.is_empty() {
@@ -1177,6 +1191,23 @@ fn join_folder_prefix(prefix: &str, folder: &str) -> String {
         (false, true) => prefix.to_string(),
         (false, false) => format!("{prefix}/{folder}"),
     }
+}
+
+fn folder_relative_path(folder_label: &str, folder: &str) -> String {
+    if folder.is_empty() {
+        return String::new();
+    }
+    if folder_label.is_empty() {
+        return folder.to_string();
+    }
+    if folder == folder_label {
+        return String::new();
+    }
+    let prefix = format!("{folder_label}/");
+    if folder.starts_with(&prefix) {
+        return folder[prefix.len()..].to_string();
+    }
+    folder.to_string()
 }
 
 fn deserialize_yaml_version<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -2407,6 +2438,32 @@ command:
         assert!(snapshot.tasks.iter().any(|task| task.id == "near-task"));
         assert!(!snapshot.tasks.iter().any(|task| task.id == "far-task"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolve_config_base_path_shows_harbor_or_project_root() {
+        let service = TaskCardService::new(PathBuf::from("/tmp/harbor"), Vec::new()).unwrap();
+        let home = crate::settings::home_dir();
+        assert_eq!(
+            service.resolve_config_base_path(
+                home.join(".harbor/harbor_taskcfg")
+                    .to_string_lossy()
+                    .as_ref(),
+            ),
+            "~/.harbor/"
+        );
+        let project = home.join("projects/demo");
+        assert_eq!(
+            service.resolve_config_base_path(project.to_string_lossy().as_ref()),
+            "~/projects/demo/"
+        );
+    }
+
+    #[test]
+    fn folder_relative_path_strips_search_prefix() {
+        assert_eq!(folder_relative_path("", "ci/nightly"), "ci/nightly");
+        assert_eq!(folder_relative_path("myproject", "myproject"), "");
+        assert_eq!(folder_relative_path("myproject", "myproject/ci"), "ci");
     }
 
     #[test]

@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Settings,
   Bot,
+  Copy,
   Square,
   Terminal,
   Trash2,
@@ -24,7 +25,7 @@ import LiveLogViewer from "../components/LiveLogViewer.vue";
 import MonacoEditor from "../components/MonacoEditor.vue";
 import SettingPanel from "../components/SettingPanel.vue";
 import TaskMetricsFooter from "../components/TaskMetricsFooter.vue";
-import SelectField from "../components/SelectField.vue";
+import PathActions from "../components/PathActions.vue";
 import {
   addSearchPath,
   createGroupYaml,
@@ -60,10 +61,13 @@ const snapshot = ref<TaskCardSnapshot | null>(null);
 const logs = ref<TaskLogSummary[]>([]);
 const loading = ref(true);
 const refreshing = ref(false);
-const researching = ref(false);
 const pathsPanelOpen = ref(false);
 const settingsPanelOpen = ref(false);
 const agentHelpPanelOpen = ref(false);
+const BACKDROP_DISMISS_GUARD_MS = 300;
+const settingsOpenedAt = ref(0);
+const agentHelpOpenedAt = ref(0);
+const yamlEditorOpenedAt = ref(0);
 const newSearchPath = ref("");
 const error = ref("");
 const pending = ref<{ key: string; label: string } | null>(null);
@@ -174,11 +178,13 @@ function resolveTaskRef(
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
-function truncatePath(path: string) {
-  if (!path) return "";
-  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
-  if (parts.length <= 2) return path;
-  return `…/${parts.slice(-2).join("/")}`;
+function showCopyFlash(message: string) {
+  copyFlash.value = message;
+  if (copyFlashTimer !== null) window.clearTimeout(copyFlashTimer);
+  copyFlashTimer = window.setTimeout(() => {
+    copyFlash.value = "";
+    copyFlashTimer = null;
+  }, 1500);
 }
 
 function groupTaskSnippet(task: TaskCardTask) {
@@ -188,20 +194,24 @@ function groupTaskSnippet(task: TaskCardTask) {
   ].join("\n");
 }
 
-async function copyGroupTaskSnippet(task: TaskCardTask) {
-  const snippet = groupTaskSnippet(task);
+async function flashCopy(message: string, write: () => Promise<void>) {
   try {
-    await navigator.clipboard.writeText(snippet);
-    copyFlash.value = `已复制 ${task.id}`;
+    await write();
+    showCopyFlash(message);
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
-    return;
   }
-  if (copyFlashTimer !== null) window.clearTimeout(copyFlashTimer);
-  copyFlashTimer = window.setTimeout(() => {
-    copyFlash.value = "";
-    copyFlashTimer = null;
-  }, 1500);
+}
+
+async function copyTaskName(task: TaskCardTask) {
+  const name = task.name.trim() || task.id;
+  await flashCopy(`已复制 ${name}`, () => navigator.clipboard.writeText(name));
+}
+
+async function copyGroupTaskSnippet(task: TaskCardTask) {
+  await flashCopy(`已复制 group 片段: ${task.id}`, () =>
+    navigator.clipboard.writeText(groupTaskSnippet(task)),
+  );
 }
 
 function editFolderDisplay(kind: "task" | "group", prefixPath: string, id: string, relativeFolder: string) {
@@ -233,9 +243,12 @@ const folderOptions = computed(() => [
   })),
 ]);
 
-async function load(options: { preserveError?: boolean } = {}) {
+async function load(options: { preserveError?: boolean; scan?: boolean } = {}) {
   refreshing.value = true;
   try {
+    if (options.scan) {
+      await researchTaskCard();
+    }
     const [nextSnapshot, nextLogs] = await Promise.all([fetchTaskCard(), fetchLogs()]);
     snapshot.value = nextSnapshot;
     logs.value = nextLogs;
@@ -251,19 +264,6 @@ async function load(options: { preserveError?: boolean } = {}) {
   } finally {
     loading.value = false;
     refreshing.value = false;
-  }
-}
-
-async function research() {
-  researching.value = true;
-  error.value = "";
-  try {
-    await researchTaskCard();
-    await load();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    researching.value = false;
   }
 }
 
@@ -307,7 +307,8 @@ function taskRunning(task: TaskCardTask | undefined) {
 
 function taskHoverTitle(task: TaskCardTask) {
   const description = task.description.trim();
-  return description ? `${description}\n\n双击复制到 group YAML` : "双击复制到 group YAML";
+  const hint = "双击复制 task name";
+  return description ? `${description}\n\n${hint}` : hint;
 }
 
 function groupHoverTitle(group: TaskCardGroup) {
@@ -349,6 +350,37 @@ function runWithSudo(
   sudoPrompt.value = { key, label, action };
 }
 
+function dismissOverlayBackdrop(openedAt: number, close: () => void) {
+  if (Date.now() - openedAt < BACKDROP_DISMISS_GUARD_MS) return;
+  close();
+}
+
+function openSettingsPanel() {
+  settingsOpenedAt.value = Date.now();
+  settingsPanelOpen.value = true;
+}
+
+function closeSettingsPanel() {
+  settingsPanelOpen.value = false;
+}
+
+function dismissSettingsBackdrop() {
+  dismissOverlayBackdrop(settingsOpenedAt.value, closeSettingsPanel);
+}
+
+function openAgentHelpPanel() {
+  agentHelpOpenedAt.value = Date.now();
+  agentHelpPanelOpen.value = true;
+}
+
+function closeAgentHelpPanel() {
+  agentHelpPanelOpen.value = false;
+}
+
+function dismissAgentHelpBackdrop() {
+  dismissOverlayBackdrop(agentHelpOpenedAt.value, closeAgentHelpPanel);
+}
+
 function closeSudoPrompt() {
   sudoPassword.value = "";
   sudoPrompt.value = null;
@@ -366,6 +398,7 @@ async function openCreate(kind: "task" | "group") {
   yamlError.value = "";
   try {
     const result = kind === "task" ? await fetchTaskTemplate() : await fetchGroupTemplate();
+    yamlEditorOpenedAt.value = Date.now();
     yamlEditor.value = {
       kind,
       content: result.content,
@@ -381,6 +414,7 @@ async function openEdit(kind: "task" | "group", prefixPath: string, id: string) 
   try {
     const result =
       kind === "task" ? await fetchTaskYaml(prefixPath, id) : await fetchGroupYaml(prefixPath, id);
+    yamlEditorOpenedAt.value = Date.now();
     yamlEditor.value = {
       kind,
       id,
@@ -396,6 +430,10 @@ async function openEdit(kind: "task" | "group", prefixPath: string, id: string) 
 
 function closeYamlEditor() {
   if (!yamlSaving.value) yamlEditor.value = null;
+}
+
+function dismissYamlEditorBackdrop() {
+  dismissOverlayBackdrop(yamlEditorOpenedAt.value, closeYamlEditor);
 }
 
 async function saveYaml() {
@@ -494,7 +532,7 @@ watch(selectedLogActive, (active, wasActive) => {
 });
 
 onMounted(() => {
-  void load();
+  void load({ scan: true });
   timer = window.setInterval(() => {
     void load({ preserveError: true });
   }, 2500);
@@ -513,9 +551,12 @@ onBeforeUnmount(() => {
 <template>
   <section class="st-shell flex h-full flex-col gap-2 px-3 py-2">
     <header class="flex flex-wrap items-center justify-between gap-2">
-      <p class="readout truncate text-[11px] text-[var(--muted)]">
-        {{ snapshot?.root || "~/.harbor/harbor_taskcfg" }}
-      </p>
+      <div class="flex min-w-0 items-center gap-2">
+        <p class="readout truncate text-[11px] text-[var(--muted)]">
+          {{ snapshot?.root || "~/.harbor/harbor_taskcfg" }}
+        </p>
+        <span v-if="copyFlash" class="readout shrink-0 text-[10px] text-[var(--accent)]">{{ copyFlash }}</span>
+      </div>
       <div class="flex items-center gap-1">
         <button
           class="btn !px-2 !py-1"
@@ -525,10 +566,18 @@ onBeforeUnmount(() => {
           @click="pathsPanelOpen = !pathsPanelOpen"
         >
           <FolderSearch class="h-3.5 w-3.5" />
-          <span class="readout text-[11px]">{{ searchPaths.length }}</span>
+          <span class="readout text-[11px]" :title="`${searchPaths.length} 个搜索路径`">
+            {{ searchPaths.length }} paths
+          </span>
           <ChevronDown :class="['h-3 w-3 transition', pathsPanelOpen ? 'rotate-180' : '']" />
         </button>
-        <button class="btn !px-2 !py-1" type="button" title="refresh" :disabled="refreshing" @click="load()">
+        <button
+          class="btn !px-2 !py-1"
+          type="button"
+          title="重新扫描 search paths 并刷新"
+          :disabled="refreshing"
+          @click="load({ scan: true })"
+        >
           <RefreshCw :class="['h-3.5 w-3.5', refreshing ? 'animate-spin' : '']" />
         </button>
         <button
@@ -540,10 +589,10 @@ onBeforeUnmount(() => {
         >
           <Square class="h-3.5 w-3.5" />
         </button>
-        <button class="btn !px-2 !py-1" type="button" title="settings" @click="settingsPanelOpen = true">
+        <button class="btn !px-2 !py-1" type="button" title="settings" @click="openSettingsPanel">
           <Settings class="h-3.5 w-3.5" />
         </button>
-        <button class="btn !px-2 !py-1" type="button" title="agent help" @click="agentHelpPanelOpen = true">
+        <button class="btn !px-2 !py-1" type="button" title="agent help" @click="openAgentHelpPanel">
           <Bot class="h-3.5 w-3.5" />
         </button>
       </div>
@@ -573,21 +622,9 @@ onBeforeUnmount(() => {
               ≤5 layers · harbor_taskcfg tasks {{ discoveredSummary.tasks }} · groups {{ discoveredSummary.groups }}
             </span>
           </div>
-          <div class="flex items-center gap-1">
-            <button
-              class="btn !px-2 !py-1"
-              type="button"
-              title="research"
-              :disabled="researching || !searchPaths.length"
-              @click="research"
-            >
-              <FolderSearch :class="['h-3.5 w-3.5', researching ? 'animate-pulse' : '']" />
-              <span class="text-[11px]">research</span>
-            </button>
-            <button class="btn !px-1.5 !py-1" type="button" title="close" @click="pathsPanelOpen = false">
-              <X class="h-3.5 w-3.5" />
-            </button>
-          </div>
+          <button class="btn !px-1.5 !py-1" type="button" title="close" @click="pathsPanelOpen = false">
+            <X class="h-3.5 w-3.5" />
+          </button>
         </div>
         <div class="space-y-2 p-2">
           <div class="flex items-center gap-1.5">
@@ -638,8 +675,6 @@ onBeforeUnmount(() => {
             <div class="flex min-w-0 items-center gap-1.5">
               <Terminal class="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
               <span class="kicker">tasks</span>
-              <span v-if="copyFlash" class="readout truncate text-[10px] text-[var(--accent)]">{{ copyFlash }}</span>
-              <span v-else class="readout truncate text-[10px] text-[var(--faint)]">双击复制 group 片段</span>
             </div>
             <button class="btn !px-2 !py-1" type="button" title="new task" @click="openCreate('task')">
               <Plus class="h-3.5 w-3.5" />
@@ -648,28 +683,36 @@ onBeforeUnmount(() => {
           <div class="min-h-0 flex-1 overflow-auto">
             <p v-if="loading" class="px-2 py-2 text-xs text-[var(--muted)]">loading…</p>
             <div v-for="folder in taskFolders" :key="`task-${folder.folder}`">
-              <button
-                type="button"
-                class="flex w-full items-center gap-1 border-b border-[var(--line-soft)] bg-[var(--surface)] px-2 py-1 text-left transition hover:bg-[var(--surface-hover)]"
-                :title="isTaskFolderCollapsed(folder.folder) ? 'expand' : 'collapse'"
-                @click="toggleTaskFolder(folder.folder)"
+              <div
+                class="flex w-full items-center gap-1 border-b border-[var(--line-soft)] bg-[var(--surface)] px-2 py-1"
               >
-                <ChevronDown
-                  :class="[
-                    'h-3 w-3 shrink-0 text-[var(--faint)] transition',
-                    isTaskFolderCollapsed(folder.folder) ? '-rotate-90' : '',
-                  ]"
-                />
-                <span class="kicker min-w-0 flex-1 truncate">{{ folderLabel(folder.folder) }}</span>
-                <span
-                  v-if="folder.entries[0]?.prefix_path"
-                  class="readout max-w-[10rem] shrink-0 truncate text-[10px] text-[var(--faint)]"
-                  :title="folder.entries[0].prefix_path"
+                <button
+                  type="button"
+                  class="flex min-w-0 flex-1 items-center gap-1 text-left transition hover:opacity-90"
+                  :title="isTaskFolderCollapsed(folder.folder) ? 'expand' : 'collapse'"
+                  @click="toggleTaskFolder(folder.folder)"
                 >
-                  {{ truncatePath(folder.entries[0].prefix_path) }}
+                  <ChevronDown
+                    :class="[
+                      'h-3 w-3 shrink-0 text-[var(--faint)] transition',
+                      isTaskFolderCollapsed(folder.folder) ? '-rotate-90' : '',
+                    ]"
+                  />
+                  <span class="kicker min-w-0 flex-1 truncate">{{ folderLabel(folder.folder) }}</span>
+                </button>
+                <span
+                  class="readout shrink-0 text-[10px] text-[var(--faint)]"
+                  :title="`${folder.entries.length} 个 task`"
+                >
+                  {{ folder.entries.length }} tasks
                 </span>
-                <span class="readout shrink-0 text-[10px] text-[var(--faint)]">{{ folder.entries.length }}</span>
-              </button>
+                <PathActions
+                  v-if="folder.entries[0]?.prefix_path"
+                  :prefix-path="folder.entries[0].prefix_path"
+                  @copied="showCopyFlash"
+                  @error="error = $event"
+                />
+              </div>
               <template v-if="!isTaskFolderCollapsed(folder.folder)">
                 <article
                   v-for="task in folder.entries"
@@ -679,7 +722,7 @@ onBeforeUnmount(() => {
                   <div
                     class="flex min-w-0 flex-1 cursor-copy items-center gap-1.5"
                     :title="taskHoverTitle(task)"
-                    @dblclick="copyGroupTaskSnippet(task)"
+                    @dblclick="copyTaskName(task)"
                   >
                     <h3 class="truncate text-[13px] font-medium text-[var(--ink-bright)]">{{ task.name }}</h3>
                     <span
@@ -754,6 +797,14 @@ onBeforeUnmount(() => {
                     <button
                       class="btn !px-1.5 !py-1"
                       type="button"
+                      title="copy group snippet"
+                      @click="copyGroupTaskSnippet(task)"
+                    >
+                      <Copy class="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      class="btn !px-1.5 !py-1"
+                      type="button"
                       title="edit"
                       @click="openEdit('task', task.prefix_path, task.id)"
                     >
@@ -791,12 +842,17 @@ onBeforeUnmount(() => {
               >
                 <p class="kicker min-w-0 flex-1 truncate">{{ folderLabel(folder.folder) }}</p>
                 <span
-                  v-if="folder.entries[0]?.prefix_path"
-                  class="readout max-w-[10rem] shrink-0 truncate text-[10px] text-[var(--faint)]"
-                  :title="folder.entries[0].prefix_path"
+                  class="readout shrink-0 text-[10px] text-[var(--faint)]"
+                  :title="`${folder.entries.length} 个 group`"
                 >
-                  {{ truncatePath(folder.entries[0].prefix_path) }}
+                  {{ folder.entries.length }} groups
                 </span>
+                <PathActions
+                  v-if="folder.entries[0]?.prefix_path"
+                  :prefix-path="folder.entries[0].prefix_path"
+                  @copied="showCopyFlash"
+                  @error="error = $event"
+                />
               </div>
               <article
                 v-for="group in folder.entries"
@@ -967,43 +1023,43 @@ onBeforeUnmount(() => {
     <div
       v-if="settingsPanelOpen"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
-      @click.self="settingsPanelOpen = false"
+      @click.self="dismissSettingsBackdrop"
     >
       <div
         class="flex h-[min(640px,calc(100vh-2rem))] w-[min(520px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--bg-1)]"
       >
         <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
           <h3 class="text-sm font-medium">Setting</h3>
-          <button class="btn !px-2 !py-1" type="button" @click="settingsPanelOpen = false">
+          <button class="btn !px-2 !py-1" type="button" @click="closeSettingsPanel">
             <X class="h-4 w-4" />
           </button>
         </div>
-        <SettingPanel @close="settingsPanelOpen = false" @saved="load" />
+        <SettingPanel @close="closeSettingsPanel" @saved="load" />
       </div>
     </div>
 
     <div
       v-if="agentHelpPanelOpen"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
-      @click.self="agentHelpPanelOpen = false"
+      @click.self="dismissAgentHelpBackdrop"
     >
       <div
         class="flex h-[min(720px,calc(100vh-2rem))] w-[min(820px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--bg-1)]"
       >
         <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
           <h3 class="text-sm font-medium">AgentHelp</h3>
-          <button class="btn !px-2 !py-1" type="button" @click="agentHelpPanelOpen = false">
+          <button class="btn !px-2 !py-1" type="button" @click="closeAgentHelpPanel">
             <X class="h-4 w-4" />
           </button>
         </div>
-        <AgentHelpPanel @close="agentHelpPanelOpen = false" />
+        <AgentHelpPanel @close="closeAgentHelpPanel" />
       </div>
     </div>
 
     <div
       v-if="yamlEditor"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
-      @click.self="closeYamlEditor"
+      @click.self="dismissYamlEditorBackdrop"
     >
       <div
         class="flex h-[min(760px,calc(100vh-2rem))] w-[min(920px,calc(100vw-2rem))] flex-col overflow-visible rounded-md border border-[var(--line)] bg-[var(--bg-1)]"

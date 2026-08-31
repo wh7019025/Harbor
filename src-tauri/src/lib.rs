@@ -1,4 +1,5 @@
 mod agent_home;
+mod path_open;
 mod settings;
 mod system_metrics;
 mod taskcard;
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent_home::{agent_help_info, sync_agent_doc, AgentHelpInfo};
+use path_open::{detect_path_openers, open_path_with, PathOpeners};
 use parking_lot::Mutex;
 use serde::Serialize;
 use settings::{expand_path, load_settings, save_settings, Settings};
@@ -403,6 +405,27 @@ fn refresh_agent_doc() -> Result<AgentHelpInfo, String> {
     sync_agent_doc()
 }
 
+#[tauri::command]
+fn path_openers() -> PathOpeners {
+    detect_path_openers()
+}
+
+#[tauri::command]
+fn path_open(path: String, target: String) -> Result<(), String> {
+    open_path_with(path.as_str(), target.as_str())
+}
+
+#[tauri::command]
+fn taskcard_resolve_config_base_path(
+    state: State<'_, Arc<AppState>>,
+    prefix_path: String,
+) -> String {
+    state
+        .taskcard
+        .lock()
+        .resolve_config_base_path(prefix_path.as_str())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Err(error) = sync_agent_doc() {
@@ -459,6 +482,9 @@ pub fn run() {
             check_app_update,
             get_agent_help,
             refresh_agent_doc,
+            path_openers,
+            path_open,
+            taskcard_resolve_config_base_path,
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("task-click") {

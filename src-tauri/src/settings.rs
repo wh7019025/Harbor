@@ -182,6 +182,30 @@ pub fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+pub fn collapse_path(path: &Path) -> String {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        expand_path(path.to_string_lossy().as_ref())
+    };
+    let home = home_dir();
+    if absolute == home {
+        return "~/".into();
+    }
+    if let Ok(rel) = absolute.strip_prefix(&home) {
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if rel.is_empty() || rel == "." {
+            return "~/".into();
+        }
+        return format!("~/{rel}/");
+    }
+    let mut display = absolute.to_string_lossy().replace('\\', "/");
+    if !display.ends_with('/') {
+        display.push('/');
+    }
+    display
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +249,16 @@ mod tests {
                 harbor.display().to_string()
             );
         }
+    }
+
+    #[test]
+    fn collapse_path_uses_tilde_for_home() {
+        let home = home_dir();
+        assert_eq!(collapse_path(home.as_path()), "~/");
+        assert_eq!(collapse_path(&home.join(".harbor")), "~/.harbor/");
+        assert_eq!(
+            collapse_path(&home.join("projects/demo")),
+            "~/projects/demo/"
+        );
     }
 }

@@ -1,6 +1,6 @@
 # Task YAML
 
-完整示例（Agent 直接写文件时，`version` 需手动设为 `harbor --version` 的输出）：
+完整示例（Agent 直接写**新**文件时，`version` 原样设为 `harbor --version` 的输出；修改已有文件且 version 已正确时不必改）：
 
 ```yaml
 version: "0.1.2-rc3"
@@ -37,7 +37,7 @@ command:
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `version` | 是 | Harbor 应用版本（`harbor --version`）。**通过 Harbor API 保存时自动维护**；**Agent 直接编辑 YAML 文件时须手动写入当前版本**。详见 [version.md](../version.md) |
+| `version` | 是 | Harbor **应用**版本（`harbor --version` 的原样输出），不是配置修订号。**API 保存时自动维护**；Agent 直接编辑时仅在旧值或与应用不一致时更新，**禁止自行递增 rc 号**。详见 [version.md](../version.md) |
 | `id` | 是 | 字母数字、`-`、`_`；同一 `tasks/` 目录内唯一 |
 | `name` | 否 | 显示名；省略或空时 UI 显示 `id` |
 | `description` | 否 | 任务说明（可为 `""`）。**Agent 编写时尽量用中文**，简要说明任务用途；无说明时可留空 |
