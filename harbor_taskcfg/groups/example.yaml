@@ -1,0 +1,12 @@
+version: "0.1.4"
+id: example
+name: Example
+description: 示例编排：先用 quick config 跑 Config Demo，再跑 Demo Ping
+tasks:
+  - task: config-demo
+    config: quick
+    wait_after_sec: 0
+    env: {}
+  - task: demo-ping
+    wait_after_sec: 0
+    env: {}

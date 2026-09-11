@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { writeClipboardText } from "../lib/clipboard";
 import { sanitizeLogText } from "../lib/logText";
 
 const props = defineProps<{
   content: string;
+}>();
+
+const emit = defineEmits<{
+  copied: [];
 }>();
 
 const viewport = ref<HTMLElement | null>(null);
@@ -63,7 +68,14 @@ function syncContent(reset = false) {
   if (next.length === renderedLength) return;
 
   if (shouldFollowLive()) {
-    el.append(document.createTextNode(next.slice(renderedLength)));
+    let node = el.firstChild;
+    if (!(node instanceof Text)) {
+      el.textContent = next;
+      renderedLength = next.length;
+      scrollToBottom();
+      return;
+    }
+    node.appendData(next.slice(renderedLength));
     renderedLength = next.length;
     scrollToBottom();
     return;
@@ -86,19 +98,45 @@ function onPointerDown() {
   pointerSelecting = true;
 }
 
-function onPointerUp() {
+function onDocumentMouseUp() {
+  if (!pointerSelecting) return;
   pointerSelecting = false;
   const el = viewport.value;
   if (!el) return;
-  if (!hasSelectionInside()) {
-    stickToBottom.value = isNearBottom(el);
+  if (hasSelectionInside()) {
+    stickToBottom.value = false;
+    return;
   }
+  stickToBottom.value = isNearBottom(el);
   if (renderedLength < displayContent.value.length) {
     syncContent(true);
     if (shouldFollowLive()) scrollToBottom();
     return;
   }
   syncContent();
+}
+
+function selectedLogText() {
+  if (hasSelectionInside()) {
+    return window.getSelection()?.toString() ?? "";
+  }
+  return displayContent.value;
+}
+
+async function copyLog() {
+  const text = selectedLogText();
+  if (!text) return;
+  await writeClipboardText(text);
+  emit("copied");
+}
+
+function onCopy(event: ClipboardEvent) {
+  if (!hasSelectionInside() && document.activeElement !== viewport.value) return;
+  event.preventDefault();
+  const text = selectedLogText();
+  if (!text) return;
+  event.clipboardData?.setData("text/plain", text);
+  emit("copied");
 }
 
 function onScroll() {
@@ -127,21 +165,26 @@ onMounted(async () => {
   await nextTick();
   syncContent(true);
   document.addEventListener("selectionchange", onSelectionChange);
+  document.addEventListener("mouseup", onDocumentMouseUp);
+  document.addEventListener("copy", onCopy);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("selectionchange", onSelectionChange);
+  document.removeEventListener("mouseup", onDocumentMouseUp);
+  document.removeEventListener("copy", onCopy);
 });
+
+defineExpose({ copyLog });
 </script>
 
 <template>
   <div class="relative flex min-h-0 flex-1 flex-col">
     <pre
       ref="viewport"
-      class="log-viewport min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)]"
+      tabindex="0"
+      class="log-viewport min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-[var(--ink)] outline-none"
       @mousedown="onPointerDown"
-      @mouseup="onPointerUp"
-      @mouseleave="onPointerUp"
       @scroll="onScroll"
     />
     <button

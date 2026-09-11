@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { editor } from "monaco-editor";
+import { writeClipboardText } from "../lib/clipboard";
 import { sanitizeLogText } from "../lib/logText";
 
 const props = defineProps<{
   content: string;
 }>();
 
+const emit = defineEmits<{
+  copied: [];
+}>();
+
 const container = ref<HTMLElement | null>(null);
 let instance: editor.IStandaloneCodeEditor | null = null;
+let copiedAt = 0;
 
 function displayText(content: string) {
   return sanitizeLogText(content);
@@ -18,6 +24,33 @@ function hasSelectionInEditor() {
   if (!instance) return false;
   const selection = instance.getSelection();
   return selection != null && !selection.isEmpty();
+}
+
+function selectedLogText() {
+  const model = instance?.getModel();
+  const selection = instance?.getSelection();
+  if (model && selection && !selection.isEmpty()) {
+    return model.getValueInRange(selection);
+  }
+  return model?.getValue() ?? displayText(props.content);
+}
+
+function notifyCopied() {
+  const now = Date.now();
+  if (now - copiedAt < 400) return;
+  copiedAt = now;
+  emit("copied");
+}
+
+async function copyLog() {
+  const text = selectedLogText();
+  if (!text) return;
+  await writeClipboardText(text);
+  notifyCopied();
+}
+
+function onEditorCopy() {
+  notifyCopied();
 }
 
 function scrollToBottom() {
@@ -48,6 +81,10 @@ onMounted(async () => {
     overviewRulerLanes: 0,
     contextmenu: true,
   });
+  instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC, () => {
+    void copyLog();
+  });
+  container.value.addEventListener("copy", onEditorCopy, true);
   scrollToBottom();
 });
 
@@ -63,8 +100,11 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  container.value?.removeEventListener("copy", onEditorCopy, true);
   instance?.dispose();
 });
+
+defineExpose({ copyLog });
 </script>
 
 <template>

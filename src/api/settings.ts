@@ -5,6 +5,14 @@ export interface Settings {
   search_paths: string[];
   metrics_fast_ms: number;
   metrics_slow_ms: number;
+  web_api_localhost_only: boolean;
+}
+
+export interface WebApiStatus {
+  localhost_only: boolean;
+  port: number;
+  listen_url: string;
+  error: string | null;
 }
 
 export function getSettings() {
@@ -13,6 +21,10 @@ export function getSettings() {
 
 export function updateSettings(next: Settings) {
   return invoke<Settings>("update_settings", { next });
+}
+
+export function getWebApiStatus() {
+  return invoke<WebApiStatus>("get_web_api_status");
 }
 
 export interface AppUpdateInfo {

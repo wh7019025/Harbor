@@ -20,6 +20,7 @@
 |------|------|
 | [version.md](version.md) | 获取并维护 YAML `version` |
 | [settings.md](settings.md) | 配置根目录和项目发现路径 |
+| [web_api.md](web_api.md) | Harbor 运行期间的第三方 HTTP 接口 |
 | [taskcard/paths.md](taskcard/paths.md) | Task / Group 的存放与发现规则 |
 | [taskcard/create.md](taskcard/create.md) | Agent 直接创建 Task / Group 的流程 |
 | [yaml/task.md](yaml/task.md) | Task YAML 格式与规则 |

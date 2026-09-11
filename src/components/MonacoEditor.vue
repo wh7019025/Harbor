@@ -10,11 +10,16 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
+  copied: [];
 }>();
 
 const container = ref<HTMLElement | null>(null);
 let instance: editor.IStandaloneCodeEditor | null = null;
 let subscription: { dispose(): void } | null = null;
+
+function onEditorCopy() {
+  emit("copied");
+}
 
 async function loadMonaco() {
   const monaco = await import("monaco-editor/esm/vs/editor/editor.api.js");
@@ -47,6 +52,7 @@ onMounted(async () => {
   subscription = instance.onDidChangeModelContent(() => {
     emit("update:modelValue", instance?.getValue() ?? "");
   });
+  container.value.addEventListener("copy", onEditorCopy, true);
 });
 
 watch(
@@ -57,6 +63,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  container.value?.removeEventListener("copy", onEditorCopy, true);
   subscription?.dispose();
   instance?.dispose();
 });

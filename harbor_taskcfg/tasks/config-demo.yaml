@@ -1,0 +1,37 @@
+version: "0.1.4"
+id: config-demo
+name: Config Demo
+description: 演示同一任务通过不同 Config 覆盖环境变量
+workdir: $(harbor_taskcfg_dir)/..
+env:
+  MESSAGE: Harbor
+  COUNT: "5"
+  INTERVAL: "1"
+configs:
+  - id: quick
+    name: 快速运行
+    env:
+      MESSAGE: Quick
+      COUNT: "3"
+      INTERVAL: "0.2"
+  - id: normal
+    name: 标准运行
+    env:
+      MESSAGE: Normal
+  - id: long
+    name: 长时间运行
+    env:
+      MESSAGE: Long
+      COUNT: "15"
+      INTERVAL: "2"
+default_config: normal
+sudo: false
+command:
+  shell: sh
+  script: |
+    i=1
+    while [ "$i" -le "$COUNT" ]; do
+      echo "$MESSAGE [$i/$COUNT] $(date '+%H:%M:%S')"
+      sleep "$INTERVAL"
+      i=$((i + 1))
+    done

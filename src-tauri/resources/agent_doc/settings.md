@@ -4,7 +4,7 @@
 
 Search Paths 是 Agent 创建和维护项目 Task / Group 配置的一部分。Agent 可以直接维护 `search_paths`，无需指导用户操作界面。
 
-Agent 只应修改 `taskcard_root` 和 `search_paths`；其他 Harbor 设置必须保留原值。
+Agent 只应修改 `taskcard_root` 和 `search_paths`；其他 Harbor 设置必须保留原值，包括 `web_api_localhost_only`。
 
 ```json
 {
@@ -19,6 +19,7 @@ Agent 只应修改 `taskcard_root` 和 `search_paths`；其他 Harbor 设置必�
 |------|------|------|
 | `taskcard_root` | string | 全局 Task / Group 配置根目录；支持绝对路径、`~/...` 或相对 HOME 的路径 |
 | `search_paths` | string[] | Harbor 搜索项目配置的起点目录 |
+| `web_api_localhost_only` | bool | Web API 是否仅监听 127.0.0.1；默认 `true`。Agent 不要改这个字段 |
 
 文件不存在时，Harbor 使用内置默认值：空 `search_paths`，`taskcard_root` 为 `~/.harbor/harbor_taskcfg`。
 

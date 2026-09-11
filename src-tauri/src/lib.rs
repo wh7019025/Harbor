@@ -3,6 +3,7 @@ mod path_open;
 mod settings;
 mod system_metrics;
 mod taskcard;
+mod web_api;
 pub mod update;
 pub mod version;
 
@@ -30,7 +31,8 @@ use tauri::{Manager, State};
 struct AppState {
     settings: Mutex<Settings>,
     metrics: Mutex<SystemMetricsSampler>,
-    taskcard: Mutex<TaskCardService>,
+    taskcard: Arc<Mutex<TaskCardService>>,
+    web_api: Mutex<web_api::WebApiRuntime>,
 }
 
 fn make_taskcard(settings: &Settings) -> Result<TaskCardService, String> {
@@ -60,15 +62,34 @@ fn update_settings(state: State<'_, Arc<AppState>>, next: Settings) -> Result<Se
         return Err("taskcard_root cannot be empty".into());
     }
 
-    {
-        let current = state.taskcard.lock();
-        let _ = current.stop_all();
+    let current = state.settings.lock().clone();
+    let rebuild_taskcard = current.taskcard_root != next.taskcard_root
+        || current.search_paths != next.search_paths;
+    if rebuild_taskcard {
+        let _ = state.taskcard.lock().stop_all();
     }
 
     save_settings(&next)?;
     *state.settings.lock() = next.clone();
-    *state.taskcard.lock() = make_taskcard(&next)?;
+    if rebuild_taskcard {
+        *state.taskcard.lock() = make_taskcard(&next)?;
+    }
+    if current.web_api_localhost_only != next.web_api_localhost_only {
+        let mut runtime = state.web_api.lock();
+        web_api::start(
+            web_api::WebApiState {
+                taskcard: state.taskcard.clone(),
+            },
+            next.web_api_localhost_only,
+            &mut runtime,
+        );
+    }
     Ok(next)
+}
+
+#[tauri::command]
+fn get_web_api_status(state: State<'_, Arc<AppState>>) -> web_api::WebApiStatus {
+    state.web_api.lock().status.clone()
 }
 
 #[tauri::command]
@@ -176,11 +197,13 @@ fn taskcard_start_task(
     state: State<'_, Arc<AppState>>,
     prefix_path: String,
     id: String,
+    config_id: Option<String>,
     sudo_password: Option<String>,
 ) -> Result<(), String> {
     state.taskcard.lock().start_task(
         prefix_path.as_str(),
         id.as_str(),
+        config_id.as_deref(),
         &HashMap::new(),
         sudo_password.as_deref(),
     )
@@ -203,11 +226,13 @@ fn taskcard_restart_task(
     state: State<'_, Arc<AppState>>,
     prefix_path: String,
     id: String,
+    config_id: Option<String>,
     sudo_password: Option<String>,
 ) -> Result<(), String> {
     state.taskcard.lock().restart_task(
         prefix_path.as_str(),
         id.as_str(),
+        config_id.as_deref(),
         &HashMap::new(),
         sudo_password.as_deref(),
     )
@@ -442,7 +467,8 @@ pub fn run() {
     let state = Arc::new(AppState {
         settings: Mutex::new(settings),
         metrics: Mutex::new(SystemMetricsSampler::default()),
-        taskcard: Mutex::new(taskcard),
+        taskcard: Arc::new(Mutex::new(taskcard)),
+        web_api: Mutex::new(web_api::WebApiRuntime::default()),
     });
 
     tauri::Builder::default()
@@ -451,6 +477,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             update_settings,
+            get_web_api_status,
             get_system_metrics,
             get_fast_system_metrics,
             get_slow_system_metrics,
@@ -487,11 +514,23 @@ pub fn run() {
             taskcard_resolve_config_base_path,
         ])
         .setup(|app| {
+            let state = app.state::<Arc<AppState>>().inner().clone();
+            {
+                let localhost_only = state.settings.lock().web_api_localhost_only;
+                let mut runtime = state.web_api.lock();
+                web_api::start(
+                    web_api::WebApiState {
+                        taskcard: state.taskcard.clone(),
+                    },
+                    localhost_only,
+                    &mut runtime,
+                );
+            }
             if let Some(window) = app.get_webview_window("task-click") {
                 let handle = app.handle().clone();
-                let state = app.state::<Arc<AppState>>().inner().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        web_api::stop(&mut state.web_api.lock());
                         for error in state.taskcard.lock().stop_all() {
                             eprintln!("stop task on exit failed: {error}");
                         }

@@ -3,14 +3,14 @@
 
 | 名称   | 当前值       | 命令行                |
 | ---- | --------- | ------------------ |
-| 应用版本 | 0.1.3 | `harbor --version` |
+| 应用版本 | 0.1.4 | `harbor --version` |
 
 
 机器可读：`~/.harbor/version.json`（Harbor 启动时更新）
 
 ## Task / Group YAML 中的 `version`
 
-YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` 相同，例如 `"0.1.3"`）。
+YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` 相同，例如 `"0.1.4"`）。
 
 **不是** Task / Group 的修订号或「改一次加一」的版本计数。
 
@@ -38,6 +38,6 @@ YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` �
 harbor --version
 ```
 
-并将结果写入 YAML，例如 `version: "0.1.3"`（建议加引号）。同一应用版本下无论改多少次 Task / Group，此值保持不变。
+并将结果写入 YAML，例如 `version: "0.1.4"`（建议加引号）。同一应用版本下无论改多少次 Task / Group，此值保持不变。
 
 详见 [yaml/task.md](yaml/task.md)、[yaml/group.md](yaml/group.md)。

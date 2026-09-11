@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Settings } from "./settings";
 
+export interface TaskCardConfig {
+  id: string;
+  name: string;
+  env: Record<string, string>;
+}
+
 export interface TaskCardTask {
   id: string;
   prefix_path: string;
@@ -9,6 +15,9 @@ export interface TaskCardTask {
   workdir: string;
   command: string;
   env_count: number;
+  configs: TaskCardConfig[];
+  default_config?: string;
+  running_config_id?: string;
   requires_sudo: boolean;
   folder: string;
   status: "running" | "stopped";
@@ -19,6 +28,7 @@ export interface TaskCardTask {
 
 export interface TaskCardGroupTask {
   task: string;
+  config?: string;
   wait_after_sec: number;
   env: Record<string, string>;
   prefix_path?: string;
@@ -53,6 +63,7 @@ export interface ResearchResult {
 export interface TaskLogSummary {
   file: string;
   task_id: string;
+  config_id?: string;
   started_at_ms: number;
   modified_at_ms: number;
   bytes: number;
@@ -93,10 +104,11 @@ export function removeSearchPath(path: string) {
   return invoke<Settings>("taskcard_remove_search_path", { path });
 }
 
-export function startTask(prefixPath: string, id: string, sudoPassword?: string) {
+export function startTask(prefixPath: string, id: string, configId?: string, sudoPassword?: string) {
   return invoke<void>("taskcard_start_task", {
     prefixPath,
     id,
+    configId: configId || null,
     sudoPassword: sudoPassword ?? null,
   });
 }
@@ -105,10 +117,11 @@ export function stopTask(prefixPath: string, id: string) {
   return invoke<void>("taskcard_stop_task", { prefixPath, id });
 }
 
-export function restartTask(prefixPath: string, id: string, sudoPassword?: string) {
+export function restartTask(prefixPath: string, id: string, configId?: string, sudoPassword?: string) {
   return invoke<void>("taskcard_restart_task", {
     prefixPath,
     id,
+    configId: configId || null,
     sudoPassword: sudoPassword ?? null,
   });
 }

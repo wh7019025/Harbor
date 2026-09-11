@@ -10,6 +10,12 @@ pub struct Settings {
     pub search_paths: Vec<String>,
     pub metrics_fast_ms: u64,
     pub metrics_slow_ms: u64,
+    #[serde(default = "default_true")]
+    pub web_api_localhost_only: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -19,6 +25,7 @@ impl Default for Settings {
             search_paths: Vec::new(),
             metrics_fast_ms: 1000,
             metrics_slow_ms: 10000,
+            web_api_localhost_only: true,
         }
     }
 }
@@ -260,5 +267,18 @@ mod tests {
             collapse_path(&home.join("projects/demo")),
             "~/projects/demo/"
         );
+    }
+
+    #[test]
+    fn web_api_localhost_only_defaults_true() {
+        let settings: Settings = serde_json::from_str(
+            r#"{
+                "taskcard_root": "~/.harbor/harbor_taskcfg",
+                "metrics_fast_ms": 1000,
+                "metrics_slow_ms": 10000
+            }"#,
+        )
+        .unwrap();
+        assert!(settings.web_api_localhost_only);
     }
 }

@@ -5,9 +5,11 @@ import {
   checkAppUpdate,
   getAppVersion,
   getSettings,
+  getWebApiStatus,
   updateSettings,
   type AppUpdateInfo,
   type Settings,
+  type WebApiStatus,
 } from "../api/settings";
 
 const emit = defineEmits<{
@@ -20,9 +22,11 @@ const form = ref<Settings>({
   search_paths: [],
   metrics_fast_ms: 1000,
   metrics_slow_ms: 10000,
+  web_api_localhost_only: true,
 });
 const searchPathsText = ref("");
-const version = ref("0.1.3");
+const version = ref("0.1.4");
+const webApiStatus = ref<WebApiStatus | null>(null);
 const updateInfo = ref<AppUpdateInfo | null>(null);
 const checkingUpdate = ref(false);
 const saving = ref(false);
@@ -32,8 +36,12 @@ const error = ref("");
 onMounted(async () => {
   try {
     form.value = await getSettings();
+    if (form.value.web_api_localhost_only === undefined) {
+      form.value.web_api_localhost_only = true;
+    }
     searchPathsText.value = (form.value.search_paths ?? []).join("\n");
     version.value = await getAppVersion();
+    webApiStatus.value = await getWebApiStatus();
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   }
@@ -65,6 +73,7 @@ async function save() {
       .filter(Boolean);
     form.value = await updateSettings({ ...form.value, search_paths });
     searchPathsText.value = form.value.search_paths.join("\n");
+    webApiStatus.value = await getWebApiStatus();
     message.value = "已写入 settings.json";
     emit("saved");
   } catch (err) {
@@ -108,6 +117,25 @@ async function save() {
         min="1000"
         step="500"
       />
+    </label>
+    <label class="block">
+      <span class="kicker">web api</span>
+      <span class="mt-2 flex items-center gap-2 text-sm text-[var(--ink)]">
+        <input v-model="form.web_api_localhost_only" type="checkbox" />
+        localhost only
+      </span>
+      <p class="readout mt-1 text-xs text-[var(--faint)]">
+        {{ webApiStatus?.listen_url ?? "http://127.0.0.1:17890" }}
+      </p>
+      <p
+        v-if="!form.web_api_localhost_only"
+        class="readout mt-1 text-xs text-[var(--danger)]"
+      >
+        无鉴权，局域网可起停任务
+      </p>
+      <p v-if="webApiStatus?.error" class="readout mt-1 text-xs text-[#f48771]">
+        {{ webApiStatus.error }}
+      </p>
     </label>
 
     <p v-if="message" class="readout text-sm text-[var(--accent)]">{{ message }}</p>

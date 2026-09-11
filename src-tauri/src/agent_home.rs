@@ -24,6 +24,10 @@ const BUNDLED_DOCS: &[(&str, &str)] = &[
         include_str!("../resources/agent_doc/settings.md"),
     ),
     (
+        "web_api.md",
+        include_str!("../resources/agent_doc/web_api.md"),
+    ),
+    (
         "version.md",
         include_str!("../resources/agent_doc/version.md"),
     ),
@@ -137,11 +141,37 @@ pub fn agent_help_info() -> AgentHelpInfo {
     let files = list_doc_files(&doc_dir);
     let mcp_script = home.join("mcp").join("index.mjs");
     let prompt = format!(
-        "请先阅读 Harbor Task / Group 配置手册：{}\n\
-优先打开 AgentDoc.md，再按需读取 yaml/task.md、yaml/group.md 和 taskcard/paths.md。\n\
-这里只包含创建和维护 Task / Group 配置所需的知识；界面和其他产品功能不需要关注。\n\
-Agent 直接修改 YAML 时，version 须原样等于 `harbor --version`；禁止自行递增 rc 号，已有正确 version 时不要改；详见 version.md。\n\
-Task / Group 的 description 尽量用中文简要说明用途。",
+        "Harbor 使用规范\n\
+\n\
+1. Harbor 是什么\n\
+Harbor 是本机任务控制台：用 YAML 定义 Task / Group，在桌面里启动、停止、看日志。Harbor 进程在跑时，也提供无鉴权 HTTP 接口（默认 http://127.0.0.1:17890）。\n\
+\n\
+2. Harbor 提供什么功能\n\
+- Task：一条可运行命令；可用 configs 覆盖 env，同一 Task 同时只能跑一份\n\
+- Group：按顺序拉起多条 Task，可指定 config 和额外 env\n\
+- 发现：全局 ~/.harbor/harbor_taskcfg，以及 search_paths 下最多 5 层的项目 harbor_taskcfg\n\
+- Web API：列表、起停、日志；Harbor 关闭后接口消失\n\
+\n\
+3. Harbor 的文档如何阅读\n\
+文档目录：{}\n\
+先读 AgentDoc.md（索引和工作流），再按需打开：\n\
+- yaml/task.md、yaml/group.md：YAML 格式\n\
+- taskcard/paths.md、taskcard/create.md：存放位置和创建流程\n\
+- settings.md：search_paths / taskcard_root\n\
+- version.md：YAML version 规则\n\
+- web_api.md：HTTP 接口\n\
+- tips.md：修改时的安全检查\n\
+\n\
+4. Agent 应该关注什么\n\
+只负责创建和维护 Task / Group YAML，以及必要时直接改 ~/.harbor/settings.json 里的 search_paths。不要管界面布局、按钮、监控面板。项目配置写在仓库的 harbor_taskcfg/；用户没要求 Group 就不要编 Group。\n\
+用户可能希望 Agent 控制 Harbor 的运行行为（列表、起停、看日志等）。Harbor 开着时，Agent 可灵活调用 Web API（见 web_api.md）完成这些需求，不必指挥用户点界面。\n\
+\n\
+注意事项\n\
+- YAML version 必须原样等于 `harbor --version`。禁止自行递增 rc 号；已是当前应用版本时不要改 version。详见 version.md。\n\
+- description 尽量用中文说明用途。\n\
+- 定位 Task 用 (prefix_path, id)；同名 id 可跨项目存在。\n\
+- 不要改正在运行的 Task 定义，先停再改。\n\
+- 未要求变更的字段、命令、环境变量一律保留。",
         doc_dir.display()
     );
     AgentHelpInfo {

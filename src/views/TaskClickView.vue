@@ -24,6 +24,7 @@ import HistoricalLogViewer from "../components/HistoricalLogViewer.vue";
 import LiveLogViewer from "../components/LiveLogViewer.vue";
 import MonacoEditor from "../components/MonacoEditor.vue";
 import SettingPanel from "../components/SettingPanel.vue";
+import SelectField from "../components/SelectField.vue";
 import TaskMetricsFooter from "../components/TaskMetricsFooter.vue";
 import PathActions from "../components/PathActions.vue";
 import {
@@ -96,6 +97,10 @@ const deletePrompt = ref<{
 } | null>(null);
 const copyFlash = ref("");
 const collapsedTaskFolders = ref<Set<string>>(loadCollapsedTaskFolders());
+const selectedConfigByTask = ref<Record<string, string>>({});
+const selectedGroupKey = ref<string | null>(null);
+const liveLogRef = ref<{ copyLog: () => Promise<void> } | null>(null);
+const historicalLogRef = ref<{ copyLog: () => Promise<void> } | null>(null);
 let timer: number | null = null;
 let logTimer: number | null = null;
 let copyFlashTimer: number | null = null;
@@ -119,6 +124,22 @@ const discoveredSummary = computed(() => {
 });
 const selectedLogItem = computed(() => logs.value.find((item) => item.file === selectedLog.value) ?? null);
 const selectedLogActive = computed(() => selectedLogItem.value?.active ?? false);
+
+function formatLogStartedAt(timestamp: number) {
+  const date = new Date(timestamp);
+  const twoDigits = (value: number) => value.toString().padStart(2, "0");
+  return [
+    twoDigits(date.getFullYear() % 100),
+    twoDigits(date.getMonth() + 1),
+    twoDigits(date.getDate()),
+    "-",
+    twoDigits(date.getHours()),
+    ":",
+    twoDigits(date.getMinutes()),
+    ":",
+    twoDigits(date.getSeconds()),
+  ].join("");
+}
 
 function groupByFolder<T extends { folder: string }>(items: T[]) {
   const folders = new Map<string, T[]>();
@@ -163,6 +184,32 @@ function instanceKey(prefixPath: string, id: string) {
   return `${prefixPath}\0${id}`;
 }
 
+function defaultTaskConfigId(task: TaskCardTask) {
+  return task.default_config || task.configs[0]?.id || "";
+}
+
+function selectedTaskConfigId(task: TaskCardTask) {
+  return selectedConfigByTask.value[instanceKey(task.prefix_path, task.id)] || defaultTaskConfigId(task);
+}
+
+function selectTaskConfig(task: TaskCardTask, configId: string) {
+  selectedConfigByTask.value = {
+    ...selectedConfigByTask.value,
+    [instanceKey(task.prefix_path, task.id)]: configId,
+  };
+}
+
+function syncTaskConfigSelections(tasks: TaskCardTask[]) {
+  const next = { ...selectedConfigByTask.value };
+  for (const task of tasks) {
+    const key = instanceKey(task.prefix_path, task.id);
+    if (!task.configs.some((config) => config.id === next[key])) {
+      next[key] = task.running_config_id || defaultTaskConfigId(task);
+    }
+  }
+  selectedConfigByTask.value = next;
+}
+
 function resolveTaskRef(
   taskId: string,
   groupPrefixPath: string,
@@ -188,10 +235,11 @@ function showCopyFlash(message: string) {
 }
 
 function groupTaskSnippet(task: TaskCardTask) {
-  return [
-    `  - task: ${task.id}`,
-    "    wait_after_sec: 0",
-  ].join("\n");
+  const lines = [`  - task: ${task.id}`];
+  const configId = selectedTaskConfigId(task);
+  if (configId) lines.push(`    config: ${configId}`);
+  lines.push("    wait_after_sec: 0");
+  return lines.join("\n");
 }
 
 async function flashCopy(message: string, write: () => Promise<void>) {
@@ -204,14 +252,35 @@ async function flashCopy(message: string, write: () => Promise<void>) {
 }
 
 async function copyTaskName(task: TaskCardTask) {
-  const name = task.name.trim() || task.id;
-  await flashCopy(`已复制 ${name}`, () => navigator.clipboard.writeText(name));
+  const text = taskCopyText(task);
+  await flashCopy(`已复制 ${text}`, () => navigator.clipboard.writeText(text));
+}
+
+function taskCopyText(task: TaskCardTask) {
+  const pwd = task.prefix_path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return `Harbor:${pwd}:${task.id}`;
 }
 
 async function copyGroupTaskSnippet(task: TaskCardTask) {
   await flashCopy(`已复制 group 片段: ${task.id}`, () =>
     navigator.clipboard.writeText(groupTaskSnippet(task)),
   );
+}
+
+async function copySelectedLog() {
+  try {
+    if (selectedLogActive.value) {
+      await liveLogRef.value?.copyLog();
+      return;
+    }
+    await historicalLogRef.value?.copyLog();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+function onLogCopied() {
+  showCopyFlash("已复制 log");
 }
 
 function editFolderDisplay(kind: "task" | "group", prefixPath: string, id: string, relativeFolder: string) {
@@ -251,6 +320,7 @@ async function load(options: { preserveError?: boolean; scan?: boolean } = {}) {
     }
     const [nextSnapshot, nextLogs] = await Promise.all([fetchTaskCard(), fetchLogs()]);
     snapshot.value = nextSnapshot;
+    syncTaskConfigSelections(nextSnapshot.tasks);
     logs.value = nextLogs;
     if (!selectedLog.value && nextLogs.length > 0) {
       const preferred = nextLogs.find((item) => item.active) ?? nextLogs[0];
@@ -301,13 +371,37 @@ function resolvedGroupTask(group: TaskCardGroup, item: TaskCardGroupTask) {
   return resolveTaskRef(item.task, group.prefix_path, item.prefix_path ?? "");
 }
 
+function selectGroup(group: TaskCardGroup) {
+  const key = instanceKey(group.prefix_path, group.id);
+  selectedGroupKey.value = selectedGroupKey.value === key ? null : key;
+}
+
+function isGroupSelected(group: TaskCardGroup) {
+  return selectedGroupKey.value === instanceKey(group.prefix_path, group.id);
+}
+
+function isTaskInSelectedGroup(task: TaskCardTask) {
+  if (!selectedGroupKey.value) return false;
+  for (const group of snapshot.value?.groups ?? []) {
+    if (instanceKey(group.prefix_path, group.id) !== selectedGroupKey.value) continue;
+    return group.tasks.some((item) => {
+      const resolved = resolvedGroupTask(group, item);
+      return (
+        resolved !== undefined &&
+        instanceKey(resolved.prefix_path, resolved.id) === instanceKey(task.prefix_path, task.id)
+      );
+    });
+  }
+  return false;
+}
+
 function taskRunning(task: TaskCardTask | undefined) {
   return task?.status === "running";
 }
 
 function taskHoverTitle(task: TaskCardTask) {
   const description = task.description.trim();
-  const hint = "双击复制 task name";
+  const hint = `双击复制 ${taskCopyText(task)}`;
   return description ? `${description}\n\n${hint}` : hint;
 }
 
@@ -552,9 +646,6 @@ onBeforeUnmount(() => {
   <section class="st-shell flex h-full flex-col gap-2 px-3 py-2">
     <header class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex min-w-0 items-center gap-2">
-        <p class="readout truncate text-[11px] text-[var(--muted)]">
-          {{ snapshot?.root || "~/.harbor/harbor_taskcfg" }}
-        </p>
         <span v-if="copyFlash" class="readout shrink-0 text-[10px] text-[var(--accent)]">{{ copyFlash }}</span>
       </div>
       <div class="flex items-center gap-1">
@@ -717,107 +808,132 @@ onBeforeUnmount(() => {
                 <article
                   v-for="task in folder.entries"
                   :key="instanceKey(task.prefix_path, task.id)"
-                  class="flex items-center gap-2 border-b border-[var(--line-soft)] px-2 py-1.5"
+                  class="flex flex-col gap-1.5 border-b border-[var(--line-soft)] px-2 py-1.5"
+                  :class="
+                    isTaskInSelectedGroup(task)
+                      ? 'bg-[var(--surface-hover)] shadow-[inset_3px_0_0_0_var(--ink)]'
+                      : ''
+                  "
                 >
-                  <div
-                    class="flex min-w-0 flex-1 cursor-copy items-center gap-1.5"
-                    :title="taskHoverTitle(task)"
-                    @dblclick="copyTaskName(task)"
-                  >
-                    <h3 class="truncate text-[13px] font-medium text-[var(--ink-bright)]">{{ task.name }}</h3>
-                    <span
-                      class="readout shrink-0 rounded px-1 py-0.5 text-[10px] uppercase tracking-wide"
-                      :class="
-                        task.status === 'running'
-                          ? 'bg-[color-mix(in_srgb,var(--running)_22%,transparent)] text-[var(--running)]'
-                          : 'bg-[color-mix(in_srgb,var(--faint)_18%,transparent)] text-[var(--faint)]'
-                      "
+                  <div class="flex w-full items-center gap-2">
+                    <div
+                      class="flex min-w-0 flex-1 cursor-copy items-center gap-1.5"
+                      :title="taskHoverTitle(task)"
+                      @dblclick="copyTaskName(task)"
                     >
-                      {{ task.status }}
-                    </span>
-                    <span
-                      v-if="task.status === 'running' && task.pid"
-                      class="readout shrink-0 text-[10px] text-[var(--muted)]"
-                      :title="`pid ${task.pid}`"
-                    >
-                      pid {{ task.pid }}
-                    </span>
-                    <KeyRound v-if="task.requires_sudo" class="h-3 w-3 shrink-0 text-[var(--warn)]" />
+                      <h3 class="truncate text-[13px] font-medium text-[var(--ink-bright)]">{{ task.name }}</h3>
+                      <button
+                        class="shrink-0 text-[var(--faint)] transition hover:text-[var(--ink-bright)]"
+                        type="button"
+                        title="copy group snippet"
+                        @click.stop="copyGroupTaskSnippet(task)"
+                        @dblclick.stop
+                      >
+                        <Copy class="h-3.5 w-3.5" />
+                      </button>
+                      <span
+                        class="readout shrink-0 rounded px-1 py-0.5 text-[10px] uppercase tracking-wide"
+                        :class="
+                          task.status === 'running'
+                            ? 'bg-[color-mix(in_srgb,var(--running)_22%,transparent)] text-[var(--running)]'
+                            : 'bg-[color-mix(in_srgb,var(--faint)_18%,transparent)] text-[var(--faint)]'
+                        "
+                      >
+                        {{ task.status }}
+                      </span>
+                      <span
+                        v-if="task.status === 'running' && task.pid"
+                        class="readout shrink-0 text-[10px] text-[var(--muted)]"
+                        :title="`pid ${task.pid}`"
+                      >
+                        pid {{ task.pid }}
+                      </span>
+                      <KeyRound v-if="task.requires_sudo" class="h-3 w-3 shrink-0 text-[var(--warn)]" />
+                    </div>
+                    <div class="flex shrink-0 items-center gap-0.5">
+                      <button
+                        class="btn !px-1.5 !py-1"
+                        type="button"
+                        title="run"
+                        :disabled="isPending(`start-${instanceKey(task.prefix_path, task.id)}`) || task.status === 'running'"
+                        @click="
+                          runWithSudo(
+                            `start-${instanceKey(task.prefix_path, task.id)}`,
+                            '启动中',
+                            task.requires_sudo,
+                            (password) =>
+                              startTask(task.prefix_path, task.id, selectedTaskConfigId(task), password),
+                          )
+                        "
+                      >
+                        <LoaderCircle
+                          v-if="isPending(`start-${instanceKey(task.prefix_path, task.id)}`)"
+                          class="h-3.5 w-3.5 animate-spin"
+                        />
+                        <Play v-else class="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        class="btn !px-1.5 !py-1"
+                        type="button"
+                        title="stop"
+                        :disabled="isPending(`stop-${instanceKey(task.prefix_path, task.id)}`) || task.status !== 'running'"
+                        @click="
+                          run(`stop-${instanceKey(task.prefix_path, task.id)}`, '停止中', () =>
+                            stopTask(task.prefix_path, task.id),
+                          )
+                        "
+                      >
+                        <Square class="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        class="btn !px-1.5 !py-1"
+                        type="button"
+                        title="restart"
+                        :disabled="isPending(`restart-${instanceKey(task.prefix_path, task.id)}`)"
+                        @click="
+                          runWithSudo(
+                            `restart-${instanceKey(task.prefix_path, task.id)}`,
+                            '重启中',
+                            task.requires_sudo,
+                            (password) =>
+                              restartTask(task.prefix_path, task.id, selectedTaskConfigId(task), password),
+                          )
+                        "
+                      >
+                        <RotateCcw class="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        class="btn !px-1.5 !py-1"
+                        type="button"
+                        title="edit"
+                        @click="openEdit('task', task.prefix_path, task.id)"
+                      >
+                        <Pencil class="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        class="btn btn-danger !px-1.5 !py-1"
+                        type="button"
+                        title="delete"
+                        @click="askRemove('task', task.prefix_path, task.id, task.name || task.id)"
+                      >
+                        <Trash2 class="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <div class="flex shrink-0 items-center gap-0.5">
-                    <button
-                      class="btn !px-1.5 !py-1"
-                      type="button"
-                      title="run"
-                      :disabled="isPending(`start-${instanceKey(task.prefix_path, task.id)}`) || task.status === 'running'"
-                      @click="
-                        runWithSudo(
-                          `start-${instanceKey(task.prefix_path, task.id)}`,
-                          '启动中',
-                          task.requires_sudo,
-                          (password) => startTask(task.prefix_path, task.id, password),
-                        )
+                  <div v-if="task.configs.length > 1" class="flex w-full items-center gap-2 pl-0.5">
+                    <span class="kicker shrink-0 text-[9px]">config</span>
+                    <SelectField
+                      compact
+                      :model-value="selectedTaskConfigId(task)"
+                      :options="
+                        task.configs.map((config) => ({
+                          value: config.id,
+                          label: config.name.trim() || config.id,
+                          highlight: config.id === task.running_config_id,
+                        }))
                       "
-                    >
-                      <LoaderCircle
-                        v-if="isPending(`start-${instanceKey(task.prefix_path, task.id)}`)"
-                        class="h-3.5 w-3.5 animate-spin"
-                      />
-                      <Play v-else class="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      class="btn !px-1.5 !py-1"
-                      type="button"
-                      title="stop"
-                      :disabled="isPending(`stop-${instanceKey(task.prefix_path, task.id)}`) || task.status !== 'running'"
-                      @click="
-                        run(`stop-${instanceKey(task.prefix_path, task.id)}`, '停止中', () =>
-                          stopTask(task.prefix_path, task.id),
-                        )
-                      "
-                    >
-                      <Square class="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      class="btn !px-1.5 !py-1"
-                      type="button"
-                      title="restart"
-                      :disabled="isPending(`restart-${instanceKey(task.prefix_path, task.id)}`)"
-                      @click="
-                        runWithSudo(
-                          `restart-${instanceKey(task.prefix_path, task.id)}`,
-                          '重启中',
-                          task.requires_sudo,
-                          (password) => restartTask(task.prefix_path, task.id, password),
-                        )
-                      "
-                    >
-                      <RotateCcw class="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      class="btn !px-1.5 !py-1"
-                      type="button"
-                      title="copy group snippet"
-                      @click="copyGroupTaskSnippet(task)"
-                    >
-                      <Copy class="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      class="btn !px-1.5 !py-1"
-                      type="button"
-                      title="edit"
-                      @click="openEdit('task', task.prefix_path, task.id)"
-                    >
-                      <Pencil class="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      class="btn btn-danger !px-1.5 !py-1"
-                      type="button"
-                      title="delete"
-                      @click="askRemove('task', task.prefix_path, task.id, task.name || task.id)"
-                    >
-                      <Trash2 class="h-3.5 w-3.5" />
-                    </button>
+                      @update:model-value="selectTaskConfig(task, $event)"
+                    />
                   </div>
                 </article>
               </template>
@@ -857,7 +973,13 @@ onBeforeUnmount(() => {
               <article
                 v-for="group in folder.entries"
                 :key="instanceKey(group.prefix_path, group.id)"
-                class="flex items-center gap-2 border-b border-[var(--line-soft)] px-2 py-1.5"
+                class="flex cursor-pointer items-center gap-2 border-b border-[var(--line-soft)] px-2 py-1.5"
+                :class="
+                  isGroupSelected(group)
+                    ? 'bg-[var(--surface-hover)] shadow-[inset_3px_0_0_0_var(--ink)]'
+                    : 'hover:bg-[var(--surface-hover)]'
+                "
+                @click="selectGroup(group)"
               >
                 <div class="flex min-w-0 flex-1 items-center gap-1.5" :title="groupHoverTitle(group)">
                   <h3 class="truncate text-[13px] font-medium text-[var(--ink-bright)]">
@@ -881,7 +1003,7 @@ onBeforeUnmount(() => {
                   </span>
                   <KeyRound v-if="groupRequiresSudo(group)" class="h-3 w-3 shrink-0 text-[var(--warn)]" />
                 </div>
-                <div class="flex shrink-0 items-center gap-0.5">
+                <div class="flex shrink-0 items-center gap-0.5" @click.stop>
                   <button
                     class="btn !px-1.5 !py-1"
                     type="button"
@@ -941,20 +1063,47 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[var(--line-soft)]">
-        <div class="flex items-center justify-between border-b border-[var(--line-soft)] bg-[var(--bg-1)] px-2 py-1">
-          <span class="kicker">logs</span>
+        <div class="flex items-center gap-2 border-b border-[var(--line-soft)] bg-[var(--bg-1)] px-2 py-1">
+          <span class="kicker shrink-0">logs</span>
+          <div class="ml-auto flex min-w-0 items-center justify-end gap-2">
+            <span
+              v-if="selectedLogActive"
+              class="readout shrink-0 text-[10px] font-medium uppercase tracking-wide text-[var(--running)]"
+            >
+              live
+            </span>
+            <span
+              v-else-if="selectedLog"
+              class="readout shrink-0 text-[10px] font-medium uppercase tracking-wide text-[var(--faint)]"
+            >
+              history
+            </span>
+            <span
+              v-if="selectedLogItem"
+              class="readout min-w-0 truncate text-right text-[10px] text-[var(--muted)]"
+              :title="selectedLogItem.file"
+            >
+              {{ selectedLogItem.file }}
+            </span>
+            <button
+              v-if="selectedLog"
+              class="btn shrink-0 !px-1.5 !py-0.5"
+              type="button"
+              title="复制当前选区，无选区则复制全部"
+              @click="copySelectedLog"
+            >
+              <Copy class="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
-        <div class="grid min-h-0 flex-1 grid-cols-[minmax(168px,0.34fr)_3px_minmax(0,1fr)]">
-          <div class="flex min-h-0 flex-col overflow-hidden bg-[var(--bg-1)]">
-            <div class="shrink-0 border-b border-[var(--line-soft)] px-2 py-1">
-              <span class="kicker text-[10px] text-[var(--faint)]">files</span>
-            </div>
+        <div class="grid min-h-0 flex-1 grid-cols-[auto_3px_minmax(0,1fr)]">
+          <div class="flex w-[calc(32ch+0.75rem)] min-w-0 flex-col overflow-hidden bg-[var(--bg-1)] font-mono text-[11px]">
             <div class="min-h-0 flex-1 overflow-auto">
               <button
                 v-for="item in listedLogs"
                 :key="item.file"
                 type="button"
-                class="flex w-full items-center gap-1.5 border-b border-[var(--line-soft)] px-2 py-1.5 text-left text-[11px] transition hover:bg-[var(--surface-hover)]"
+                class="flex w-full flex-col gap-0.5 border-b border-[var(--line-soft)] px-1.5 py-1 text-left transition hover:bg-[var(--surface-hover)]"
                 :class="
                   selectedLog === item.file
                     ? 'bg-[var(--accent-soft)] text-[var(--ink-bright)]'
@@ -962,14 +1111,30 @@ onBeforeUnmount(() => {
                 "
                 @click="selectLog(item.file)"
               >
-                <span
-                  class="readout w-3 shrink-0 text-center text-[10px]"
-                  :class="item.active ? 'text-[var(--running)]' : 'text-transparent'"
-                  aria-hidden="true"
-                >
-                  ●
+                <span class="flex min-w-0 items-center gap-1">
+                  <span class="readout min-w-0 truncate" :title="item.file">
+                    {{ item.task_id }}
+                  </span>
+                  <span
+                    v-if="item.config_id"
+                    class="readout max-w-[8ch] shrink-0 truncate text-[9px] text-[var(--accent)]"
+                    :title="`config: ${item.config_id}`"
+                  >
+                    {{ item.config_id }}
+                  </span>
                 </span>
-                <span class="readout min-w-0 flex-1 truncate">{{ item.file }}</span>
+                <span class="flex min-w-0 items-center gap-1">
+                  <span class="readout min-w-0 truncate text-[9px] leading-none text-[var(--faint)]">
+                    {{ formatLogStartedAt(item.started_at_ms) }}
+                  </span>
+                  <span
+                    v-if="item.active"
+                    class="readout shrink-0 text-[9px] leading-none text-[var(--running)]"
+                    title="live"
+                  >
+                    ●
+                  </span>
+                </span>
               </button>
             </div>
           </div>
@@ -977,30 +1142,18 @@ onBeforeUnmount(() => {
           <div class="bg-[var(--line)]" />
 
           <div class="flex min-h-0 flex-col overflow-hidden bg-[var(--surface-2)]">
-            <div
-              class="flex shrink-0 items-center justify-between gap-2 border-b-2 border-[var(--line)] bg-[var(--bg-1)] px-2 py-1"
-            >
-              <span
-                v-if="selectedLogActive"
-                class="readout text-[10px] font-medium uppercase tracking-wide text-[var(--running)]"
-              >
-                live
-              </span>
-              <span
-                v-else-if="selectedLog"
-                class="readout text-[10px] font-medium uppercase tracking-wide text-[var(--faint)]"
-              >
-                history
-              </span>
-              <span v-else class="readout text-[10px] font-medium uppercase tracking-wide text-[var(--faint)]">
-                viewer
-              </span>
-              <span v-if="selectedLogItem" class="readout min-w-0 truncate text-[10px] text-[var(--muted)]">
-                {{ selectedLogItem.file }}
-              </span>
-            </div>
-            <LiveLogViewer v-if="selectedLogActive" :content="logText" />
-            <HistoricalLogViewer v-else-if="selectedLog" :content="historicalContent" />
+            <LiveLogViewer
+              v-if="selectedLogActive"
+              ref="liveLogRef"
+              :content="logText"
+              @copied="onLogCopied"
+            />
+            <HistoricalLogViewer
+              v-else-if="selectedLog"
+              ref="historicalLogRef"
+              :content="historicalContent"
+              @copied="onLogCopied"
+            />
             <div
               v-else
               class="flex flex-1 items-center justify-center px-2 text-center text-[11px] text-[var(--faint)]"
@@ -1087,7 +1240,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <MonacoEditor v-model="yamlEditor.content" language="yaml" />
+          <MonacoEditor v-model="yamlEditor.content" language="yaml" @copied="showCopyFlash('已复制')" />
         </div>
         <p v-if="yamlError" class="shrink-0 border-t border-[var(--line-soft)] px-3 py-2 text-sm text-[#f48771]">
           {{ yamlError }}

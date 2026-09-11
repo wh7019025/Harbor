@@ -27,6 +27,10 @@ pub struct TaskDefinition {
     #[serde(default)]
     pub env: HashMap<String, String>,
     #[serde(default)]
+    pub configs: Vec<TaskConfig>,
+    #[serde(default)]
+    pub default_config: String,
+    #[serde(default)]
     pub sudo: bool,
     pub command: TaskCommand,
     #[serde(default, skip_deserializing)]
@@ -37,6 +41,15 @@ pub struct TaskDefinition {
     pub taskcfg_dir: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TaskConfig {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct TaskCommand {
     #[serde(default)]
@@ -45,6 +58,31 @@ pub struct TaskCommand {
     pub shell: String,
     #[serde(default)]
     pub script: String,
+}
+
+impl TaskDefinition {
+    fn default_config_id(&self) -> Option<&str> {
+        if self.configs.is_empty() {
+            None
+        } else if self.default_config.is_empty() {
+            self.configs.first().map(|config| config.id.as_str())
+        } else {
+            Some(self.default_config.as_str())
+        }
+    }
+
+    fn resolve_config(&self, requested: Option<&str>) -> Result<Option<&TaskConfig>, String> {
+        let config_id = requested.or_else(|| self.default_config_id());
+        match config_id {
+            Some(config_id) => self
+                .configs
+                .iter()
+                .find(|config| config.id == config_id)
+                .map(Some)
+                .ok_or_else(|| format!("config not found: {config_id} for task {}", self.id)),
+            None => Ok(None),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -66,6 +104,8 @@ pub struct GroupDefinition {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct GroupTask {
     pub task: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub config: String,
     #[serde(default)]
     pub wait_after_sec: u64,
     #[serde(default)]
@@ -84,6 +124,11 @@ pub struct TaskSummary {
     pub workdir: String,
     pub command: String,
     pub env_count: usize,
+    pub configs: Vec<TaskConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_config: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running_config_id: Option<String>,
     pub requires_sudo: bool,
     pub folder: String,
     pub status: &'static str,
@@ -117,6 +162,8 @@ pub struct ResearchResult {
 pub struct TaskLogSummary {
     pub file: String,
     pub task_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_id: Option<String>,
     pub started_at_ms: u128,
     pub modified_at_ms: u128,
     pub bytes: u64,
@@ -156,6 +203,7 @@ struct RunningTask {
     child: Child,
     started_at_ms: u128,
     log_file: String,
+    config_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -166,6 +214,8 @@ struct RunningTaskRecord {
     pgid: i32,
     started_at_ms: u128,
     log_file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    config_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -279,6 +329,9 @@ impl TaskCardService {
                     workdir: task.workdir.clone(),
                     command: command_label(&task.command),
                     env_count: task.env.len(),
+                    configs: task.configs.clone(),
+                    default_config: task.default_config_id().map(str::to_string),
+                    running_config_id: running.and_then(|item| item.config_id.clone()),
                     requires_sudo: task.sudo,
                     folder: task.folder.clone(),
                     status: if running.is_some() { "running" } else { "stopped" },
@@ -325,21 +378,30 @@ impl TaskCardService {
         &self,
         prefix_path: &str,
         id: &str,
+        config_id: Option<&str>,
         env_override: &HashMap<String, String>,
         sudo_password: Option<&str>,
     ) -> Result<(), String> {
         validate_id(id)?;
         let key = instance_key(prefix_path, id);
         self.refresh_processes();
-        let mut state = self.state.lock();
-        if state.running.contains_key(key.as_str()) {
-            return Ok(());
-        }
-
         let tasks = self.load_tasks().0;
         let task = tasks
             .get(key.as_str())
             .ok_or_else(|| format!("task not found: {id} @ {prefix_path}"))?;
+        let config = task.resolve_config(config_id)?;
+        let selected_config_id = config.map(|item| item.id.clone());
+        let mut state = self.state.lock();
+        if let Some(running) = state.running.get(key.as_str()) {
+            if running.config_id == selected_config_id {
+                return Ok(());
+            }
+            return Err(format!(
+                "task {id} is already running with config {}; stop or restart it before using config {}",
+                running.config_id.as_deref().unwrap_or("default"),
+                selected_config_id.as_deref().unwrap_or("default")
+            ));
+        }
         let workdir = expand_workdir(task.workdir.as_str(), task.taskcfg_dir.as_str())?;
         if !workdir.is_dir() {
             return Err(format!("workdir does not exist: {}", workdir.display()));
@@ -355,7 +417,8 @@ impl TaskCardService {
         } else {
             build_command(&task.command)?
         };
-        let (started_at_ms, log_file, stdout) = create_log_file(self.root.as_path(), id)?;
+        let (started_at_ms, log_file, stdout) =
+            create_log_file(self.root.as_path(), id, selected_config_id.as_deref())?;
         let log_path = self.root.join("log").join(log_file.as_str());
         let stderr = stdout
             .try_clone()
@@ -365,9 +428,7 @@ impl TaskCardService {
             .stdin(if task.sudo { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
-        for (env_key, value) in task.env.iter().chain(env_override.iter()) {
-            command.env(env_key, value);
-        }
+        command.envs(merged_task_env(task, config, env_override));
         let parent_pid = unsafe { libc::getpid() };
         unsafe {
             command.pre_exec(move || {
@@ -408,6 +469,7 @@ impl TaskCardService {
                 child,
                 started_at_ms,
                 log_file,
+                config_id: selected_config_id,
             },
         );
         drop(state);
@@ -448,6 +510,7 @@ impl TaskCardService {
         &self,
         prefix_path: &str,
         id: &str,
+        config_id: Option<&str>,
         env_override: &HashMap<String, String>,
         sudo_password: Option<&str>,
     ) -> Result<(), String> {
@@ -457,11 +520,12 @@ impl TaskCardService {
         let task = tasks
             .get(key.as_str())
             .ok_or_else(|| format!("task not found: {id} @ {prefix_path}"))?;
+        task.resolve_config(config_id)?;
         if task.sudo && sudo_password.filter(|password| !password.is_empty()).is_none() {
             return Err("sudo password is required".into());
         }
         self.stop_task(prefix_path, id)?;
-        self.start_task(prefix_path, id, env_override, sudo_password)
+        self.start_task(prefix_path, id, config_id, env_override, sudo_password)
     }
 
     pub async fn start_group(
@@ -487,7 +551,10 @@ impl TaskCardService {
                     item.task.as_str(),
                     item.prefix_path.as_str(),
                 )
-                .map(|task| (item, task))
+                .and_then(|task| {
+                    task.resolve_config(optional_string(item.config.as_str()))?;
+                    Ok((item, task))
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -496,6 +563,7 @@ impl TaskCardService {
             self.start_task(
                 task.prefix_path.as_str(),
                 task.id.as_str(),
+                optional_string(item.config.as_str()),
                 &item.env,
                 sudo_password,
             )?;
@@ -702,7 +770,7 @@ impl TaskCardService {
             .filter_map(|entry| {
                 let path = entry.path();
                 let file = path.file_name()?.to_str()?.to_string();
-                let (task_id, started_at_ms) = parse_log_file(file.as_str())?;
+                let (task_id, config_id, started_at_ms) = parse_log_file(file.as_str())?;
                 let metadata = entry.metadata().ok()?;
                 let bytes = metadata.len();
                 let modified_at_ms = metadata
@@ -715,6 +783,7 @@ impl TaskCardService {
                     active: active.contains(file.as_str()),
                     file,
                     task_id,
+                    config_id,
                     started_at_ms,
                     modified_at_ms,
                     bytes,
@@ -816,6 +885,7 @@ impl TaskCardService {
                         pgid: running.child.id() as i32,
                         started_at_ms: running.started_at_ms,
                         log_file: running.log_file.clone(),
+                        config_id: running.config_id.clone(),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -842,6 +912,10 @@ impl TaskCardService {
             );
             for (id, mut task) in part {
                 task.prefix_path = prefix_path.clone();
+                if let Err(error) = validate_task_definition(&task) {
+                    errors.push(format!("invalid task {id} @ {prefix_path}: {error}"));
+                    continue;
+                }
                 let key = instance_key(&prefix_path, &id);
                 if items.insert(key, task).is_some() {
                     errors.push(format!("duplicate task id: {id} @ {prefix_path}"));
@@ -1093,11 +1167,12 @@ impl TaskCardService {
         let group = serde_yaml::from_str::<GroupDefinition>(content).map_err(|e| e.to_string())?;
         validate_id(group.id.as_str())?;
         for item in &group.tasks {
-            self.resolve_group_task_ref(
+            let task = self.resolve_group_task_ref(
                 group_prefix_path,
                 item.task.as_str(),
                 item.prefix_path.as_str(),
             )?;
+            task.resolve_config(optional_string(item.config.as_str()))?;
         }
         Ok(group)
     }
@@ -1105,6 +1180,23 @@ impl TaskCardService {
 
 fn instance_key(prefix_path: &str, id: &str) -> String {
     format!("{prefix_path}\0{id}")
+}
+
+fn optional_string(value: &str) -> Option<&str> {
+    (!value.is_empty()).then_some(value)
+}
+
+fn merged_task_env(
+    task: &TaskDefinition,
+    config: Option<&TaskConfig>,
+    env_override: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut env = task.env.clone();
+    if let Some(config) = config {
+        env.extend(config.env.clone());
+    }
+    env.extend(env_override.clone());
+    env
 }
 
 fn absolutize(path: &Path) -> String {
@@ -1243,12 +1335,35 @@ fn stamp_yaml_version(content: &str) -> Result<String, String> {
 
 fn validate_task_yaml(content: &str) -> Result<TaskDefinition, String> {
     let task = serde_yaml::from_str::<TaskDefinition>(content).map_err(|e| e.to_string())?;
+    validate_task_definition(&task)?;
+    Ok(task)
+}
+
+fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
     validate_id(task.id.as_str())?;
+    let mut config_ids = std::collections::HashSet::new();
+    for config in &task.configs {
+        validate_id(config.id.as_str())?;
+        if !config_ids.insert(config.id.as_str()) {
+            return Err(format!("duplicate config id: {}", config.id));
+        }
+    }
+    if !task.default_config.is_empty()
+        && !task
+            .configs
+            .iter()
+            .any(|config| config.id == task.default_config)
+    {
+        return Err(format!(
+            "default_config not found: {} for task {}",
+            task.default_config, task.id
+        ));
+    }
     if task.workdir.trim().is_empty() {
         return Err("workdir cannot be empty".into());
     }
     build_command(&task.command)?;
-    Ok(task)
+    Ok(())
 }
 
 fn read_definition(dir: &Path, id: &str) -> Result<TaskCardYamlDocument, String> {
@@ -1464,12 +1579,19 @@ fn terminate_task(id: &str, child: &mut Child) -> Result<(), String> {
     Ok(())
 }
 
-fn create_log_file(root: &Path, id: &str) -> Result<(u128, String, fs::File), String> {
+fn create_log_file(
+    root: &Path,
+    id: &str,
+    config_id: Option<&str>,
+) -> Result<(u128, String, fs::File), String> {
     let started_at_ms = now_ms();
     for offset_sec in 0..1000u128 {
         let stamp_ms = started_at_ms + offset_sec * 1000;
         let stamp = format_log_stamp(stamp_ms);
-        let file = format!("{id}-{stamp}.log");
+        let file = match config_id {
+            Some(config_id) => format!("{id}.{config_id}.{stamp}.log"),
+            None => format!("{id}-{stamp}.log"),
+        };
         let path = root.join("log").join(file.as_str());
         match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(handle) => return Ok((stamp_ms, file, handle)),
@@ -1562,18 +1684,27 @@ fn initialize_root(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_log_file(file: &str) -> Option<(String, u128)> {
+fn parse_log_file(file: &str) -> Option<(String, Option<String>, u128)> {
     let stem = file.strip_suffix(".log")?;
+    if let Some((identity, stamp)) = stem.rsplit_once('.') {
+        let (task_id, config_id) = identity.split_once('.')?;
+        let (yymm, rest) = stamp.split_once('-')?;
+        if rest.len() == 8 && rest.chars().all(|c| c.is_ascii_digit()) {
+            if let Some(ms) = parse_log_stamp(yymm, rest) {
+                return Some((task_id.to_string(), Some(config_id.to_string()), ms));
+            }
+        }
+    }
     let (prefix, last) = stem.rsplit_once('-')?;
     // New: {id}-YYMM-DDHHMMSS
     if last.len() == 8 && last.chars().all(|c| c.is_ascii_digit()) {
         let (task_id, yymm) = prefix.rsplit_once('-')?;
         if let Some(ms) = parse_log_stamp(yymm, last) {
-            return Some((task_id.to_string(), ms));
+            return Some((task_id.to_string(), None, ms));
         }
     }
     // Legacy: {id}-{unix_ms}
-    Some((prefix.to_string(), last.parse().ok()?))
+    Some((prefix.to_string(), None, last.parse().ok()?))
 }
 
 fn validate_log_file(file: &str) -> Result<(), String> {
@@ -1658,6 +1789,7 @@ name: New Task
 description: ""
 workdir: $(harbor_taskcfg_dir)/..
 env: {{}}
+configs: []
 sudo: false
 command:
   argv:
@@ -1914,6 +2046,212 @@ mod tests {
     }
 
     #[test]
+    fn config_env_overrides_task_env_and_group_env_overrides_config() {
+        let task = validate_task_yaml(
+            r#"version: 1
+id: server
+workdir: /tmp
+env:
+  HOST: 0.0.0.0
+  PORT: "8000"
+configs:
+  - id: production
+    env:
+      PORT: "80"
+      WORKERS: "4"
+default_config: production
+command:
+  argv: [echo, hello]
+"#,
+        )
+        .unwrap();
+        let config = task.resolve_config(None).unwrap();
+        let group_env = HashMap::from([
+            ("PORT".to_string(), "8080".to_string()),
+            ("EXTRA".to_string(), "yes".to_string()),
+        ]);
+        let merged = merged_task_env(&task, config, &group_env);
+        assert_eq!(merged.get("HOST").map(String::as_str), Some("0.0.0.0"));
+        assert_eq!(merged.get("PORT").map(String::as_str), Some("8080"));
+        assert_eq!(merged.get("WORKERS").map(String::as_str), Some("4"));
+        assert_eq!(merged.get("EXTRA").map(String::as_str), Some("yes"));
+    }
+
+    #[test]
+    fn config_validation_rejects_duplicates_and_missing_default() {
+        let duplicate = r#"version: 1
+id: server
+workdir: /tmp
+configs:
+  - id: dev
+  - id: dev
+command:
+  argv: [echo]
+"#;
+        assert!(validate_task_yaml(duplicate)
+            .unwrap_err()
+            .contains("duplicate config id"));
+
+        let missing_default = r#"version: 1
+id: server
+workdir: /tmp
+configs:
+  - id: dev
+default_config: prod
+command:
+  argv: [echo]
+"#;
+        assert!(validate_task_yaml(missing_default)
+            .unwrap_err()
+            .contains("default_config not found"));
+    }
+
+    #[test]
+    fn starts_selected_config_and_records_it_in_snapshot_and_log() {
+        let root = std::env::temp_dir().join(format!(
+            "harbor-task-config-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(root.join("tasks")).unwrap();
+        fs::write(
+            root.join("tasks/server.yaml"),
+            r#"version: 1
+id: server
+workdir: /tmp
+configs:
+  - id: development
+  - id: production
+default_config: development
+command:
+  argv: [sleep, "30"]
+"#,
+        )
+        .unwrap();
+        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        let prefix = service.snapshot().root;
+        service
+            .start_task(
+                prefix.as_str(),
+                "server",
+                Some("production"),
+                &HashMap::new(),
+                None,
+            )
+            .unwrap();
+        let snapshot = service.snapshot();
+        assert_eq!(
+            snapshot.tasks[0].running_config_id.as_deref(),
+            Some("production")
+        );
+        let logs = service.logs();
+        assert_eq!(logs[0].config_id.as_deref(), Some("production"));
+        assert!(service
+            .start_task(
+                prefix.as_str(),
+                "server",
+                Some("development"),
+                &HashMap::new(),
+                None,
+            )
+            .unwrap_err()
+            .contains("already running with config production"));
+        service.stop_all();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn group_rejects_unknown_task_config() {
+        let root = std::env::temp_dir().join(format!(
+            "harbor-group-config-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(root.join("tasks")).unwrap();
+        fs::write(
+            root.join("tasks/server.yaml"),
+            r#"version: 1
+id: server
+workdir: /tmp
+configs:
+  - id: development
+command:
+  argv: [echo]
+"#,
+        )
+        .unwrap();
+        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        let group = r#"version: 1
+id: invalid-config
+tasks:
+  - task: server
+    config: production
+"#;
+        assert!(service
+            .create_group_yaml(group, "")
+            .unwrap_err()
+            .contains("config not found"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn group_starts_its_selected_task_config() {
+        let root = std::env::temp_dir().join(format!(
+            "harbor-group-config-run-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(root.join("tasks")).unwrap();
+        fs::create_dir_all(root.join("groups")).unwrap();
+        fs::write(
+            root.join("tasks/server.yaml"),
+            r#"version: 1
+id: server
+workdir: /tmp
+configs:
+  - id: development
+  - id: production
+default_config: development
+command:
+  argv: [sleep, "30"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("groups/production.yaml"),
+            r#"version: 1
+id: production
+tasks:
+  - task: server
+    config: production
+"#,
+        )
+        .unwrap();
+        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        let prefix = service.snapshot().root;
+        service
+            .start_group(prefix.as_str(), "production", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            service.snapshot().tasks[0].running_config_id.as_deref(),
+            Some("production")
+        );
+        assert_eq!(
+            service.logs()[0].config_id.as_deref(),
+            Some("production")
+        );
+        service.stop_all();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn log_stamp_roundtrips_and_parses_filenames() {
         let ms = now_ms();
         let stamp = format_log_stamp(ms);
@@ -1923,12 +2261,20 @@ mod tests {
         let parsed = parse_log_stamp(yymm, ddhhmmss).unwrap();
         assert!((parsed as i128 - ms as i128).abs() < 1000);
 
-        let (id, t) = parse_log_file(&format!("demo-ping-{stamp}.log")).unwrap();
+        let (id, config_id, t) = parse_log_file(&format!("demo-ping-{stamp}.log")).unwrap();
         assert_eq!(id, "demo-ping");
+        assert_eq!(config_id, None);
         assert_eq!(t, parsed);
 
-        let (id, t) = parse_log_file("legacy-1710000000000.log").unwrap();
+        let (id, config_id, t) =
+            parse_log_file(&format!("demo-ping.production.{stamp}.log")).unwrap();
+        assert_eq!(id, "demo-ping");
+        assert_eq!(config_id.as_deref(), Some("production"));
+        assert_eq!(t, parsed);
+
+        let (id, config_id, t) = parse_log_file("legacy-1710000000000.log").unwrap();
         assert_eq!(id, "legacy");
+        assert_eq!(config_id, None);
         assert_eq!(t, 1710000000000);
     }
 
@@ -1989,12 +2335,12 @@ tasks:
             .unwrap();
         assert!(empty_chunk.content.is_empty());
         service
-            .start_task(prefix.as_str(), "sleep", &HashMap::new(), None)
+            .start_task(prefix.as_str(), "sleep", None, &HashMap::new(), None)
             .unwrap();
         assert_eq!(service.logs().len(), 1);
 
         service
-            .restart_task(prefix.as_str(), "sleep", &HashMap::new(), None)
+            .restart_task(prefix.as_str(), "sleep", None, &HashMap::new(), None)
             .unwrap();
         let logs = service.logs();
         assert_eq!(logs.len(), 2);
@@ -2186,10 +2532,10 @@ command:
 "#;
         service.create_task_yaml(sudo_task, "").unwrap();
         assert!(service
-            .start_task(prefix.as_str(), "sudo-task", &HashMap::new(), None)
+            .start_task(prefix.as_str(), "sudo-task", None, &HashMap::new(), None)
             .is_err());
         assert!(service
-            .restart_task(prefix.as_str(), "sudo-task", &HashMap::new(), None)
+            .restart_task(prefix.as_str(), "sudo-task", None, &HashMap::new(), None)
             .is_err());
         assert!(service
             .snapshot()
@@ -2242,10 +2588,10 @@ command:
         );
 
         service
-            .start_task(prefix_a.as_str(), "demo-ping", &HashMap::new(), None)
+            .start_task(prefix_a.as_str(), "demo-ping", None, &HashMap::new(), None)
             .unwrap();
         service
-            .start_task(prefix_b.as_str(), "demo-ping", &HashMap::new(), None)
+            .start_task(prefix_b.as_str(), "demo-ping", None, &HashMap::new(), None)
             .unwrap();
         let running = service
             .snapshot()
@@ -2473,6 +2819,7 @@ command:
         assert!(task.contains(&format!("version: \"{}\"", APP_VERSION)));
         assert!(task.contains("description: \"\""));
         assert!(task.contains("$(harbor_taskcfg_dir)"));
+        assert!(task.contains("configs: []"));
 
         let group = service.new_group_template();
         assert!(group.contains(&format!("version: \"{}\"", APP_VERSION)));
@@ -2493,12 +2840,14 @@ command:
             pgid: 4242,
             started_at_ms: 1,
             log_file: "demo.log".into(),
+            config_id: None,
         }];
         write_running_registry(&root, &records).unwrap();
         let raw = fs::read_to_string(running_registry_path(&root)).unwrap();
         let parsed: Vec<RunningTaskRecord> = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].id, "demo");
+        assert_eq!(parsed[0].config_id, None);
         cleanup_orphan_tasks(&root).unwrap();
         assert_eq!(fs::read_to_string(running_registry_path(&root)).unwrap(), "[]");
         fs::remove_dir_all(root).unwrap();

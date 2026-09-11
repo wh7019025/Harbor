@@ -52,7 +52,7 @@ onMounted(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-4 py-3">
-    <p class="text-[12px] text-[var(--muted)]">复制下面这段话发给 Agent，告诉它文档在哪。</p>
+    <p class="text-[12px] text-[var(--muted)]">复制下面这段 Harbor 使用规范发给 Agent。</p>
 
     <p v-if="error" class="text-sm text-[#f48771]">{{ error }}</p>
 

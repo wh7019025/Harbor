@@ -1,7 +1,7 @@
 # Group YAML
 
 ```yaml
-version: "0.1.3"
+version: "0.1.4"
 id: system-info
 name: System Info
 description: 收集基础系统信息
@@ -10,6 +10,7 @@ tasks:
     wait_after_sec: 0
     env: {}
   - task: demo-ping
+    config: development
     wait_after_sec: 0
     env:
       MODE: quick
@@ -25,8 +26,9 @@ tasks:
 | `description` | 否 | 组说明。**Agent 编写时尽量用中文**，简要说明组的编排目的 |
 | `tasks` | 是 | 按顺序执行的 Task 条目列表 |
 | `tasks[].task` | 是 | 已存在的 Task `id` |
+| `tasks[].config` | 否 | 使用该 Task 的 config `id`；省略时使用 Task 的默认 config |
 | `tasks[].wait_after_sec` | 否 | 当前 Task 后等待的秒数，默认 `0` |
-| `tasks[].env` | 否 | 对此次组内执行追加或覆盖的环境变量，默认 `{}` |
+| `tasks[].env` | 否 | 对此次组内执行追加或覆盖的环境变量，默认 `{}`；优先级高于 Task config |
 
 ## description
 
@@ -44,6 +46,8 @@ Harbor 在保存和执行 Group 前按以下顺序检查：
 3. 只有一个结果时使用该 Task。
 4. 有多个结果时报告所有候选位置并拒绝保存或执行，不按加载顺序猜测。
 5. 完整 Group 的所有引用检查通过后，才开始执行第一个 Task。
+
+若填写 `tasks[].config`，保存和执行 Group 前还会确认引用的 Task 中存在该 config。省略时使用 Task 的 `default_config`；Task 未填写 `default_config` 时使用 `configs` 第一项。环境变量覆盖顺序为：Task 顶层 `env` → 所选 config 的 `env` → Group 条目的 `env`。
 
 旧配置中的 `tasks[].prefix_path` 仍可读取，但新建或维护 Group 时不应再写入。
 

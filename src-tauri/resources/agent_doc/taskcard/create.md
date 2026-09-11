@@ -20,7 +20,8 @@ Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 2. 创建 `harbor_taskcfg/tasks/` 目录（若不存在）。
 3. 按 [../yaml/task.md](../yaml/task.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**简要说明任务用途；无说明可留 `""`。
-5. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
+5. 若同一程序只有环境变量参数不同，可在一个 Task 中使用 `configs`，不要复制多个几乎相同的 Task。
+6. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
 
 文件名建议与 Task `id` 一致，例如：
 
