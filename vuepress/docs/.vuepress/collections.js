@@ -4,28 +4,30 @@ const guide = defineCollection({
   type: 'doc',
   dir: 'guide',
   title: '使用指南',
-  sidebar: ['', 'concepts', 'getting-started', 'workspaces', 'tasks', 'groups', 'logs', 'panels', 'remote'],
+  sidebar: [
+    { text: '什么是 Harbor', link: '/guide/' },
+    'concepts',
+    'getting-started',
+    'work-with-ai',
+    'workspaces',
+    'tasks',
+    'groups',
+    'logs',
+    'panels',
+    'remote',
+    {
+      text: '配置参考',
+      collapsed: false,
+      items: ['reference/', 'reference/task-yaml', 'reference/group-yaml', 'reference/settings', 'reference/web-api'],
+    },
+  ],
 })
 
-const reference = defineCollection({
+const development = defineCollection({
   type: 'doc',
-  dir: 'reference',
-  title: '配置参考',
-  sidebar: ['', 'task-yaml', 'group-yaml', 'settings', 'web-api'],
+  dir: 'development',
+  title: '开发',
+  sidebar: [{ text: '设计理念', link: '/development/' }, 'architecture', 'environment', 'build', 'security'],
 })
 
-const integration = defineCollection({
-  type: 'doc',
-  dir: 'integration',
-  title: '程序接入',
-  sidebar: ['', 'agent-skill', 'task-definition', 'runtime', 'web-panel', 'ros2'],
-})
-
-const operations = defineCollection({
-  type: 'doc',
-  dir: 'operations',
-  title: '运维与开发',
-  sidebar: ['', 'core', 'security', 'troubleshooting', 'build', 'architecture'],
-})
-
-export const collections = defineCollections([guide, integration, reference, operations])
+export const collections = defineCollections([guide, development])

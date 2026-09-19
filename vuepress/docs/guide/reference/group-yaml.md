@@ -1,7 +1,7 @@
 ---
-title: group-yaml
-createTime: 2026/09/19 23:56:32
-permalink: /reference/6xd7el4t/
+title: Group YAML
+permalink: /reference/group-yaml/
+createTime: 2026/09/20 00:44:43
 ---
 # Group YAML
 

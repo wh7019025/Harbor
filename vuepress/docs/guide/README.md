@@ -1,5 +1,5 @@
 ---
-title: 什么是 Harbor
+title: 使用指南
 createTime: 2026/09/19 23:55:58
 permalink: /guide/
 ---
@@ -31,5 +31,6 @@ Harbor 是一个面向机器人开发的任务编排工具。它把反复输入�
 
 1. [关键概念](./concepts.md)：理解 GUI、Core、Workspace、Task 与 Group。
 2. [快速开始](./getting-started.md)：安装 Harbor 并运行第一个 Task。
-3. [工作空间](./workspaces.md)：配置扫描路径和远端主机。
-4. [远端运行](./remote.md)：了解 SSH、Core 部署和图形环境。
+3. [Work with AI](./work-with-ai.md)：让 AI 创建、运行和排查 Harbor 任务。
+4. [工作空间](./workspaces.md)：配置扫描路径和远端主机。
+5. [远端运行](./remote.md)：了解 SSH、Core 部署和图形环境。

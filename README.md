@@ -9,69 +9,29 @@
 
 Harbor 是一个面向开发者与 AI Agent 的本地任务管理工具，用统一配置组织、编排和运行工作流。
 
-## 系统依赖（Linux）
+> 让每个任务，有序启航。
 
-开发前请先安装：
+把重复操作沉淀为简单、可复用的 Task 与 Group，在同一个界面中管理本地和远端程序、日志与 Web Panel。
 
-```bash
-sudo apt update
-sudo apt install -y \
-  libwebkit2gtk-4.1-dev \
-  libgtk-3-dev \
-  libayatana-appindicator3-dev \
-  librsvg2-dev \
-  patchelf \
-  pkg-config \
-  build-essential
-```
+![Harbor 实际运行界面](vuepress/docs/.vuepress/public/images/harbor-app.png)
 
-装完后确认：
+## 下载
 
-```bash
-pkg-config --exists webkit2gtk-4.1 && echo webkit_ok
-pkg-config --exists gtk+-3.0 && echo gtk_ok
-```
+从 [GitHub Releases](https://github.com/wh7019025/Harbor/releases) 下载最新 Linux 安装包。
 
-## 开发
+## 文档
 
-```bash
-npm install
-npm run tauri dev
-```
+- [什么是 Harbor](https://harbor.hyln.space/guide/)
+- [快速开始](https://harbor.hyln.space/guide/getting-started/)
+- [Work with AI](https://harbor.hyln.space/guide/work-with-ai/)
+- [远端运行](https://harbor.hyln.space/guide/remote/)
+- [Web Panel](https://harbor.hyln.space/guide/panels/)
 
-`npm run tauri dev` 会先执行 `npm run core:release`，生成 release `harbor_core` 和相邻的 `harbor_core.sha256`。GUI 编译时校验并固化该哈希。
+## 开发 Harbor
 
-## 打包
+开发环境、架构与构建流程统一维护在官方文档中：
 
-```bash
-npm run tauri build -- --bundles deb
-```
-
-产物：`src-tauri/target/release/bundle/deb/Harbor_*_amd64.deb`（含 `harbor` 与 `harbor_core`）
-
-## CI
-
-GitHub Actions（`.github/workflows/build.yml`）会在 `main` / PR / 手动触发时构建 Linux `.deb`，并上传为 workflow artifact。
-
-推送 `v*` tag（例如 `v0.1.2-rc3`）时，会额外创建并公开 Release，挂上 `.deb`。
-
-## 官方文档
-
-VuePress 文档与 Harbor 位于同一仓库，源码在 `vuepress/`。
-
-```bash
-npm install
-npm run docs:dev
-```
-
-应用与文档统一使用根目录的 npm workspace 管理。生产构建使用 `npm run docs:build`，产物位于 `vuepress/docs/.vuepress/dist/`。
-
-## 数据
-
-- Task / Group：项目内 `<项目>/harbor_taskcfg/{tasks,groups}`
-- 日志：core 所在机器的 `~/.harbor/workspace/<id>/log`，各 workspace 独立
-- 进程占用状态：core 所在机器的 `~/.harbor/runtime/run`，按 UUID 跨 workspace 共享
-- Harbor 自身日志：`~/.harbor/log/harbor.log`（GUI 与 core 聚合显示）
-- 设置：`~/.harbor/settings.json`（含当前 workspace 的 `search_paths`；Agent 可通过 `~/.agents/skills/harbor/` 中的 Harbor Skill 维护）
-- 本机 daemon：GUI 只执行 `~/.harbor/core/<version>/harbor_core` 中的托管副本（默认 `http://127.0.0.1:29385`）。该副本必须与 GUI 内固化的 release core SHA-256 一致；打包目录或 `/usr/bin/harbor_core` 仅作为安装来源，不能直接运行。GUI 关闭后 core 仍可运行。每台机器同一时间只运行一个 core，不区分版本；当前 GUI 访问时会自动关闭版本、API 或哈希不对应的旧 core 并启动匹配 core。
-- Task / Group YAML 都有全局 `uuid`。缺失时 core 自动写入；同一台机器发现重复 UUID 时禁止启动，需为其中一个配置重置 UUID。workspace 只决定当前发现哪些配置，不隔离运行实例。
+- [设计理念](https://harbor.hyln.space/development/)
+- [Harbor 架构](https://harbor.hyln.space/development/architecture/)
+- [环境配置](https://harbor.hyln.space/development/environment/)
+- [构建 Harbor](https://harbor.hyln.space/development/build/)

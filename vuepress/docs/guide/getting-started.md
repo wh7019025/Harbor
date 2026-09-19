@@ -1,7 +1,7 @@
 ---
 title: 快速开始
 createTime: 2026/09/19 23:55:58
-permalink: /guide/dkicmkgu/
+permalink: /guide/getting-started/
 ---
 # 快速开始
 

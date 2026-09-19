@@ -12,9 +12,9 @@ config:
         width: 720
       actions:
         - theme: brand
+          text: 下载 Harbor
+          link: https://github.com/wh7019025/Harbor/releases
+        - theme: alt
           text: 快速开始
           link: /guide/getting-started/
-        - theme: alt
-          text: 配置参考
-          link: /reference/
 ---

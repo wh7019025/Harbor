@@ -1,7 +1,7 @@
 ---
-title: web-api
-createTime: 2026/09/19 23:56:33
-permalink: /reference/kmp45d9d/
+title: Web API
+permalink: /reference/web-api/
+createTime: 2026/09/20 00:44:43
 ---
 # Web API
 

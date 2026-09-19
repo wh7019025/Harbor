@@ -1,7 +1,7 @@
 ---
-title: settings
-createTime: 2026/09/19 23:56:33
-permalink: /reference/2mtkugtn/
+title: Settings
+permalink: /reference/settings/
+createTime: 2026/09/20 00:44:43
 ---
 # Settings
 

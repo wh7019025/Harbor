@@ -1,7 +1,7 @@
 ---
-title: task-yaml
-createTime: 2026/09/19 23:56:32
-permalink: /reference/3trlj7r1/
+title: Task YAML
+permalink: /reference/task-yaml/
+createTime: 2026/09/20 00:44:43
 ---
 # Task YAML
 

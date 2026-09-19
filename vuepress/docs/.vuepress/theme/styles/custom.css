@@ -3,6 +3,7 @@
   --vp-c-brand-2: #0f63d8;
   --vp-c-brand-3: #0b4fae;
   --vp-c-brand-soft: rgb(22 119 255 / 14%);
+  --vp-sidebar-bg-color: var(--vp-c-bg);
   --vp-home-hero-name-color: transparent;
   --vp-home-hero-name-background: linear-gradient(120deg, #1677ff 20%, #21c7a8 85%);
 }

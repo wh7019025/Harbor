@@ -1,7 +1,7 @@
 ---
 title: 关键概念
 createTime: 2026/09/19 23:55:58
-permalink: /guide/pmxfl5gq/
+permalink: /guide/concepts/
 ---
 # 关键概念
 

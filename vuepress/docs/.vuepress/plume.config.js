@@ -8,6 +8,10 @@ export default defineThemeConfig({
   docsRepo: 'https://github.com/wh7019025/Harbor',
   docsDir: 'docs',
   appearance: 'force-dark',
+  createTime: false,
+  editLink: false,
+  lastUpdated: false,
+  contributors: false,
   social: [
     { icon: 'github', link: 'https://github.com/wh7019025/Harbor' },
   ],

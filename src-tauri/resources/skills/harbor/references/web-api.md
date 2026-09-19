@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`2`。
+- 当前 `api_revision`：`3`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
