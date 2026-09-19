@@ -55,6 +55,17 @@ GitHub Actions（`.github/workflows/build.yml`）会在 `main` / PR / 手动触�
 
 推送 `v*` tag（例如 `v0.1.2-rc3`）时，会额外创建并公开 Release，挂上 `.deb`。
 
+## 官方文档
+
+VuePress 文档与 Harbor 位于同一仓库，源码在 `vuepress/`。
+
+```bash
+npm install
+npm run docs:dev
+```
+
+应用与文档统一使用根目录的 npm workspace 管理。生产构建使用 `npm run docs:build`，产物位于 `vuepress/docs/.vuepress/dist/`。
+
 ## 数据
 
 - Task / Group：项目内 `<项目>/harbor_taskcfg/{tasks,groups}`

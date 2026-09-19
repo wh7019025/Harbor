@@ -3,10 +3,16 @@
   "private": true,
   "version": "0.2.0-preview",
   "type": "module",
+  "workspaces": [
+    "vuepress"
+  ],
   "scripts": {
     "core:release": "bash scripts/build_core_release.sh",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "docs:dev": "npm run dev --workspace=harbor-vuepress",
+    "docs:build": "npm run build --workspace=harbor-vuepress",
+    "docs:preview": "npm run preview --workspace=harbor-vuepress",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

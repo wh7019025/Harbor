@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" role="img" aria-labelledby="title desc">
+  <title id="title">Harbor 远端连接流程</title><desc id="desc">GUI 通过 SSH 探测、校验、部署并连接远端 Core。</desc>
+  <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0d1728"/><stop offset="1" stop-color="#14243a"/></linearGradient><marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0l9 4.5L0 9z" fill="#55a7ff"/></marker></defs>
+  <rect width="1200" height="440" rx="26" fill="url(#bg)"/><text x="54" y="64" fill="#fff" font-size="28" font-weight="700" font-family="system-ui,sans-serif">远端 Workspace 连接流程</text><text x="54" y="96" fill="#94a9c3" font-size="16" font-family="system-ui,sans-serif">只有 Core 缺失或校验不匹配时才复制 release 二进制</text>
+  <g font-family="system-ui,sans-serif">
+    <g transform="translate(54 150)"><rect width="190" height="150" rx="18" fill="#17283f" stroke="#31506f"/><circle cx="34" cy="34" r="18" fill="#1677ff"/><text x="34" y="40" text-anchor="middle" fill="#fff" font-size="16">1</text><text x="95" y="72" text-anchor="middle" fill="#fff" font-size="21" font-weight="700">SSH Probe</text><text x="95" y="104" text-anchor="middle" fill="#94a9c3" font-size="14">探测系统与 Core</text></g>
+    <path d="M244 225h55" stroke="#55a7ff" stroke-width="4" marker-end="url(#a)"/>
+    <g transform="translate(310 150)"><rect width="220" height="150" rx="18" fill="#17283f" stroke="#31506f"/><circle cx="34" cy="34" r="18" fill="#1677ff"/><text x="34" y="40" text-anchor="middle" fill="#fff" font-size="16">2</text><text x="110" y="68" text-anchor="middle" fill="#fff" font-size="21" font-weight="700">严格校验</text><text x="110" y="100" text-anchor="middle" fill="#94a9c3" font-size="14">Version · API · SHA-256</text></g>
+    <path d="M530 225h55" stroke="#55a7ff" stroke-width="4" marker-end="url(#a)"/>
+    <g transform="translate(596 150)"><rect width="220" height="150" rx="18" fill="#17283f" stroke="#31506f"/><circle cx="34" cy="34" r="18" fill="#21c7a8"/><text x="34" y="40" text-anchor="middle" fill="#fff" font-size="16">3</text><text x="110" y="68" text-anchor="middle" fill="#fff" font-size="21" font-weight="700">按需部署</text><text x="110" y="100" text-anchor="middle" fill="#94a9c3" font-size="14">复制匹配的 release Core</text></g>
+    <path d="M816 225h55" stroke="#55a7ff" stroke-width="4" marker-end="url(#a)"/>
+    <g transform="translate(882 150)"><rect width="264" height="150" rx="18" fill="#17283f" stroke="#31506f"/><circle cx="34" cy="34" r="18" fill="#21c7a8"/><text x="34" y="40" text-anchor="middle" fill="#fff" font-size="16">4</text><text x="132" y="68" text-anchor="middle" fill="#fff" font-size="21" font-weight="700">HTTP Connected</text><text x="132" y="100" text-anchor="middle" fill="#94a9c3" font-size="14">host:29385 · 状态同步</text></g>
+    <rect x="54" y="338" width="1092" height="50" rx="12" fill="#10243b" stroke="#294a69"/><text x="600" y="369" text-anchor="middle" fill="#9fc4e8" font-size="15">远端 Core 无鉴权：仅在可信局域网、VPN 或严格防火墙后使用</text>
+  </g>
+</svg>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Harbor">
+  <rect x="48" y="48" width="928" height="928" rx="208" fill="#1a1a1a"/>
+  <path d="M352 290V610M352 450H672M672 290V610" fill="none" stroke="#f5f5f5" stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="352" y="698" width="320" height="52" rx="26" fill="#4ea1ff"/>
+</svg>
