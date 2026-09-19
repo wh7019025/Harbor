@@ -1,4 +1,5 @@
 version: "0.1.4"
+uuid: b681d035-2ca7-49ef-91b4-73e5a826cf19
 id: demo-ping
 name: Demo Ping
 description: 演示用的周期性 ping 任务

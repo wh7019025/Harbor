@@ -3,14 +3,18 @@
 
 | 名称   | 当前值       | 命令行                |
 | ---- | --------- | ------------------ |
-| 应用版本 | 0.1.4 | `harbor --version` |
+| 应用版本 | 0.2.0-preview | `harbor --version` |
 
 
 机器可读：`~/.harbor/version.json`（Harbor 启动时更新）
 
+Harbor GUI 与 `harbor_core` 的应用版本和 API revision **必须对应**。二进制按版本分开放在 `~/.harbor/core/<version>/harbor_core`（远端同样路径），但每台机器同一时间只允许运行一个 `harbor_core`，不区分版本。当前访问该机器的 Harbor GUI 占用这个唯一 core；发现版本或 API revision 不对应时，会关闭旧 core 并启动与当前 GUI 对应的 core，不会并行启动第二个。
+
+GUI 只执行 `.harbor` 中的托管副本。构建 pipeline 先生成 release `harbor_core` 和 `harbor_core.sha256`，再把 SHA-256 固化进 GUI；安装和远端部署后必须再次校验哈希。版本相同但内容不同的 core 也会被替换，debug core 不得进入 `.harbor`。
+
 ## Task / Group YAML 中的 `version`
 
-YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` 相同，例如 `"0.1.4"`）。
+YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` 相同，例如 `"0.2.0-preview"`）。
 
 **不是** Task / Group 的修订号或「改一次加一」的版本计数。
 
@@ -38,6 +42,6 @@ YAML 顶部的 `version` 是 **Harbor 应用版本**（与 `harbor --version` �
 harbor --version
 ```
 
-并将结果写入 YAML，例如 `version: "0.1.4"`（建议加引号）。同一应用版本下无论改多少次 Task / Group，此值保持不变。
+并将结果写入 YAML，例如 `version: "0.2.0-preview"`（建议加引号）。同一应用版本下无论改多少次 Task / Group，此值保持不变。
 
 详见 [yaml/task.md](yaml/task.md)、[yaml/group.md](yaml/group.md)。

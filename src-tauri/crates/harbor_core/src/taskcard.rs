@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::version::APP_VERSION;
 
@@ -18,6 +19,8 @@ use crate::version::APP_VERSION;
 pub struct TaskDefinition {
     #[serde(deserialize_with = "deserialize_yaml_version")]
     pub version: String,
+    #[serde(default = "generate_uuid")]
+    pub uuid: String,
     pub id: String,
     #[serde(default)]
     pub name: String,
@@ -32,6 +35,8 @@ pub struct TaskDefinition {
     pub default_config: String,
     #[serde(default)]
     pub sudo: bool,
+    #[serde(default)]
+    pub panel_interface: Vec<PanelInterface>,
     pub command: TaskCommand,
     #[serde(default, skip_deserializing)]
     pub folder: String,
@@ -39,6 +44,16 @@ pub struct TaskDefinition {
     pub prefix_path: String,
     #[serde(default, skip_deserializing)]
     pub taskcfg_dir: String,
+    #[serde(default, skip_deserializing)]
+    pub definition_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PanelInterface {
+    pub panel_name: String,
+    pub interface_port: u16,
+    #[serde(default)]
+    pub localhost_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -89,16 +104,20 @@ impl TaskDefinition {
 pub struct GroupDefinition {
     #[serde(deserialize_with = "deserialize_yaml_version")]
     pub version: String,
+    #[serde(default = "generate_uuid")]
+    pub uuid: String,
     pub id: String,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub description: String,
     pub tasks: Vec<GroupTask>,
-    #[serde(default, skip_deserializing)]
+    #[serde(default)]
     pub folder: String,
-    #[serde(default, skip_deserializing)]
+    #[serde(default)]
     pub prefix_path: String,
+    #[serde(default, skip_deserializing)]
+    pub definition_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,8 +134,10 @@ pub struct GroupTask {
     pub prefix_path: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TaskSummary {
+    pub uuid: String,
+    pub uuid_conflict: bool,
     pub id: String,
     pub prefix_path: String,
     pub name: String,
@@ -125,22 +146,24 @@ pub struct TaskSummary {
     pub command: String,
     pub env_count: usize,
     pub configs: Vec<TaskConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_config: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub running_config_id: Option<String>,
     pub requires_sudo: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panel_interface: Vec<PanelInterface>,
     pub folder: String,
-    pub status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<u128>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log_file: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskCardSnapshot {
     pub root: String,
     pub search_paths: Vec<String>,
@@ -148,21 +171,37 @@ pub struct TaskCardSnapshot {
     pub discovered_group_dirs: Vec<String>,
     pub tasks: Vec<TaskSummary>,
     pub groups: Vec<GroupDefinition>,
+    #[serde(default)]
+    pub uuid_conflicts: Vec<UuidConflict>,
     pub errors: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UuidDefinitionRef {
+    pub kind: String,
+    pub id: String,
+    pub prefix_path: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UuidConflict {
+    pub uuid: String,
+    pub definitions: Vec<UuidDefinitionRef>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResearchResult {
     pub search_paths: Vec<String>,
     pub discovered_task_dirs: Vec<String>,
     pub discovered_group_dirs: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskLogSummary {
     pub file: String,
     pub task_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_id: Option<String>,
     pub started_at_ms: u128,
     pub modified_at_ms: u128,
@@ -170,14 +209,14 @@ pub struct TaskLogSummary {
     pub active: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskLogContent {
     pub file: String,
     pub content: String,
     pub truncated: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskLogChunk {
     pub file: String,
     pub content: String,
@@ -193,21 +232,26 @@ pub struct TaskCardYamlBody {
     pub folder: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskCardYamlDocument {
     pub content: String,
     pub folder: String,
 }
 
 struct RunningTask {
+    id: String,
+    prefix_path: String,
     child: Child,
     started_at_ms: u128,
     log_file: String,
+    log_dir: PathBuf,
     config_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct RunningTaskRecord {
+    #[serde(default)]
+    uuid: String,
     prefix_path: String,
     id: String,
     pid: u32,
@@ -224,11 +268,19 @@ struct RuntimeState {
 }
 
 #[derive(Clone)]
+struct DiscoveryCache {
+    task_dirs: Vec<PathBuf>,
+    group_dirs: Vec<PathBuf>,
+}
+
+#[derive(Clone)]
 pub struct TaskCardService {
     root: PathBuf,
+    log_dir: Arc<Mutex<PathBuf>>,
     search_paths: Arc<Mutex<Vec<PathBuf>>>,
     discovered_task_dirs: Arc<Mutex<Vec<PathBuf>>>,
     discovered_group_dirs: Arc<Mutex<Vec<PathBuf>>>,
+    discovery_cache: Arc<Mutex<HashMap<Vec<PathBuf>, DiscoveryCache>>>,
     state: Arc<Mutex<RuntimeState>>,
     _instance_lock: Arc<File>,
 }
@@ -236,17 +288,22 @@ pub struct TaskCardService {
 impl TaskCardService {
     pub fn new(root: PathBuf, search_paths: Vec<PathBuf>) -> Result<Self, String> {
         if let Err(error) = initialize_root(&root) {
-            eprintln!("initialize TaskCard root {} failed: {error}", root.display());
+            eprintln!(
+                "initialize TaskCard root {} failed: {error}",
+                root.display()
+            );
         }
         let instance_lock = acquire_instance_lock(root.join("run").as_path())?;
         if let Err(error) = cleanup_orphan_tasks(root.as_path()) {
             eprintln!("cleanup orphan tasks failed: {error}");
         }
         let service = Self {
+            log_dir: Arc::new(Mutex::new(root.join("log"))),
             root,
             search_paths: Arc::new(Mutex::new(search_paths)),
             discovered_task_dirs: Arc::new(Mutex::new(Vec::new())),
             discovered_group_dirs: Arc::new(Mutex::new(Vec::new())),
+            discovery_cache: Arc::new(Mutex::new(HashMap::new())),
             state: Arc::new(Mutex::new(RuntimeState::default())),
             _instance_lock: Arc::new(instance_lock),
         };
@@ -256,6 +313,27 @@ impl TaskCardService {
 
     pub fn set_search_paths(&self, paths: Vec<PathBuf>) {
         *self.search_paths.lock() = paths;
+    }
+
+    pub fn activate_search_paths(&self, paths: Vec<PathBuf>) -> bool {
+        *self.search_paths.lock() = paths.clone();
+        let Some(cached) = self.discovery_cache.lock().get(&paths).cloned() else {
+            return false;
+        };
+        *self.discovered_task_dirs.lock() = cached.task_dirs;
+        *self.discovered_group_dirs.lock() = cached.group_dirs;
+        true
+    }
+
+    pub fn set_log_dir(&self, path: PathBuf) -> Result<(), String> {
+        fs::create_dir_all(&path)
+            .map_err(|error| format!("create log dir {} failed: {error}", path.display()))?;
+        *self.log_dir.lock() = path;
+        Ok(())
+    }
+
+    fn current_log_dir(&self) -> PathBuf {
+        self.log_dir.lock().clone()
     }
 
     pub fn search_paths(&self) -> Vec<String> {
@@ -291,8 +369,27 @@ impl TaskCardService {
         task_dirs.dedup();
         group_dirs.sort();
         group_dirs.dedup();
+        for dir in task_dirs.iter().chain(group_dirs.iter()) {
+            let mut files = Vec::new();
+            collect_yaml_files(dir, &mut files);
+            for path in files {
+                let result = fs::read_to_string(&path)
+                    .map_err(|error| error.to_string())
+                    .and_then(|content| ensure_yaml_uuid(&path, &content));
+                if let Err(error) = result {
+                    eprintln!("migrate yaml uuid {} failed: {error}", path.display());
+                }
+            }
+        }
         *self.discovered_task_dirs.lock() = task_dirs.clone();
         *self.discovered_group_dirs.lock() = group_dirs.clone();
+        self.discovery_cache.lock().insert(
+            roots.clone(),
+            DiscoveryCache {
+                task_dirs: task_dirs.clone(),
+                group_dirs: group_dirs.clone(),
+            },
+        );
         ResearchResult {
             search_paths: roots
                 .iter()
@@ -313,15 +410,34 @@ impl TaskCardService {
         let (task_defs, mut errors) = self.load_tasks();
         let (group_defs, group_errors) = self.load_groups();
         errors.extend(group_errors);
+        let uuid_conflicts = self.uuid_conflicts();
+        let conflicted_uuids = uuid_conflicts
+            .iter()
+            .map(|conflict| conflict.uuid.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        errors.extend(uuid_conflicts.iter().map(|conflict| {
+            format!(
+                "duplicate uuid {}: {}",
+                conflict.uuid,
+                conflict
+                    .definitions
+                    .iter()
+                    .map(|item| item.path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }));
         self.refresh_processes();
 
         let state = self.state.lock();
+        let current_log_dir = self.current_log_dir();
         let mut tasks = task_defs
             .into_values()
             .map(|task| {
-                let key = instance_key(task.prefix_path.as_str(), task.id.as_str());
-                let running = state.running.get(key.as_str());
+                let running = state.running.get(task.uuid.as_str());
                 TaskSummary {
+                    uuid: task.uuid.clone(),
+                    uuid_conflict: conflicted_uuids.contains(task.uuid.as_str()),
                     id: task.id.clone(),
                     prefix_path: task.prefix_path.clone(),
                     name: display_name(task.name.as_str(), task.id.as_str()),
@@ -333,11 +449,18 @@ impl TaskCardService {
                     default_config: task.default_config_id().map(str::to_string),
                     running_config_id: running.and_then(|item| item.config_id.clone()),
                     requires_sudo: task.sudo,
+                    panel_interface: task.panel_interface.clone(),
                     folder: task.folder.clone(),
-                    status: if running.is_some() { "running" } else { "stopped" },
+                    status: if running.is_some() {
+                        "running".to_string()
+                    } else {
+                        "stopped".to_string()
+                    },
                     pid: running.map(|item| item.child.id()),
                     started_at_ms: running.map(|item| item.started_at_ms),
-                    log_file: running.map(|item| item.log_file.clone()),
+                    log_file: running
+                        .filter(|item| item.log_dir == current_log_dir)
+                        .map(|item| item.log_file.clone()),
                 }
             })
             .collect::<Vec<_>>();
@@ -370,6 +493,7 @@ impl TaskCardService {
                 .collect(),
             tasks,
             groups,
+            uuid_conflicts,
             errors,
         }
     }
@@ -383,16 +507,27 @@ impl TaskCardService {
         sudo_password: Option<&str>,
     ) -> Result<(), String> {
         validate_id(id)?;
-        let key = instance_key(prefix_path, id);
+        let definition_key = instance_key(prefix_path, id);
         self.refresh_processes();
         let tasks = self.load_tasks().0;
         let task = tasks
-            .get(key.as_str())
+            .get(definition_key.as_str())
             .ok_or_else(|| format!("task not found: {id} @ {prefix_path}"))?;
+        if self
+            .uuid_conflicts()
+            .iter()
+            .any(|conflict| conflict.uuid == task.uuid)
+        {
+            return Err(format!(
+                "task uuid conflict: {}; reset one conflicting definition before starting",
+                task.uuid
+            ));
+        }
         let config = task.resolve_config(config_id)?;
         let selected_config_id = config.map(|item| item.id.clone());
+        let runtime_key = task.uuid.clone();
         let mut state = self.state.lock();
-        if let Some(running) = state.running.get(key.as_str()) {
+        if let Some(running) = state.running.get(runtime_key.as_str()) {
             if running.config_id == selected_config_id {
                 return Ok(());
             }
@@ -408,7 +543,11 @@ impl TaskCardService {
         }
 
         let password = if task.sudo {
-            Some(sudo_password.filter(|password| !password.is_empty()).ok_or("sudo password is required")?)
+            Some(
+                sudo_password
+                    .filter(|password| !password.is_empty())
+                    .ok_or("sudo password is required")?,
+            )
         } else {
             None
         };
@@ -417,15 +556,20 @@ impl TaskCardService {
         } else {
             build_command(&task.command)?
         };
+        let log_dir = self.current_log_dir();
         let (started_at_ms, log_file, stdout) =
-            create_log_file(self.root.as_path(), id, selected_config_id.as_deref())?;
-        let log_path = self.root.join("log").join(log_file.as_str());
+            create_log_file(log_dir.as_path(), id, selected_config_id.as_deref())?;
+        let log_path = log_dir.join(log_file.as_str());
         let stderr = stdout
             .try_clone()
             .map_err(|e| format!("clone log {} failed: {e}", log_path.display()))?;
         command
             .current_dir(workdir)
-            .stdin(if task.sudo { Stdio::piped() } else { Stdio::null() })
+            .stdin(if task.sudo {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
         command.envs(merged_task_env(task, config, env_override));
@@ -464,11 +608,14 @@ impl TaskCardService {
             }
         }
         state.running.insert(
-            key,
+            runtime_key,
             RunningTask {
+                id: task.id.clone(),
+                prefix_path: task.prefix_path.clone(),
                 child,
                 started_at_ms,
                 log_file,
+                log_dir,
                 config_id: selected_config_id,
             },
         );
@@ -479,8 +626,12 @@ impl TaskCardService {
 
     pub fn stop_task(&self, prefix_path: &str, id: &str) -> Result<(), String> {
         validate_id(id)?;
-        let key = instance_key(prefix_path, id);
-        let Some(mut running) = self.state.lock().running.remove(key.as_str()) else {
+        let definition_key = instance_key(prefix_path, id);
+        let tasks = self.load_tasks().0;
+        let task = tasks
+            .get(definition_key.as_str())
+            .ok_or_else(|| format!("task not found: {id} @ {prefix_path}"))?;
+        let Some(mut running) = self.state.lock().running.remove(task.uuid.as_str()) else {
             return Ok(());
         };
         terminate_task(id, &mut running.child)?;
@@ -488,19 +639,17 @@ impl TaskCardService {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn running_count(&self) -> usize {
+        self.refresh_processes();
+        self.state.lock().running.len()
+    }
+
     pub fn stop_all(&self) -> Vec<String> {
-        let running = self
-            .state
-            .lock()
-            .running
-            .drain()
-            .collect::<Vec<_>>();
+        let running = self.state.lock().running.drain().collect::<Vec<_>>();
         let errors = running
             .into_iter()
-            .filter_map(|(key, mut running)| {
-                let id = key.rsplit('\0').next().unwrap_or(key.as_str());
-                terminate_task(id, &mut running.child).err()
-            })
+            .filter_map(|(_, mut running)| terminate_task(&running.id, &mut running.child).err())
             .collect::<Vec<_>>();
         let _ = self.sync_running_registry();
         errors
@@ -521,7 +670,11 @@ impl TaskCardService {
             .get(key.as_str())
             .ok_or_else(|| format!("task not found: {id} @ {prefix_path}"))?;
         task.resolve_config(config_id)?;
-        if task.sudo && sudo_password.filter(|password| !password.is_empty()).is_none() {
+        if task.sudo
+            && sudo_password
+                .filter(|password| !password.is_empty())
+                .is_none()
+        {
             return Err("sudo password is required".into());
         }
         self.stop_task(prefix_path, id)?;
@@ -541,6 +694,16 @@ impl TaskCardService {
             .get(key.as_str())
             .ok_or_else(|| format!("group not found: {id} @ {prefix_path}"))?
             .clone();
+        if self
+            .uuid_conflicts()
+            .iter()
+            .any(|conflict| conflict.uuid == group.uuid)
+        {
+            return Err(format!(
+                "group uuid conflict: {}; reset one conflicting definition before starting",
+                group.uuid
+            ));
+        }
         // Stage 1: resolve every reference before starting anything.
         let resolved = group
             .tasks
@@ -622,10 +785,14 @@ impl TaskCardService {
         if definition_path(&dir, task.id.as_str()).is_some() {
             return Err(format!("definition already exists: {}", task.id));
         }
-        write_definition(&dir, task.id.as_str(), "", stamp_yaml_version(content)?.as_str(), false)?;
-        if dir != self.root.join("tasks") {
-            let _ = self.research();
-        }
+        write_definition(
+            &dir,
+            task.id.as_str(),
+            "",
+            stamp_yaml_version(content)?.as_str(),
+            false,
+        )?;
+        let _ = self.research();
         Ok(task.id)
     }
 
@@ -647,8 +814,7 @@ impl TaskCardService {
                 return Err(format!("definition already exists: {new_id}"));
             }
             self.refresh_processes();
-            let key = instance_key(prefix_path, id);
-            if self.state.lock().running.contains_key(key.as_str()) {
+            if self.state.lock().running.contains_key(task.uuid.as_str()) {
                 return Err(format!("task is running: {id}"));
             }
             self.rewrite_group_task_refs(prefix_path, id, new_id)?;
@@ -665,8 +831,12 @@ impl TaskCardService {
     pub fn delete_task(&self, prefix_path: &str, id: &str) -> Result<(), String> {
         validate_id(id)?;
         self.refresh_processes();
-        let key = instance_key(prefix_path, id);
-        if self.state.lock().running.contains_key(key.as_str()) {
+        let definition_key = instance_key(prefix_path, id);
+        let tasks = self.load_tasks().0;
+        let task = tasks
+            .get(definition_key.as_str())
+            .ok_or_else(|| format!("task not found: {id} @ {prefix_path}"))?;
+        if self.state.lock().running.contains_key(task.uuid.as_str()) {
             return Err(format!("task is running: {id}"));
         }
         let (groups, _) = self.load_groups();
@@ -708,9 +878,7 @@ impl TaskCardService {
             stamp_yaml_version(content)?.as_str(),
             false,
         )?;
-        if dir != self.root.join("groups") {
-            let _ = self.research();
-        }
+        let _ = self.research();
         Ok(group.id)
     }
 
@@ -755,15 +923,87 @@ impl TaskCardService {
         new_group_template()
     }
 
+    pub fn uuid_conflicts(&self) -> Vec<UuidConflict> {
+        let mut definitions = HashMap::<String, Vec<UuidDefinitionRef>>::new();
+        let sources = [
+            ("task", self.discovered_task_dirs.lock().clone()),
+            ("group", self.discovered_group_dirs.lock().clone()),
+        ];
+        for (kind, dirs) in sources {
+            for dir in dirs {
+                let prefix_path = self.prefix_path_for_dir(&dir);
+                let mut files = Vec::new();
+                collect_yaml_files(&dir, &mut files);
+                for path in files {
+                    let Ok(content) = fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    let Ok(content) = ensure_yaml_uuid(&path, &content) else {
+                        continue;
+                    };
+                    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&content) else {
+                        continue;
+                    };
+                    let Some(uuid) = value.get("uuid").and_then(serde_yaml::Value::as_str) else {
+                        continue;
+                    };
+                    let id = value
+                        .get("id")
+                        .and_then(serde_yaml::Value::as_str)
+                        .unwrap_or_default();
+                    definitions
+                        .entry(uuid.to_string())
+                        .or_default()
+                        .push(UuidDefinitionRef {
+                            kind: kind.into(),
+                            id: id.to_string(),
+                            prefix_path: prefix_path.clone(),
+                            path: absolutize(&path),
+                        });
+                }
+            }
+        }
+        uuid_conflicts_from_definitions(definitions)
+    }
+
+    pub fn reset_definition_uuid(&self, path: &str) -> Result<String, String> {
+        let requested = PathBuf::from(path)
+            .canonicalize()
+            .map_err(|error| format!("resolve {path} failed: {error}"))?;
+        let mut allowed = Vec::new();
+        let mut dirs = self.discovered_task_dirs.lock().clone();
+        dirs.extend(self.discovered_group_dirs.lock().iter().cloned());
+        for dir in &dirs {
+            collect_yaml_files(dir, &mut allowed);
+        }
+        let allowed = allowed.into_iter().any(|candidate| {
+            candidate
+                .canonicalize()
+                .is_ok_and(|candidate| candidate == requested)
+        });
+        if !allowed {
+            return Err(format!(
+                "definition is outside discovered yaml files: {path}"
+            ));
+        }
+        let content = fs::read_to_string(&requested)
+            .map_err(|error| format!("read {} failed: {error}", requested.display()))?;
+        let uuid = generate_uuid();
+        write_yaml_uuid(&requested, &content, uuid.as_str())?;
+        Ok(uuid)
+    }
+
     pub fn logs(&self) -> Vec<TaskLogSummary> {
         self.refresh_processes();
+        let log_dir = self.current_log_dir();
         let state = self.state.lock();
         let active = state
             .running
             .values()
+            .filter(|task| task.log_dir == log_dir)
             .map(|task| task.log_file.as_str())
             .collect::<std::collections::HashSet<_>>();
-        let mut logs = fs::read_dir(self.root.join("log"))
+        let mut logs = fs::read_dir(&log_dir)
             .into_iter()
             .flatten()
             .flatten()
@@ -798,7 +1038,6 @@ impl TaskCardService {
         });
         const MAX_LOGS: usize = 50;
         if logs.len() > MAX_LOGS {
-            let log_dir = self.root.join("log");
             for old in logs.iter().skip(MAX_LOGS) {
                 if old.active {
                     continue;
@@ -812,7 +1051,7 @@ impl TaskCardService {
 
     pub fn read_log(&self, file: &str) -> Result<TaskLogContent, String> {
         validate_log_file(file)?;
-        let path = self.root.join("log").join(file);
+        let path = self.current_log_dir().join(file);
         let mut handle = fs::File::open(&path)
             .map_err(|e| format!("open log {} failed: {e}", path.display()))?;
         let bytes = handle.metadata().map_err(|e| e.to_string())?.len();
@@ -824,7 +1063,9 @@ impl TaskCardService {
                 .map_err(|e| e.to_string())?;
         }
         let mut content = Vec::new();
-        handle.read_to_end(&mut content).map_err(|e| e.to_string())?;
+        handle
+            .read_to_end(&mut content)
+            .map_err(|e| e.to_string())?;
         Ok(TaskLogContent {
             file: file.to_string(),
             content: String::from_utf8_lossy(&content).into_owned(),
@@ -834,13 +1075,15 @@ impl TaskCardService {
 
     pub fn read_log_chunk(&self, file: &str, offset: u64) -> Result<TaskLogChunk, String> {
         validate_log_file(file)?;
-        let path = self.root.join("log").join(file);
+        let path = self.current_log_dir().join(file);
         let mut handle = fs::File::open(&path)
             .map_err(|e| format!("open log {} failed: {e}", path.display()))?;
         let bytes = handle.metadata().map_err(|e| e.to_string())?.len();
         let reset = offset > bytes;
         let start = if reset { 0 } else { offset };
-        handle.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+        handle
+            .seek(SeekFrom::Start(start))
+            .map_err(|e| e.to_string())?;
         let mut content = Vec::new();
         handle
             .take(64 * 1024)
@@ -858,11 +1101,13 @@ impl TaskCardService {
         let changed = {
             let mut state = self.state.lock();
             let before = state.running.len();
-            state.running.retain(|_, running| match running.child.try_wait() {
-                Ok(Some(_)) => false,
-                Ok(None) => true,
-                Err(_) => false,
-            });
+            state
+                .running
+                .retain(|_, running| match running.child.try_wait() {
+                    Ok(Some(_)) => false,
+                    Ok(None) => true,
+                    Err(_) => false,
+                });
             before != state.running.len()
         };
         if changed {
@@ -876,17 +1121,15 @@ impl TaskCardService {
             state
                 .running
                 .iter()
-                .filter_map(|(key, running)| {
-                    let (prefix_path, id) = split_instance_key(key)?;
-                    Some(RunningTaskRecord {
-                        prefix_path,
-                        id,
-                        pid: running.child.id(),
-                        pgid: running.child.id() as i32,
-                        started_at_ms: running.started_at_ms,
-                        log_file: running.log_file.clone(),
-                        config_id: running.config_id.clone(),
-                    })
+                .map(|(uuid, running)| RunningTaskRecord {
+                    uuid: uuid.clone(),
+                    prefix_path: running.prefix_path.clone(),
+                    id: running.id.clone(),
+                    pid: running.child.id(),
+                    pgid: running.child.id() as i32,
+                    started_at_ms: running.started_at_ms,
+                    log_file: running.log_file.clone(),
+                    config_id: running.config_id.clone(),
                 })
                 .collect::<Vec<_>>()
         };
@@ -905,9 +1148,10 @@ impl TaskCardService {
             let (part, part_errors) = load_yaml_dir::<TaskDefinition>(
                 dir.clone(),
                 |task| task.id.as_str(),
-                |task, folder| {
+                |task, folder, definition_path| {
                     task.folder = join_folder_prefix(&folder_label, &folder);
                     task.taskcfg_dir = taskcfg_dir.display().to_string();
+                    task.definition_path = definition_path;
                 },
             );
             for (id, mut task) in part {
@@ -934,10 +1178,17 @@ impl TaskCardService {
             let (part, part_errors) = load_yaml_dir::<GroupDefinition>(
                 dir.clone(),
                 |group| group.id.as_str(),
-                |group, folder| group.folder = join_folder_prefix(&folder_label, &folder),
+                |group, folder, definition_path| {
+                    group.folder = join_folder_prefix(&folder_label, &folder);
+                    group.definition_path = definition_path;
+                },
             );
             for (id, mut group) in part {
                 group.prefix_path = prefix_path.clone();
+                if let Err(error) = validate_uuid(group.uuid.as_str()) {
+                    errors.push(format!("invalid group {id} @ {prefix_path}: {error}"));
+                    continue;
+                }
                 let key = instance_key(&prefix_path, &id);
                 if items.insert(key, group).is_some() {
                     errors.push(format!("duplicate group id: {id} @ {prefix_path}"));
@@ -949,7 +1200,7 @@ impl TaskCardService {
     }
 
     fn task_source_dirs(&self) -> Vec<(PathBuf, String)> {
-        let mut dirs = vec![(self.root.join("tasks"), String::new())];
+        let mut dirs = Vec::new();
         let search_roots = self.search_paths.lock().clone();
         for dir in self.discovered_task_dirs.lock().iter() {
             let prefix = folder_prefix_for_discovered(&search_roots, dir);
@@ -959,7 +1210,7 @@ impl TaskCardService {
     }
 
     fn group_source_dirs(&self) -> Vec<(PathBuf, String)> {
-        let mut dirs = vec![(self.root.join("groups"), String::new())];
+        let mut dirs = Vec::new();
         let search_roots = self.search_paths.lock().clone();
         for dir in self.discovered_group_dirs.lock().iter() {
             let prefix = folder_prefix_for_discovered(&search_roots, dir);
@@ -969,15 +1220,8 @@ impl TaskCardService {
     }
 
     fn prefix_path_for_dir(&self, dir: &Path) -> String {
-        if dir == self.root.join("tasks") || dir == self.root.join("groups") {
-            return absolutize(&self.root);
-        }
         let cfg = dir.parent().unwrap_or(dir);
-        if cfg
-            .file_name()
-            .and_then(|value| value.to_str())
-            == Some(TASK_CFG_DIR)
-        {
+        if cfg.file_name().and_then(|value| value.to_str()) == Some(TASK_CFG_DIR) {
             return absolutize(cfg.parent().unwrap_or(cfg));
         }
         absolutize(cfg)
@@ -985,11 +1229,7 @@ impl TaskCardService {
 
     pub fn resolve_config_base_path(&self, prefix_path: &str) -> String {
         let path = PathBuf::from(prefix_path);
-        let base = if path
-            .file_name()
-            .and_then(|value| value.to_str())
-            == Some(TASK_CFG_DIR)
-        {
+        let base = if path.file_name().and_then(|value| value.to_str()) == Some(TASK_CFG_DIR) {
             path.parent().unwrap_or(&path).to_path_buf()
         } else {
             path
@@ -1000,7 +1240,7 @@ impl TaskCardService {
     fn resolve_create_dir(&self, target: &str, root_child: &str) -> Result<PathBuf, String> {
         let target = target.trim();
         if target.is_empty() {
-            return Ok(self.root.join(root_child));
+            return Err("choose a search path before creating a task or group".into());
         }
         let search_paths = self.search_paths.lock().clone();
         for path in &search_paths {
@@ -1017,7 +1257,7 @@ impl TaskCardService {
             }
         }
         Err(format!(
-            "folder must be empty (root) or one of the configured search paths: {target}"
+            "folder must be one of the configured search paths: {target}"
         ))
     }
 
@@ -1178,6 +1418,24 @@ impl TaskCardService {
     }
 }
 
+fn uuid_conflicts_from_definitions(
+    definitions: HashMap<String, Vec<UuidDefinitionRef>>,
+) -> Vec<UuidConflict> {
+    let mut conflicts = definitions
+        .into_iter()
+        .filter_map(|(uuid, mut items)| {
+            items.sort_by(|a, b| a.path.cmp(&b.path));
+            items.dedup_by(|a, b| a.path == b.path);
+            (items.len() > 1).then_some(UuidConflict {
+                uuid,
+                definitions: items,
+            })
+        })
+        .collect::<Vec<_>>();
+    conflicts.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+    conflicts
+}
+
 fn instance_key(prefix_path: &str, id: &str) -> String {
     format!("{prefix_path}\0{id}")
 }
@@ -1191,12 +1449,86 @@ fn merged_task_env(
     config: Option<&TaskConfig>,
     env_override: &HashMap<String, String>,
 ) -> HashMap<String, String> {
-    let mut env = task.env.clone();
+    // --- 阶段 1：合并用户声明的任务环境 ---
+    let mut env = desktop_session_env();
+    env.extend(task.env.clone());
     if let Some(config) = config {
         env.extend(config.env.clone());
     }
     env.extend(env_override.clone());
+
+    // --- 阶段 2：注入 Harbor 管理的面板环境 ---
+    env.extend(panel_interface_env(&task.panel_interface));
     env
+}
+
+fn panel_interface_env(panels: &[PanelInterface]) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    for panel in panels {
+        let panel_key = panel
+            .panel_name
+            .chars()
+            .map(|character| match character {
+                '-' => '_',
+                _ => character.to_ascii_uppercase(),
+            })
+            .collect::<String>();
+        let prefix = format!("HARBOR_PANEL_{panel_key}");
+        env.insert(format!("{prefix}_NAME"), panel.panel_name.clone());
+        env.insert(
+            format!("{prefix}_INTERFACE_PORT"),
+            panel.interface_port.to_string(),
+        );
+        env.insert(
+            format!("{prefix}_LOCALHOST_ONLY"),
+            panel.localhost_only.to_string(),
+        );
+    }
+
+    if let [panel] = panels {
+        env.insert("HARBOR_PANEL_NAME".into(), panel.panel_name.clone());
+        env.insert(
+            "HARBOR_PANEL_INTERFACE_PORT".into(),
+            panel.interface_port.to_string(),
+        );
+        env.insert(
+            "HARBOR_PANEL_LOCALHOST_ONLY".into(),
+            panel.localhost_only.to_string(),
+        );
+    }
+    env
+}
+
+fn desktop_session_env() -> HashMap<String, String> {
+    // --- 阶段 1：读取当前用户图形会话环境 ---
+    let Ok(output) = Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+    else {
+        return HashMap::new();
+    };
+    if !output.status.success() {
+        return HashMap::new();
+    }
+
+    // --- 阶段 2：仅传递启动桌面程序所需变量 ---
+    parse_desktop_session_env(String::from_utf8_lossy(&output.stdout).as_ref())
+}
+
+fn parse_desktop_session_env(content: &str) -> HashMap<String, String> {
+    const KEYS: [&str; 5] = [
+        "DISPLAY",
+        "XAUTHORITY",
+        "WAYLAND_DISPLAY",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "XDG_RUNTIME_DIR",
+    ];
+    content
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(key, value)| KEYS.contains(key) && !value.is_empty())
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
 }
 
 fn absolutize(path: &Path) -> String {
@@ -1239,19 +1571,24 @@ fn walk_named_dirs(root: &Path, name: &str, out: &mut Vec<PathBuf>, depth_left: 
 fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git" | ".hg" | ".svn" | ".cache" | "node_modules" | "target" | "dist" | "build" | ".idea"
-            | ".vscode" | "__pycache__"
+        ".git"
+            | ".hg"
+            | ".svn"
+            | ".cache"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".idea"
+            | ".vscode"
+            | "__pycache__"
     ) || name.starts_with('.')
 }
 
 fn folder_prefix_for_discovered(search_roots: &[PathBuf], discovered: &Path) -> String {
     // discovered is .../harbor_taskcfg/tasks or .../harbor_taskcfg/groups
     let cfg_dir = discovered.parent().unwrap_or(discovered);
-    let project = if cfg_dir
-        .file_name()
-        .and_then(|value| value.to_str())
-        == Some(TASK_CFG_DIR)
-    {
+    let project = if cfg_dir.file_name().and_then(|value| value.to_str()) == Some(TASK_CFG_DIR) {
         cfg_dir.parent().unwrap_or(cfg_dir)
     } else {
         cfg_dir
@@ -1340,6 +1677,7 @@ fn validate_task_yaml(content: &str) -> Result<TaskDefinition, String> {
 }
 
 fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
+    validate_uuid(task.uuid.as_str())?;
     validate_id(task.id.as_str())?;
     let mut config_ids = std::collections::HashSet::new();
     for config in &task.configs {
@@ -1362,6 +1700,20 @@ fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
     if task.workdir.trim().is_empty() {
         return Err("workdir cannot be empty".into());
     }
+    let mut panel_names = std::collections::HashSet::new();
+    for panel in &task.panel_interface {
+        validate_id(panel.panel_name.as_str())
+            .map_err(|_| format!("invalid panel_name: {}", panel.panel_name))?;
+        if panel.interface_port == 0 {
+            return Err(format!(
+                "interface_port cannot be 0 for panel {}",
+                panel.panel_name
+            ));
+        }
+        if !panel_names.insert(panel.panel_name.as_str()) {
+            return Err(format!("duplicate panel_name: {}", panel.panel_name));
+        }
+    }
     build_command(&task.command)?;
     Ok(())
 }
@@ -1369,7 +1721,8 @@ fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
 fn read_definition(dir: &Path, id: &str) -> Result<TaskCardYamlDocument, String> {
     validate_id(id)?;
     let path = definition_path(dir, id).ok_or_else(|| format!("definition not found: {id}"))?;
-    let content = fs::read_to_string(&path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
     Ok(TaskCardYamlDocument {
         content,
         folder: definition_folder(dir, &path),
@@ -1401,14 +1754,19 @@ fn write_definition(
         .unwrap_or_else(|| format!("{id}.yaml").into());
     let path = destination.join(file_name);
     if path.is_file() && existing.as_ref() != Some(&path) {
-        return Err(format!("definition path already exists: {}", path.display()));
+        return Err(format!(
+            "definition path already exists: {}",
+            path.display()
+        ));
     }
     let temporary = destination.join(format!(".{id}.yaml.tmp-{}", std::process::id()));
-    fs::write(&temporary, content).map_err(|e| format!("write {} failed: {e}", temporary.display()))?;
+    fs::write(&temporary, content)
+        .map_err(|e| format!("write {} failed: {e}", temporary.display()))?;
     fs::rename(&temporary, &path).map_err(|e| format!("save {} failed: {e}", path.display()))?;
     if let Some(existing) = existing {
         if existing != path {
-            fs::remove_file(&existing).map_err(|e| format!("delete old definition {} failed: {e}", existing.display()))?;
+            fs::remove_file(&existing)
+                .map_err(|e| format!("delete old definition {} failed: {e}", existing.display()))?;
         }
     }
     Ok(())
@@ -1427,19 +1785,18 @@ fn rewrite_definition(
         .map_err(|e| format!("create directory {} failed: {e}", destination.display()))?;
     let path = destination.join(format!("{new_id}.yaml"));
     if path.is_file() && path != old_path {
-        return Err(format!("definition path already exists: {}", path.display()));
+        return Err(format!(
+            "definition path already exists: {}",
+            path.display()
+        ));
     }
     let temporary = destination.join(format!(".{new_id}.yaml.tmp-{}", std::process::id()));
     fs::write(&temporary, content)
         .map_err(|e| format!("write {} failed: {e}", temporary.display()))?;
     fs::rename(&temporary, &path).map_err(|e| format!("save {} failed: {e}", path.display()))?;
     if old_path != path.as_path() {
-        fs::remove_file(old_path).map_err(|e| {
-            format!(
-                "delete old definition {} failed: {e}",
-                old_path.display()
-            )
-        })?;
+        fs::remove_file(old_path)
+            .map_err(|e| format!("delete old definition {} failed: {e}", old_path.display()))?;
     }
     Ok(())
 }
@@ -1468,24 +1825,19 @@ fn definition_path(dir: &Path, id: &str) -> Option<PathBuf> {
     })
 }
 
-fn split_instance_key(key: &str) -> Option<(String, String)> {
-    let (prefix_path, id) = key.split_once('\0')?;
-    Some((prefix_path.to_string(), id.to_string()))
-}
-
 fn running_registry_path(root: &Path) -> PathBuf {
     root.join("run/tasks.json")
 }
 
 fn write_running_registry(root: &Path, records: &[RunningTaskRecord]) -> Result<(), String> {
     let run_dir = root.join("run");
-    fs::create_dir_all(&run_dir).map_err(|e| format!("create {} failed: {e}", run_dir.display()))?;
+    fs::create_dir_all(&run_dir)
+        .map_err(|e| format!("create {} failed: {e}", run_dir.display()))?;
     let path = running_registry_path(root);
     let temporary = run_dir.join(format!(".tasks.json.tmp-{}", std::process::id()));
     let raw = serde_json::to_string_pretty(records).map_err(|e| e.to_string())?;
     fs::write(&temporary, raw).map_err(|e| format!("write {} failed: {e}", temporary.display()))?;
-    fs::rename(&temporary, &path)
-        .map_err(|e| format!("save {} failed: {e}", path.display()))
+    fs::rename(&temporary, &path).map_err(|e| format!("save {} failed: {e}", path.display()))
 }
 
 fn acquire_instance_lock(run_dir: &Path) -> Result<File, String> {
@@ -1512,7 +1864,8 @@ fn cleanup_orphan_tasks(root: &Path) -> Result<(), String> {
     if !path.is_file() {
         return Ok(());
     }
-    let raw = fs::read_to_string(&path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
     let records: Vec<RunningTaskRecord> = serde_json::from_str(&raw).unwrap_or_default();
     for record in records {
         if let Err(error) = terminate_orphan(record.id.as_str(), record.pid as i32, record.pgid) {
@@ -1580,7 +1933,7 @@ fn terminate_task(id: &str, child: &mut Child) -> Result<(), String> {
 }
 
 fn create_log_file(
-    root: &Path,
+    log_dir: &Path,
     id: &str,
     config_id: Option<&str>,
 ) -> Result<(u128, String, fs::File), String> {
@@ -1592,14 +1945,20 @@ fn create_log_file(
             Some(config_id) => format!("{id}.{config_id}.{stamp}.log"),
             None => format!("{id}-{stamp}.log"),
         };
-        let path = root.join("log").join(file.as_str());
-        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        let path = log_dir.join(file.as_str());
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(handle) => return Ok((stamp_ms, file, handle)),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(format!("create log {} failed: {error}", path.display())),
         }
     }
-    Err(format!("create log for task {id} failed: too many collisions"))
+    Err(format!(
+        "create log for task {id} failed: too many collisions"
+    ))
 }
 
 /// Local time as `YYMM-DDHHMMSS` (e.g. `2507-28224430`).
@@ -1667,20 +2026,8 @@ fn parse_log_stamp(yymm: &str, ddhhmmss: &str) -> Option<u128> {
 }
 
 fn initialize_root(root: &Path) -> Result<(), String> {
-    let is_new = !root.exists();
-    fs::create_dir_all(root.join("tasks")).map_err(|e| e.to_string())?;
-    fs::create_dir_all(root.join("groups")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("log")).map_err(|e| e.to_string())?;
     fs::create_dir_all(root.join("run")).map_err(|e| e.to_string())?;
-    if !is_new {
-        return Ok(());
-    }
-    fs::write(root.join("tasks/uc-info.yaml"), default_uc_info_task()).map_err(|e| e.to_string())?;
-    fs::write(root.join("tasks/uname-kernel.yaml"), default_uname_task()).map_err(|e| e.to_string())?;
-    fs::write(root.join("tasks/hello-world-loop.yaml"), default_hello_world_loop_task())
-        .map_err(|e| e.to_string())?;
-    fs::write(root.join("groups/system-info.yaml"), default_system_info_group())
-        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1719,71 +2066,10 @@ fn validate_log_file(file: &str) -> Result<(), String> {
     }
 }
 
-fn default_uc_info_task() -> String {
-    format!(
-        r#"version: "{version}"
-id: uc-info
-name: unicom Info
-description: ""
-workdir: "~"
-command:
-  argv:
-    - uc_info
-"#,
-        version = APP_VERSION
-    )
-}
-
-fn default_uname_task() -> String {
-    format!(
-        r#"version: "{version}"
-id: uname-kernel
-name: Kernel Version
-description: ""
-workdir: "~"
-command:
-  argv:
-    - uname
-    - -r
-"#,
-        version = APP_VERSION
-    )
-}
-
-fn default_hello_world_loop_task() -> String {
-    format!(
-        r#"version: "{version}"
-id: hello-world-loop
-name: Hello World Loop
-description: ""
-workdir: "~"
-command:
-  shell: sh
-  script: while true; do echo helloworld; sleep 1; done
-"#,
-        version = APP_VERSION
-    )
-}
-
-fn default_system_info_group() -> String {
-    format!(
-        r#"version: "{version}"
-id: system-info
-name: System Info
-description: ""
-tasks:
-  - task: uc-info
-    wait_after_sec: 1
-  - task: uname-kernel
-    wait_after_sec: 0
-"#,
-        version = APP_VERSION
-    )
-}
-
 fn new_task_template() -> String {
     format!(
         r#"version: "{version}"
+uuid: "{uuid}"
 id: new-task
 name: New Task
 description: ""
@@ -1796,26 +2082,89 @@ command:
     - echo
     - hello
 "#,
-        version = APP_VERSION
+        version = APP_VERSION,
+        uuid = generate_uuid(),
     )
 }
 
 fn new_group_template() -> String {
     format!(
         r#"version: "{version}"
+uuid: "{uuid}"
 id: new-group
 name: New Group
 description: ""
 tasks: []
 "#,
-        version = APP_VERSION
+        version = APP_VERSION,
+        uuid = generate_uuid(),
     )
+}
+
+fn generate_uuid() -> String {
+    Uuid::new_v4().to_string()
+}
+
+fn validate_uuid(value: &str) -> Result<(), String> {
+    Uuid::parse_str(value)
+        .map(|_| ())
+        .map_err(|_| format!("invalid uuid: {value}"))
+}
+
+fn ensure_yaml_uuid(path: &Path, content: &str) -> Result<String, String> {
+    let value: serde_yaml::Value =
+        serde_yaml::from_str(content).map_err(|error| format!("parse yaml failed: {error}"))?;
+    let mapping = value
+        .as_mapping()
+        .ok_or_else(|| "yaml root must be a mapping".to_string())?;
+    let key = serde_yaml::Value::String("uuid".into());
+    if let Some(existing) = mapping.get(&key).and_then(serde_yaml::Value::as_str) {
+        validate_uuid(existing)?;
+        return Ok(content.to_string());
+    }
+
+    let uuid = generate_uuid();
+    write_yaml_uuid(path, content, uuid.as_str())
+}
+
+fn write_yaml_uuid(path: &Path, content: &str, uuid: &str) -> Result<String, String> {
+    validate_uuid(uuid)?;
+    let mut lines = content.lines().map(str::to_string).collect::<Vec<_>>();
+    if let Some(index) = lines.iter().position(|line| line.starts_with("uuid:")) {
+        lines[index] = format!("uuid: \"{uuid}\"");
+    } else {
+        let insert_at = lines
+            .iter()
+            .position(|line| line.starts_with("version:"))
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        lines.insert(insert_at, format!("uuid: \"{uuid}\""));
+    }
+    let mut updated = lines.join("\n");
+    if content.ends_with('\n') {
+        updated.push('\n');
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid yaml path: {}", path.display()))?;
+    let temporary = parent.join(format!(
+        ".{}.uuid-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("harbor.yaml"),
+        std::process::id()
+    ));
+    fs::write(&temporary, updated.as_bytes())
+        .map_err(|error| format!("write {} failed: {error}", temporary.display()))?;
+    fs::rename(&temporary, path)
+        .map_err(|error| format!("save {} failed: {error}", path.display()))?;
+    Ok(updated)
 }
 
 fn load_yaml_dir<T>(
     dir: PathBuf,
     id: impl Fn(&T) -> &str,
-    set_folder: impl Fn(&mut T, String),
+    set_source: impl Fn(&mut T, String, String),
 ) -> (HashMap<String, T>, Vec<String>)
 where
     T: for<'de> Deserialize<'de>,
@@ -1828,6 +2177,7 @@ where
     for path in files {
         let parsed = fs::read_to_string(&path)
             .map_err(|e| e.to_string())
+            .and_then(|text| ensure_yaml_uuid(&path, &text))
             .and_then(|text| serde_yaml::from_str::<T>(&text).map_err(|e| e.to_string()));
         match parsed {
             Ok(mut item) => {
@@ -1835,7 +2185,7 @@ where
                 if let Err(error) = validate_id(item_id.as_str()) {
                     errors.push(format!("{}: {error}", path.display()));
                 } else {
-                    set_folder(&mut item, definition_folder(&dir, &path));
+                    set_source(&mut item, definition_folder(&dir, &path), absolutize(&path));
                     if items.insert(item_id.clone(), item).is_some() {
                         errors.push(format!("duplicate id: {item_id}"));
                     }
@@ -1883,9 +2233,9 @@ fn validate_folder_path(folder: &str) -> Result<PathBuf, String> {
         if segment.is_empty()
             || segment == "."
             || segment == ".."
-            || !segment
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+            || !segment.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+            })
         {
             return Err(
                 "folder path may only contain letters, numbers, '-', '_', and '/'".to_string(),
@@ -1905,7 +2255,10 @@ fn definition_folder(root: &Path, path: &Path) -> String {
 }
 
 fn is_yaml_file(path: &Path) -> bool {
-    matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("yaml" | "yml")
+    )
 }
 
 fn validate_id(id: &str) -> Result<(), String> {
@@ -1973,9 +2326,7 @@ fn expand_workdir(workdir: &str, taskcfg_dir: &str) -> Result<PathBuf, String> {
     if taskcfg.as_os_str().is_empty() {
         return Err("internal error: missing taskcfg_dir for task".into());
     }
-    let taskcfg = taskcfg
-        .canonicalize()
-        .unwrap_or_else(|_| taskcfg.clone());
+    let taskcfg = taskcfg.canonicalize().unwrap_or_else(|_| taskcfg.clone());
     let project_root = taskcfg
         .parent()
         .map(|path| path.to_path_buf())
@@ -1995,7 +2346,9 @@ fn normalize_path(path: PathBuf) -> PathBuf {
     let mut parts = Vec::new();
     for component in path.components() {
         match component {
-            std::path::Component::Prefix(prefix) => parts.push(std::path::Component::Prefix(prefix)),
+            std::path::Component::Prefix(prefix) => {
+                parts.push(std::path::Component::Prefix(prefix))
+            }
             std::path::Component::RootDir => parts.push(std::path::Component::RootDir),
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
@@ -2017,6 +2370,25 @@ fn now_ms() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unique_temp(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("{name}-{}-{}", std::process::id(), now_ms()));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        root
+    }
+
+    fn write_project_yaml(project: &Path, kind: &str, file: &str, yaml: &str) {
+        let dir = project.join("harbor_taskcfg").join(kind);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(file), yaml).unwrap();
+    }
+
+    fn service_with_project(root: &Path, project: &Path) -> TaskCardService {
+        fs::create_dir_all(project).unwrap();
+        TaskCardService::new(root.to_path_buf(), vec![project.to_path_buf()]).unwrap()
+    }
 
     #[test]
     fn expand_workdir_substitutes_harbor_taskcfg_dir() {
@@ -2054,6 +2426,7 @@ workdir: /tmp
 env:
   HOST: 0.0.0.0
   PORT: "8000"
+  DISPLAY: ":9"
 configs:
   - id: production
     env:
@@ -2075,6 +2448,20 @@ command:
         assert_eq!(merged.get("PORT").map(String::as_str), Some("8080"));
         assert_eq!(merged.get("WORKERS").map(String::as_str), Some("4"));
         assert_eq!(merged.get("EXTRA").map(String::as_str), Some("yes"));
+        assert_eq!(merged.get("DISPLAY").map(String::as_str), Some(":9"));
+    }
+
+    #[test]
+    fn desktop_session_env_only_keeps_graphical_variables() {
+        let env = parse_desktop_session_env(
+            "DISPLAY=:1\nXAUTHORITY=/run/user/1000/gdm/Xauthority\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\nIGNORED=value\n",
+        );
+        assert_eq!(env.get("DISPLAY").map(String::as_str), Some(":1"));
+        assert_eq!(
+            env.get("XAUTHORITY").map(String::as_str),
+            Some("/run/user/1000/gdm/Xauthority")
+        );
+        assert!(!env.contains_key("IGNORED"));
     }
 
     #[test]
@@ -2107,17 +2494,85 @@ command:
     }
 
     #[test]
+    fn panel_interface_parses_and_rejects_bad_values() {
+        let task = validate_task_yaml(
+            r#"version: 1
+id: robot-panel
+workdir: /tmp
+panel_interface:
+  - panel_name: robot_panel
+    interface_port: 23842
+    localhost_only: false
+command:
+  argv: [echo]
+"#,
+        )
+        .unwrap();
+        assert_eq!(task.panel_interface.len(), 1);
+        assert_eq!(task.panel_interface[0].panel_name, "robot_panel");
+        assert_eq!(task.panel_interface[0].interface_port, 23842);
+        assert!(!task.panel_interface[0].localhost_only);
+
+        let bad_port = r#"version: 1
+id: robot-panel
+workdir: /tmp
+panel_interface:
+  - panel_name: robot_panel
+    interface_port: 0
+command:
+  argv: [echo]
+"#;
+        assert!(validate_task_yaml(bad_port)
+            .unwrap_err()
+            .contains("interface_port cannot be 0"));
+    }
+
+    #[test]
+    fn panel_interface_is_injected_as_reserved_task_environment() {
+        let task = validate_task_yaml(
+            r#"version: 1
+id: robot-panel
+workdir: /tmp
+env:
+  HARBOR_PANEL_INTERFACE_PORT: "9999"
+panel_interface:
+  - panel_name: robot-panel
+    interface_port: 23842
+    localhost_only: false
+command:
+  argv: [echo]
+"#,
+        )
+        .unwrap();
+
+        let env = merged_task_env(&task, None, &HashMap::new());
+        assert_eq!(
+            env.get("HARBOR_PANEL_NAME").map(String::as_str),
+            Some("robot-panel")
+        );
+        assert_eq!(
+            env.get("HARBOR_PANEL_INTERFACE_PORT").map(String::as_str),
+            Some("23842")
+        );
+        assert_eq!(
+            env.get("HARBOR_PANEL_LOCALHOST_ONLY").map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            env.get("HARBOR_PANEL_ROBOT_PANEL_INTERFACE_PORT")
+                .map(String::as_str),
+            Some("23842")
+        );
+    }
+
+    #[test]
     fn starts_selected_config_and_records_it_in_snapshot_and_log() {
-        let root = std::env::temp_dir().join(format!(
-            "harbor-task-config-test-{}",
-            std::process::id()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(root.join("tasks")).unwrap();
-        fs::write(
-            root.join("tasks/server.yaml"),
+        let root = unique_temp("harbor-task-config-test");
+        let project = root.join("project");
+        write_project_yaml(
+            &project,
+            "tasks",
+            "server.yaml",
             r#"version: 1
 id: server
 workdir: /tmp
@@ -2128,10 +2583,9 @@ default_config: development
 command:
   argv: [sleep, "30"]
 "#,
-        )
-        .unwrap();
-        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
-        let prefix = service.snapshot().root;
+        );
+        let service = service_with_project(&root, &project);
+        let prefix = absolutize(&project);
         service
             .start_task(
                 prefix.as_str(),
@@ -2164,16 +2618,12 @@ command:
 
     #[test]
     fn group_rejects_unknown_task_config() {
-        let root = std::env::temp_dir().join(format!(
-            "harbor-group-config-test-{}",
-            std::process::id()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(root.join("tasks")).unwrap();
-        fs::write(
-            root.join("tasks/server.yaml"),
+        let root = unique_temp("harbor-group-config-test");
+        let project = root.join("project");
+        write_project_yaml(
+            &project,
+            "tasks",
+            "server.yaml",
             r#"version: 1
 id: server
 workdir: /tmp
@@ -2182,9 +2632,8 @@ configs:
 command:
   argv: [echo]
 "#,
-        )
-        .unwrap();
-        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        );
+        let service = service_with_project(&root, &project);
         let group = r#"version: 1
 id: invalid-config
 tasks:
@@ -2192,7 +2641,7 @@ tasks:
     config: production
 "#;
         assert!(service
-            .create_group_yaml(group, "")
+            .create_group_yaml(group, project.display().to_string().as_str())
             .unwrap_err()
             .contains("config not found"));
         fs::remove_dir_all(root).unwrap();
@@ -2200,17 +2649,12 @@ tasks:
 
     #[tokio::test]
     async fn group_starts_its_selected_task_config() {
-        let root = std::env::temp_dir().join(format!(
-            "harbor-group-config-run-test-{}",
-            std::process::id()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-        fs::create_dir_all(root.join("tasks")).unwrap();
-        fs::create_dir_all(root.join("groups")).unwrap();
-        fs::write(
-            root.join("tasks/server.yaml"),
+        let root = unique_temp("harbor-group-config-run-test");
+        let project = root.join("project");
+        write_project_yaml(
+            &project,
+            "tasks",
+            "server.yaml",
             r#"version: 1
 id: server
 workdir: /tmp
@@ -2221,20 +2665,20 @@ default_config: development
 command:
   argv: [sleep, "30"]
 "#,
-        )
-        .unwrap();
-        fs::write(
-            root.join("groups/production.yaml"),
+        );
+        write_project_yaml(
+            &project,
+            "groups",
+            "production.yaml",
             r#"version: 1
 id: production
 tasks:
   - task: server
     config: production
 "#,
-        )
-        .unwrap();
-        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
-        let prefix = service.snapshot().root;
+        );
+        let service = service_with_project(&root, &project);
+        let prefix = absolutize(&project);
         service
             .start_group(prefix.as_str(), "production", None)
             .await
@@ -2243,10 +2687,7 @@ tasks:
             service.snapshot().tasks[0].running_config_id.as_deref(),
             Some("production")
         );
-        assert_eq!(
-            service.logs()[0].config_id.as_deref(),
-            Some("production")
-        );
+        assert_eq!(service.logs()[0].config_id.as_deref(), Some("production"));
         service.stop_all();
         fs::remove_dir_all(root).unwrap();
     }
@@ -2280,11 +2721,12 @@ tasks:
 
     #[tokio::test]
     async fn loads_starts_and_stops_tasks_and_groups() {
-        let root = std::env::temp_dir().join(format!("ucgraph-taskcard-test-{}", std::process::id()));
-        fs::create_dir_all(root.join("tasks")).unwrap();
-        fs::create_dir_all(root.join("groups")).unwrap();
-        fs::write(
-            root.join("tasks/sleep.yaml"),
+        let root = unique_temp("ucgraph-taskcard-test");
+        let project = root.join("project");
+        write_project_yaml(
+            &project,
+            "tasks",
+            "sleep.yaml",
             r#"version: 1
 id: sleep
 workdir: /tmp
@@ -2294,25 +2736,25 @@ command:
     - -c
     - "echo hello; echo error >&2; sleep 30"
 "#,
-        )
-        .unwrap();
-        fs::write(
-            root.join("groups/test.yaml"),
+        );
+        write_project_yaml(
+            &project,
+            "groups",
+            "test.yaml",
             r#"version: 1
 id: test
 tasks:
   - task: sleep
     wait_after_sec: 0
 "#,
-        )
-        .unwrap();
+        );
 
-        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        let service = service_with_project(&root, &project);
         let snapshot = service.snapshot();
         assert_eq!(snapshot.tasks.len(), 1);
         assert_eq!(snapshot.groups.len(), 1);
         assert_eq!(snapshot.tasks[0].status, "stopped");
-        let prefix = snapshot.root.clone();
+        let prefix = absolutize(&project);
 
         service
             .start_group(prefix.as_str(), "test", None)
@@ -2362,34 +2804,47 @@ tasks:
     }
 
     #[test]
-    fn initializes_missing_root_with_examples() {
-        let root = std::env::temp_dir().join(format!("ucgraph-taskcard-init-test-{}", std::process::id()));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-
+    fn initializes_runtime_data_dir_with_log_and_run() {
+        let root = unique_temp("ucgraph-taskcard-init-test");
         let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
         let snapshot = service.snapshot();
-        assert_eq!(snapshot.tasks.len(), 3);
-        assert_eq!(snapshot.groups.len(), 1);
-        assert!(snapshot.tasks.iter().any(|task| task.id == "uc-info"));
-        assert!(snapshot.tasks.iter().any(|task| task.id == "uname-kernel"));
-        assert!(snapshot.tasks.iter().any(|task| task.id == "hello-world-loop"));
-        assert_eq!(snapshot.groups[0].id, "system-info");
+        assert!(snapshot.tasks.is_empty());
+        assert!(snapshot.groups.is_empty());
         assert!(root.join("log").is_dir());
+        assert!(root.join("run").is_dir());
+        assert!(!root.join("tasks").exists());
+        assert!(!root.join("groups").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn empty_search_paths_snapshot_has_no_tasks_or_groups() {
+        let root = unique_temp("harbor-empty-search-paths");
+        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        assert!(service.snapshot().tasks.is_empty());
+        assert!(service.snapshot().groups.is_empty());
+        assert!(service
+            .create_task_yaml(
+                r#"version: 1
+id: blocked
+workdir: /tmp
+command:
+  argv: [echo]
+"#,
+                "",
+            )
+            .unwrap_err()
+            .contains("choose a search path"));
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn creates_and_updates_yaml_definitions() {
-        let root = std::env::temp_dir().join(format!("ucgraph-taskcard-yaml-test-{}", std::process::id()));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
-
+        let root = unique_temp("ucgraph-taskcard-yaml-test");
         let search = root.join("workspace");
         fs::create_dir_all(&search).unwrap();
         let service = TaskCardService::new(root.clone(), vec![search.clone()]).unwrap();
+        let folder = search.display().to_string();
         let task = r#"version: 1
 id: editable-task
 name: Editable Task
@@ -2399,22 +2854,36 @@ command:
     - echo
     - hello
 "#;
-        let prefix = absolutize(&root);
-        let search_prefix = absolutize(&search);
-        assert_eq!(service.create_task_yaml(task, "").unwrap(), "editable-task");
-        assert!(service.create_task_yaml(task, "").is_err());
-        assert!(root.join("tasks/editable-task.yaml").is_file());
-        let saved = fs::read_to_string(root.join("tasks/editable-task.yaml")).unwrap();
+        let prefix = absolutize(&search);
+        assert!(service
+            .create_task_yaml(task, "")
+            .unwrap_err()
+            .contains("choose a search path"));
+        assert_eq!(
+            service.create_task_yaml(task, folder.as_str()).unwrap(),
+            "editable-task"
+        );
+        assert!(service.create_task_yaml(task, folder.as_str()).is_err());
+        let task_path = search.join("harbor_taskcfg/tasks/editable-task.yaml");
+        assert!(task_path.is_file());
+        let saved = fs::read_to_string(&task_path).unwrap();
         assert!(saved.contains(APP_VERSION));
         let updated = task.replace("Editable Task", "Updated Task");
         service
-            .update_task_yaml(prefix.as_str(), "editable-task", updated.as_str(), "tools/system")
+            .update_task_yaml(
+                prefix.as_str(),
+                "editable-task",
+                updated.as_str(),
+                "tools/system",
+            )
             .unwrap();
         let task_document = service.task_yaml(prefix.as_str(), "editable-task").unwrap();
         assert!(task_document.content.contains("Updated Task"));
         assert!(!task_document.content.contains("folder:"));
         assert_eq!(task_document.folder, "tools/system");
-        assert!(root.join("tasks/tools/system/editable-task.yaml").is_file());
+        assert!(search
+            .join("harbor_taskcfg/tasks/tools/system/editable-task.yaml")
+            .is_file());
         assert_eq!(
             service
                 .snapshot()
@@ -2423,7 +2892,7 @@ command:
                 .find(|task| task.id == "editable-task")
                 .unwrap()
                 .folder,
-            "tools/system"
+            "workspace/tools/system"
         );
 
         let group = r#"version: 1
@@ -2433,9 +2902,16 @@ tasks:
   - task: editable-task
     wait_after_sec: 0
 "#;
-        assert_eq!(service.create_group_yaml(group, "").unwrap(), "editable-group");
-        assert!(root.join("groups/editable-group.yaml").is_file());
-        let group_document = service.group_yaml(prefix.as_str(), "editable-group").unwrap();
+        assert_eq!(
+            service.create_group_yaml(group, folder.as_str()).unwrap(),
+            "editable-group"
+        );
+        assert!(search
+            .join("harbor_taskcfg/groups/editable-group.yaml")
+            .is_file());
+        let group_document = service
+            .group_yaml(prefix.as_str(), "editable-group")
+            .unwrap();
         assert!(group_document.content.contains("editable-task"));
         assert!(!group_document.content.contains("folder:"));
         assert_eq!(group_document.folder, "");
@@ -2447,20 +2923,38 @@ tasks:
                 .find(|group| group.id == "editable-group")
                 .unwrap()
                 .folder,
-            ""
+            "workspace"
         );
         service
-            .update_task_yaml(prefix.as_str(), "editable-task", updated.as_str(), "tools/runtime")
+            .update_task_yaml(
+                prefix.as_str(),
+                "editable-task",
+                updated.as_str(),
+                "tools/runtime",
+            )
             .unwrap();
-        assert!(!root.join("tasks/tools/system/editable-task.yaml").exists());
-        assert!(root.join("tasks/tools/runtime/editable-task.yaml").is_file());
+        assert!(!search
+            .join("harbor_taskcfg/tasks/tools/system/editable-task.yaml")
+            .exists());
+        assert!(search
+            .join("harbor_taskcfg/tasks/tools/runtime/editable-task.yaml")
+            .is_file());
 
         let renamed = updated.replace("id: editable-task", "id: renamed-task");
         service
-            .update_task_yaml(prefix.as_str(), "editable-task", renamed.as_str(), "tools/runtime")
+            .update_task_yaml(
+                prefix.as_str(),
+                "editable-task",
+                renamed.as_str(),
+                "tools/runtime",
+            )
             .unwrap();
-        assert!(!root.join("tasks/tools/runtime/editable-task.yaml").exists());
-        assert!(root.join("tasks/tools/runtime/renamed-task.yaml").is_file());
+        assert!(!search
+            .join("harbor_taskcfg/tasks/tools/runtime/editable-task.yaml")
+            .exists());
+        assert!(search
+            .join("harbor_taskcfg/tasks/tools/runtime/renamed-task.yaml")
+            .is_file());
         assert!(service.task_yaml(prefix.as_str(), "editable-task").is_err());
         assert!(service
             .task_yaml(prefix.as_str(), "renamed-task")
@@ -2485,11 +2979,13 @@ tasks:
         let search_task = task.replace("editable-task", "workspace-task");
         assert_eq!(
             service
-                .create_task_yaml(&search_task, search.display().to_string().as_str())
+                .create_task_yaml(&search_task, folder.as_str())
                 .unwrap(),
             "workspace-task"
         );
-        assert!(search.join("harbor_taskcfg/tasks/workspace-task.yaml").is_file());
+        assert!(search
+            .join("harbor_taskcfg/tasks/workspace-task.yaml")
+            .is_file());
         assert_eq!(
             service
                 .snapshot()
@@ -2501,7 +2997,9 @@ tasks:
             "workspace"
         );
 
-        assert!(service.delete_task(prefix.as_str(), "renamed-task").is_err());
+        assert!(service
+            .delete_task(prefix.as_str(), "renamed-task")
+            .is_err());
         assert!(service
             .create_group_yaml(
                 r#"version: 1
@@ -2509,15 +3007,21 @@ id: invalid-group
 tasks:
   - task: missing-task
 "#,
-                "",
+                folder.as_str(),
             )
             .is_err());
-        service.delete_group(prefix.as_str(), "editable-group").unwrap();
-        assert!(service.group_yaml(prefix.as_str(), "editable-group").is_err());
-        service.delete_task(prefix.as_str(), "renamed-task").unwrap();
+        service
+            .delete_group(prefix.as_str(), "editable-group")
+            .unwrap();
+        assert!(service
+            .group_yaml(prefix.as_str(), "editable-group")
+            .is_err());
+        service
+            .delete_task(prefix.as_str(), "renamed-task")
+            .unwrap();
         assert!(service.task_yaml(prefix.as_str(), "renamed-task").is_err());
         service
-            .delete_task(search_prefix.as_str(), "workspace-task")
+            .delete_task(prefix.as_str(), "workspace-task")
             .unwrap();
 
         let sudo_task = r#"version: 1
@@ -2530,7 +3034,9 @@ command:
     - echo
     - hello
 "#;
-        service.create_task_yaml(sudo_task, "").unwrap();
+        service
+            .create_task_yaml(sudo_task, folder.as_str())
+            .unwrap();
         assert!(service
             .start_task(prefix.as_str(), "sudo-task", None, &HashMap::new(), None)
             .is_err());
@@ -2547,18 +3053,14 @@ command:
 
     #[tokio::test]
     async fn allows_same_id_across_prefix_paths() {
-        let root = std::env::temp_dir().join(format!(
-            "ucgraph-taskcard-prefix-{}",
-            std::process::id()
-        ));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
+        let root = unique_temp("ucgraph-taskcard-prefix");
         let proj_a = root.join("proj-a");
         let proj_b = root.join("proj-b");
+        let proj_c = root.join("proj-c");
         fs::create_dir_all(proj_a.join("harbor_taskcfg/tasks")).unwrap();
         fs::create_dir_all(proj_b.join("harbor_taskcfg/tasks")).unwrap();
-        fs::create_dir_all(root.join("groups")).unwrap();
+        fs::create_dir_all(proj_c.join("harbor_taskcfg/tasks")).unwrap();
+        fs::create_dir_all(proj_c.join("harbor_taskcfg/groups")).unwrap();
         let task_yaml = r#"version: 1
 id: demo-ping
 name: Demo Ping
@@ -2569,15 +3071,27 @@ command:
     - -c
     - "sleep 30"
 "#;
-        fs::write(proj_a.join("harbor_taskcfg/tasks/demo-ping.yaml"), task_yaml).unwrap();
-        fs::write(proj_b.join("harbor_taskcfg/tasks/demo-ping.yaml"), task_yaml).unwrap();
+        fs::write(
+            proj_a.join("harbor_taskcfg/tasks/demo-ping.yaml"),
+            task_yaml,
+        )
+        .unwrap();
+        fs::write(
+            proj_b.join("harbor_taskcfg/tasks/demo-ping.yaml"),
+            task_yaml,
+        )
+        .unwrap();
 
-        let service = TaskCardService::new(root.clone(), vec![proj_a.clone(), proj_b.clone()]).unwrap();
+        let service = TaskCardService::new(
+            root.clone(),
+            vec![proj_a.clone(), proj_b.clone(), proj_c.clone()],
+        )
+        .unwrap();
         let _ = service.research();
         let snapshot = service.snapshot();
-        let root_prefix = snapshot.root.clone();
         let prefix_a = absolutize(&proj_a);
         let prefix_b = absolutize(&proj_b);
+        let prefix_c = absolutize(&proj_c);
         assert_eq!(
             snapshot
                 .tasks
@@ -2618,7 +3132,9 @@ tasks:
     wait_after_sec: 0
 "#
         );
-        let ambiguity = service.create_group_yaml(&first_group, "").unwrap_err();
+        let ambiguity = service
+            .create_group_yaml(&first_group, proj_c.display().to_string().as_str())
+            .unwrap_err();
         assert!(ambiguity.contains("ambiguous task reference 'demo-ping'"));
         assert!(ambiguity.contains(prefix_a.as_str()));
         assert!(ambiguity.contains(prefix_b.as_str()));
@@ -2628,7 +3144,9 @@ tasks:
             .create_group_yaml(&first_group, proj_a.display().to_string().as_str())
             .unwrap();
         // Explicit prefixes remain readable for legacy group files.
-        service.create_group_yaml(&exact_group, "").unwrap();
+        service
+            .create_group_yaml(&exact_group, proj_c.display().to_string().as_str())
+            .unwrap();
 
         assert_eq!(
             service
@@ -2638,12 +3156,12 @@ tasks:
             prefix_a
         );
         assert!(service
-            .resolve_group_task_ref(root_prefix.as_str(), "demo-ping", "")
+            .resolve_group_task_ref(prefix_c.as_str(), "demo-ping", "")
             .unwrap_err()
             .contains("ambiguous task reference"));
         assert_eq!(
             service
-                .resolve_group_task_ref(root_prefix.as_str(), "demo-ping", prefix_b.as_str())
+                .resolve_group_task_ref(prefix_c.as_str(), "demo-ping", prefix_b.as_str())
                 .unwrap()
                 .prefix_path,
             prefix_b
@@ -2653,9 +3171,9 @@ tasks:
 
         // Group execution preflights every reference before starting the first task.
         let starter = task_yaml.replace("demo-ping", "starter");
-        fs::write(root.join("tasks/starter.yaml"), starter).unwrap();
+        fs::write(proj_c.join("harbor_taskcfg/tasks/starter.yaml"), starter).unwrap();
         fs::write(
-            root.join("groups/preflight.yaml"),
+            proj_c.join("harbor_taskcfg/groups/preflight.yaml"),
             r#"version: 1
 id: preflight
 tasks:
@@ -2665,7 +3183,7 @@ tasks:
         )
         .unwrap();
         let error = service
-            .start_group(root_prefix.as_str(), "preflight", None)
+            .start_group(prefix_c.as_str(), "preflight", None)
             .await
             .unwrap_err();
         assert!(error.contains("ambiguous task reference 'demo-ping'"));
@@ -2688,7 +3206,8 @@ tasks:
 
     #[test]
     fn researches_named_task_and_group_dirs() {
-        let root = std::env::temp_dir().join(format!("ucgraph-taskcard-research-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ucgraph-taskcard-research-{}", std::process::id()));
         let search = root.join("workspace");
         if root.exists() {
             fs::remove_dir_all(&root).unwrap();
@@ -2724,8 +3243,14 @@ tasks:
         assert_eq!(result.discovered_task_dirs.len(), 1);
         assert_eq!(result.discovered_group_dirs.len(), 1);
         let snapshot = service.snapshot();
-        assert!(snapshot.tasks.iter().any(|task| task.id == "discovered-task"));
-        assert!(snapshot.groups.iter().any(|group| group.id == "discovered-group"));
+        assert!(snapshot
+            .tasks
+            .iter()
+            .any(|task| task.id == "discovered-task"));
+        assert!(snapshot
+            .groups
+            .iter()
+            .any(|group| group.id == "discovered-group"));
         assert_eq!(
             snapshot
                 .tasks
@@ -2746,8 +3271,38 @@ tasks:
     }
 
     #[test]
+    fn restores_cached_discovery_when_search_paths_are_revisited() {
+        let root = unique_temp("harbor-discovery-cache");
+        let project_a = root.join("project-a");
+        let project_b = root.join("project-b");
+        write_project_yaml(
+            &project_a,
+            "tasks",
+            "a.yaml",
+            "version: 1\nid: a\nworkdir: /tmp\ncommand:\n  argv: [echo, a]\n",
+        );
+        write_project_yaml(
+            &project_b,
+            "tasks",
+            "b.yaml",
+            "version: 1\nid: b\nworkdir: /tmp\ncommand:\n  argv: [echo, b]\n",
+        );
+
+        let service = service_with_project(&root, &project_a);
+        assert!(!service.activate_search_paths(vec![project_b.clone()]));
+        service.research();
+        assert!(service.activate_search_paths(vec![project_a]));
+        assert_eq!(service.snapshot().tasks[0].id, "a");
+        assert!(service.activate_search_paths(vec![project_b]));
+        assert_eq!(service.snapshot().tasks[0].id, "b");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn research_stops_at_five_directory_layers() {
-        let root = std::env::temp_dir().join(format!("ucgraph-taskcard-depth-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ucgraph-taskcard-depth-{}", std::process::id()));
         let search = root.join("workspace");
         if root.exists() {
             fs::remove_dir_all(&root).unwrap();
@@ -2834,6 +3389,7 @@ command:
         }
         fs::create_dir_all(root.join("run")).unwrap();
         let records = vec![RunningTaskRecord {
+            uuid: generate_uuid(),
             prefix_path: "/tmp/project".into(),
             id: "demo".into(),
             pid: 4242,
@@ -2849,21 +3405,172 @@ command:
         assert_eq!(parsed[0].id, "demo");
         assert_eq!(parsed[0].config_id, None);
         cleanup_orphan_tasks(&root).unwrap();
-        assert_eq!(fs::read_to_string(running_registry_path(&root)).unwrap(), "[]");
+        assert_eq!(
+            fs::read_to_string(running_registry_path(&root)).unwrap(),
+            "[]"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn rejects_second_instance_on_same_taskcard_root() {
-        let root = std::env::temp_dir().join(format!("harbor-single-instance-{}", std::process::id()));
-        if root.exists() {
-            fs::remove_dir_all(&root).unwrap();
-        }
+        let root = unique_temp("harbor-single-instance");
         let first = TaskCardService::new(root.clone(), Vec::new()).unwrap();
         let second = TaskCardService::new(root.clone(), Vec::new());
         assert!(second.is_err());
         drop(first);
         TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn distinct_runtime_roots_isolate_processes_and_logs() {
+        let root_a = unique_temp("harbor-ws-a");
+        let root_b = unique_temp("harbor-ws-b");
+        let proj_a = root_a.join("proj");
+        let proj_b = root_b.join("proj");
+        write_project_yaml(
+            &proj_a,
+            "tasks",
+            "alpha.yaml",
+            r#"version: 1
+id: alpha
+workdir: /tmp
+command:
+  argv: [sleep, "30"]
+"#,
+        );
+        write_project_yaml(
+            &proj_b,
+            "tasks",
+            "beta.yaml",
+            r#"version: 1
+id: beta
+workdir: /tmp
+command:
+  argv: [sleep, "30"]
+"#,
+        );
+        let service_a = service_with_project(&root_a, &proj_a);
+        let service_b = service_with_project(&root_b, &proj_b);
+        let snapshot_a = service_a.snapshot();
+        let snapshot_b = service_b.snapshot();
+        assert!(snapshot_a.tasks.iter().any(|task| task.id == "alpha"));
+        assert!(!snapshot_a.tasks.iter().any(|task| task.id == "beta"));
+        assert!(snapshot_b.tasks.iter().any(|task| task.id == "beta"));
+        assert!(!snapshot_b.tasks.iter().any(|task| task.id == "alpha"));
+
+        service_a
+            .start_task(
+                absolutize(&proj_a).as_str(),
+                "alpha",
+                None,
+                &HashMap::new(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(service_a.running_count(), 1);
+        assert_eq!(service_b.running_count(), 0);
+        assert!(!service_a.logs().is_empty());
+        assert!(service_b.logs().is_empty());
+        assert_eq!(fs::read_dir(root_a.join("log")).unwrap().count(), 1);
+        assert_eq!(
+            fs::read_dir(root_b.join("log"))
+                .unwrap()
+                .filter(|e| e.is_ok())
+                .count(),
+            0
+        );
+        service_a.stop_all();
+        fs::remove_dir_all(root_a).unwrap();
+        fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn missing_uuid_is_written_and_duplicate_can_be_reset() {
+        let root = unique_temp("harbor-uuid-migration");
+        let project = root.join("project");
+        write_project_yaml(
+            &project,
+            "tasks",
+            "alpha.yaml",
+            r#"version: 1
+id: alpha
+workdir: /tmp
+command:
+  argv: [echo, alpha]
+"#,
+        );
+        let service = service_with_project(&root, &project);
+        let alpha_path = project.join("harbor_taskcfg/tasks/alpha.yaml");
+        let alpha = fs::read_to_string(&alpha_path).unwrap();
+        let uuid = serde_yaml::from_str::<serde_yaml::Value>(&alpha).unwrap()["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(Uuid::parse_str(&uuid).is_ok());
+
+        let duplicate = alpha.replace("id: alpha", "id: beta");
+        let beta_path = project.join("harbor_taskcfg/tasks/beta.yaml");
+        fs::write(&beta_path, duplicate).unwrap();
+        let conflicts = service.uuid_conflicts();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].definitions.len(), 2);
+
+        let replacement = service
+            .reset_definition_uuid(beta_path.to_string_lossy().as_ref())
+            .unwrap();
+        assert_ne!(replacement, uuid);
+        assert!(service.uuid_conflicts().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn switching_search_paths_preserves_running_tasks() {
+        let root = unique_temp("harbor-ws-switch");
+        let project = root.join("project");
+        let next_project = root.join("next-project");
+        let workspace_a_logs = root.join("workspace/a/log");
+        let workspace_b_logs = root.join("workspace/b/log");
+        fs::create_dir_all(&next_project).unwrap();
+        write_project_yaml(
+            &project,
+            "tasks",
+            "sleep.yaml",
+            r#"version: 1
+id: sleep
+workdir: /tmp
+command:
+  argv: [sleep, "30"]
+"#,
+        );
+        let service = service_with_project(&root, &project);
+        service.set_log_dir(workspace_a_logs.clone()).unwrap();
+        service
+            .start_task(
+                absolutize(&project).as_str(),
+                "sleep",
+                None,
+                &HashMap::new(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(service.running_count(), 1);
+        assert_eq!(service.logs().len(), 1);
+        service.set_search_paths(vec![next_project]);
+        service.set_log_dir(workspace_b_logs).unwrap();
+        service.research();
+        assert!(service.snapshot().tasks.is_empty());
+        assert!(service.logs().is_empty());
+        assert_eq!(service.running_count(), 1);
+        service.set_search_paths(vec![project.clone()]);
+        service.set_log_dir(workspace_a_logs).unwrap();
+        service.research();
+        let snapshot = service.snapshot();
+        assert_eq!(snapshot.tasks[0].status, "running");
+        assert!(snapshot.tasks[0].log_file.is_some());
+        assert_eq!(service.logs().len(), 1);
+        assert!(service.stop_all().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 }

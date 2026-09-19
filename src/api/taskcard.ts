@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Settings } from "./settings";
 
+export interface TaskPanelInterface {
+  panel_name: string;
+  interface_port: number;
+  localhost_only: boolean;
+}
+
 export interface TaskCardConfig {
   id: string;
   name: string;
@@ -8,6 +14,8 @@ export interface TaskCardConfig {
 }
 
 export interface TaskCardTask {
+  uuid: string;
+  uuid_conflict: boolean;
   id: string;
   prefix_path: string;
   name: string;
@@ -19,6 +27,7 @@ export interface TaskCardTask {
   default_config?: string;
   running_config_id?: string;
   requires_sudo: boolean;
+  panel_interface?: TaskPanelInterface[];
   folder: string;
   status: "running" | "stopped";
   pid?: number;
@@ -36,6 +45,7 @@ export interface TaskCardGroupTask {
 
 export interface TaskCardGroup {
   version: string;
+  uuid: string;
   id: string;
   prefix_path: string;
   name: string;
@@ -51,7 +61,20 @@ export interface TaskCardSnapshot {
   discovered_group_dirs: string[];
   tasks: TaskCardTask[];
   groups: TaskCardGroup[];
+  uuid_conflicts: UuidConflict[];
   errors: string[];
+}
+
+export interface UuidDefinitionRef {
+  kind: "task" | "group";
+  id: string;
+  prefix_path: string;
+  path: string;
+}
+
+export interface UuidConflict {
+  uuid: string;
+  definitions: UuidDefinitionRef[];
 }
 
 export interface ResearchResult {
@@ -100,6 +123,15 @@ export function addSearchPath(path: string) {
   return invoke<Settings>("taskcard_add_search_path", { path });
 }
 
+export interface PathSuggestions {
+  query: string;
+  paths: string[];
+}
+
+export function listPathSuggestions(prefix: string) {
+  return invoke<PathSuggestions>("list_path_suggestions_command", { prefix });
+}
+
 export function removeSearchPath(path: string) {
   return invoke<Settings>("taskcard_remove_search_path", { path });
 }
@@ -128,6 +160,10 @@ export function restartTask(prefixPath: string, id: string, configId?: string, s
 
 export function stopAllTasks() {
   return invoke<string[]>("taskcard_stop_all");
+}
+
+export function resetDefinitionUuid(path: string) {
+  return invoke<string>("taskcard_reset_uuid", { path });
 }
 
 export function startGroup(prefixPath: string, id: string, sudoPassword?: string) {
@@ -186,10 +222,30 @@ export function fetchLogs() {
   return invoke<TaskLogSummary[]>("taskcard_logs");
 }
 
+export function fetchHarborLog() {
+  return invoke<string>("harbor_self_log");
+}
+
 export function readLog(file: string) {
   return invoke<TaskLogContent>("taskcard_read_log", { file });
 }
 
 export function readLogChunk(file: string, offset: number) {
   return invoke<TaskLogChunk>("taskcard_read_log_chunk", { file, offset });
+}
+
+export function panelUrls(task: TaskCardTask, settings: Settings | null) {
+  const workspace = settings?.workspaces.find((item) => item.id === settings.current_workspace);
+  const host =
+    workspace?.mode === "remote" && workspace.ssh?.host.trim()
+      ? workspace.ssh.host.trim()
+      : "127.0.0.1";
+  return (task.panel_interface ?? []).map((panel) => ({
+    name: panel.panel_name,
+    url: `http://${host}:${panel.interface_port}/`,
+  }));
+}
+
+export function openPanelWindow(title: string, url: string) {
+  return invoke<void>("open_panel_window", { title, url });
 }

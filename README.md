@@ -39,13 +39,15 @@ npm install
 npm run tauri dev
 ```
 
+`npm run tauri dev` 会先执行 `npm run core:release`，生成 release `harbor_core` 和相邻的 `harbor_core.sha256`。GUI 编译时校验并固化该哈希。
+
 ## 打包
 
 ```bash
 npm run tauri build -- --bundles deb
 ```
 
-产物：`src-tauri/target/release/bundle/deb/Harbor_*_amd64.deb`
+产物：`src-tauri/target/release/bundle/deb/Harbor_*_amd64.deb`（含 `harbor` 与 `harbor_core`）
 
 ## CI
 
@@ -55,6 +57,10 @@ GitHub Actions（`.github/workflows/build.yml`）会在 `main` / PR / 手动触�
 
 ## 数据
 
-- Task / Group：默认 `~/.harbor/harbor_taskcfg/{tasks,groups,log}`
-- 项目内：`<项目>/harbor_taskcfg/{tasks,groups}`
-- 设置：`~/.harbor/settings.json`（含 `search_paths`；Agent 可直接编辑，见 `agent_doc/settings.md`）
+- Task / Group：项目内 `<项目>/harbor_taskcfg/{tasks,groups}`
+- 日志：core 所在机器的 `~/.harbor/workspace/<id>/log`，各 workspace 独立
+- 进程占用状态：core 所在机器的 `~/.harbor/runtime/run`，按 UUID 跨 workspace 共享
+- Harbor 自身日志：`~/.harbor/log/harbor.log`（GUI 与 core 聚合显示）
+- 设置：`~/.harbor/settings.json`（含当前 workspace 的 `search_paths`；Agent 可直接编辑，见 `agent_doc/settings.md`）
+- 本机 daemon：GUI 只执行 `~/.harbor/core/<version>/harbor_core` 中的托管副本（默认 `http://127.0.0.1:29385`）。该副本必须与 GUI 内固化的 release core SHA-256 一致；打包目录或 `/usr/bin/harbor_core` 仅作为安装来源，不能直接运行。GUI 关闭后 core 仍可运行。每台机器同一时间只运行一个 core，不区分版本；当前 GUI 访问时会自动关闭版本、API 或哈希不对应的旧 core 并启动匹配 core。
+- Task / Group YAML 都有全局 `uuid`。缺失时 core 自动写入；同一台机器发现重复 UUID 时禁止启动，需为其中一个配置重置 UUID。workspace 只决定当前发现哪些配置，不隔离运行实例。

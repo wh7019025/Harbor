@@ -10,3 +10,14 @@ declare module "*.md?raw" {
   const content: string;
   export default content;
 }
+
+declare global {
+  interface Window {
+    __HARBOR_PANEL__?: {
+      title: string;
+      url: string;
+    };
+  }
+}
+
+export {};

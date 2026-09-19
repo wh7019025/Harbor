@@ -241,9 +241,7 @@ impl SystemMetricsSampler {
             let Ok(device) = nvml.device_by_index(index) else {
                 continue;
             };
-            let name = device
-                .name()
-                .unwrap_or_else(|_| format!("GPU {index}"));
+            let name = device.name().unwrap_or_else(|_| format!("GPU {index}"));
             let utilization_percent = device
                 .utilization_rates()
                 .ok()

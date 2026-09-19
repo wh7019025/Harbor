@@ -7,16 +7,14 @@ Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 ## 公共准备：确定配置位置
 
 - 项目配置：`{project}/harbor_taskcfg/`
-- 当前机器的全局配置：`~/.harbor/harbor_taskcfg/`
-- `taskcard_root` 被修改时，全局配置使用其实际路径
 
-创建项目配置前，Agent 必须按 [../settings.md](../settings.md) 检查 Search Paths。项目尚未被覆盖时，直接将项目根加入 `search_paths`，同时保留其他设置字段。
+创建项目配置前，Agent 必须按 [../settings.md](../settings.md) 检查**当前 workspace** 的 Search Paths。项目尚未被覆盖时，直接将项目根加入当前 workspace 的 `search_paths`，同时保留其他设置字段。
 
 ## 创建 Task
 
 仅在用户要求创建 Task 时执行：
 
-1. 运行 `harbor --version`，将输出**原样**写入 `version`（勿自行递增 rc 号）。
+1. 运行 `harbor --version`，将输出**原样**写入 `version`（勿自行递增 rc 号）；通过 core 模板/API 创建时会生成 `uuid`，直接写文件时可暂不填写，由 core 首次发现后自动写回。
 2. 创建 `harbor_taskcfg/tasks/` 目录（若不存在）。
 3. 按 [../yaml/task.md](../yaml/task.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**简要说明任务用途；无说明可留 `""`。
@@ -35,7 +33,7 @@ harbor_taskcfg/tasks/build-assets.yaml
 
 仅在用户明确要求创建 Group、组合任务或编排已有 Task 时执行：
 
-1. 先确认 Group 引用的所有 Task 均已存在；不要为了填充 Group 而自行创建用户未要求的 Task。
+1. 先确认 Group 引用的所有 Task 均已存在；不要为了填充 Group 而自行创建用户未要求的 Task。`uuid` 规则与 Task 相同。
 2. 创建 `harbor_taskcfg/groups/` 目录（若不存在）。
 3. 按 [../yaml/group.md](../yaml/group.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**说明编排目的。
@@ -50,6 +48,6 @@ harbor_taskcfg/groups/dev-pipeline.yaml
 ## 完成检查
 
 - 只检查和交付用户要求的配置类型。
-- 确认 YAML 可以解析，且没有写入自动生成的顶层 `folder`、`prefix_path` 或 `taskcfg_dir`。
+- 确认 YAML 可以解析，且没有写入自动生成的顶层 `folder`、`prefix_path` 或 `taskcfg_dir`；不要复制其他配置的 `uuid`。
 - 不要覆盖同目录下已有的同名配置；修改已有配置时保留无关字段。
 - 完成后告知用户重新加载配置或重启 Harbor。

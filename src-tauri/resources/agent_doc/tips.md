@@ -1,7 +1,7 @@
 # 配置维护检查
 
-1. 仓库相关配置优先写入项目的 `harbor_taskcfg/tasks/` 和 `harbor_taskcfg/groups/`，并由 Agent 检查和维护 `search_paths`。
-2. 跨工程可复用同名短 `id`，但定位时使用 `(prefix_path, id)`。
+1. 仓库相关配置优先写入项目的 `harbor_taskcfg/tasks/` 和 `harbor_taskcfg/groups/`，并由 Agent 检查和维护**当前 workspace** 的 `search_paths`。
+2. 跨工程可复用同名短 `id`；运行实例由 `uuid` 唯一标识，缺失时 core 自动补齐，禁止复制其他配置的 UUID。
 3. 新增或修改 YAML 后，告知用户重新加载配置或重启 Harbor；无需指导界面操作。
 4. 不要修改正在运行的 Task 定义；应先停止任务。
 5. 修改已有文件时保留用户未要求变更的字段、命令和环境变量。

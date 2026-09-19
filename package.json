@@ -1,9 +1,10 @@
 {
   "name": "harbor",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.2.0-preview",
   "type": "module",
   "scripts": {
+    "core:release": "bash scripts/build_core_release.sh",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",

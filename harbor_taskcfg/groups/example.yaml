@@ -1,4 +1,5 @@
 version: "0.1.4"
+uuid: 4c9e2d73-6b15-4f80-a271-95d38c7e1a42
 id: example
 name: Example
 description: 示例编排：先用 quick config 跑 Config Demo，再跑 Demo Ping

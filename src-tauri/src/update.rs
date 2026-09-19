@@ -1,7 +1,7 @@
-use serde::Serialize;
 use semver::Version;
+use serde::Serialize;
 
-use crate::version::APP_VERSION;
+use harbor_core::version::APP_VERSION;
 
 const GITHUB_REPO: &str = "wh7019025/Harbor";
 

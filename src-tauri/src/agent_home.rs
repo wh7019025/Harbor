@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::settings::config_dir;
-use crate::version::APP_VERSION;
+use harbor_core::settings::config_dir;
+use harbor_core::version::APP_VERSION;
 
 const BUNDLED_DOCS: &[(&str, &str)] = &[
     (
@@ -67,8 +67,10 @@ pub fn sync_agent_doc() -> Result<AgentHelpInfo, String> {
     let home = harbor_home();
     let doc_dir = agent_doc_dir();
     let mcp_dir = home.join("mcp");
-    fs::create_dir_all(&doc_dir).map_err(|e| format!("create {} failed: {e}", doc_dir.display()))?;
-    fs::create_dir_all(&mcp_dir).map_err(|e| format!("create {} failed: {e}", mcp_dir.display()))?;
+    fs::create_dir_all(&doc_dir)
+        .map_err(|e| format!("create {} failed: {e}", doc_dir.display()))?;
+    fs::create_dir_all(&mcp_dir)
+        .map_err(|e| format!("create {} failed: {e}", mcp_dir.display()))?;
 
     for (rel, content) in BUNDLED_DOCS {
         let path = doc_dir.join(rel);
@@ -144,32 +146,32 @@ pub fn agent_help_info() -> AgentHelpInfo {
         "Harbor 使用规范\n\
 \n\
 1. Harbor 是什么\n\
-Harbor 是本机任务控制台：用 YAML 定义 Task / Group，在桌面里启动、停止、看日志。Harbor 进程在跑时，也提供无鉴权 HTTP 接口（默认 http://127.0.0.1:17890）。\n\
+Harbor GUI 是桌面控制台；harbor_core 负责发现、起停任务，并提供无需登录或令牌的 HTTP 接口（默认 http://127.0.0.1:29385）。GUI 关闭后 core 仍可继续运行。\n\
 \n\
 2. Harbor 提供什么功能\n\
 - Task：一条可运行命令；可用 configs 覆盖 env，同一 Task 同时只能跑一份\n\
 - Group：按顺序拉起多条 Task，可指定 config 和额外 env\n\
-- 发现：全局 ~/.harbor/harbor_taskcfg，以及 search_paths 下最多 5 层的项目 harbor_taskcfg\n\
-- Web API：列表、起停、日志；Harbor 关闭后接口消失\n\
+- 发现：当前 workspace 的 search_paths 下最多 5 层的项目 harbor_taskcfg；日志按 workspace 写入 ~/.harbor/workspace/<id>/log/，进程占用按 UUID 全机共享，切换 workspace 不停任务\n\
+- Web API：列表、起停、日志；由 harbor_core 提供，不随 GUI 窗口关闭而消失\n\
 \n\
 3. Harbor 的文档如何阅读\n\
 文档目录：{}\n\
 先读 AgentDoc.md（索引和工作流），再按需打开：\n\
 - yaml/task.md、yaml/group.md：YAML 格式\n\
 - taskcard/paths.md、taskcard/create.md：存放位置和创建流程\n\
-- settings.md：search_paths / taskcard_root\n\
+- settings.md：当前 workspace 的 search_paths\n\
 - version.md：YAML version 规则\n\
 - web_api.md：HTTP 接口\n\
 - tips.md：修改时的安全检查\n\
 \n\
 4. Agent 应该关注什么\n\
-只负责创建和维护 Task / Group YAML，以及必要时直接改 ~/.harbor/settings.json 里的 search_paths。不要管界面布局、按钮、监控面板。项目配置写在仓库的 harbor_taskcfg/；用户没要求 Group 就不要编 Group。\n\
-用户可能希望 Agent 控制 Harbor 的运行行为（列表、起停、看日志等）。Harbor 开着时，Agent 可灵活调用 Web API（见 web_api.md）完成这些需求，不必指挥用户点界面。\n\
+只负责创建和维护 Task / Group YAML，以及必要时直接改 ~/.harbor/settings.json 里**当前 workspace** 的 search_paths。不要管界面布局、按钮、监控面板。项目配置写在仓库的 harbor_taskcfg/；用户没要求 Group 就不要编 Group。\n\
+用户可能希望 Agent 控制 Harbor 的运行行为（列表、起停、看日志等）。harbor_core 在跑时，Agent 可灵活调用 Web API（见 web_api.md）完成这些需求，不必指挥用户点界面。\n\
 \n\
 注意事项\n\
 - YAML version 必须原样等于 `harbor --version`。禁止自行递增 rc 号；已是当前应用版本时不要改 version。详见 version.md。\n\
 - description 尽量用中文说明用途。\n\
-- 定位 Task 用 (prefix_path, id)；同名 id 可跨项目存在。\n\
+- YAML 查找用 (prefix_path, id)，运行实例以 uuid 唯一标识；同名 id 可跨项目存在。缺失 uuid 时 core 会自动写回，禁止复制其他配置的 uuid。\n\
 - 不要改正在运行的 Task 定义，先停再改。\n\
 - 未要求变更的字段、命令、环境变量一律保留。",
         doc_dir.display()

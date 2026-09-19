@@ -1481,23 +1481,37 @@ dependencies = [
 
 [[package]]
 name = "harbor"
-version = "0.1.4"
+version = "0.2.0-preview"
 dependencies = [
- "axum",
+ "harbor_core",
  "libc",
  "nvml-wrapper",
  "parking_lot",
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
+ "ureq",
+]
+
+[[package]]
+name = "harbor_core"
+version = "0.2.0-preview"
+dependencies = [
+ "axum",
+ "libc",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
  "tower",
  "tower-http",
- "ureq",
+ "uuid",
 ]
 
 [[package]]
@@ -3902,6 +3916,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

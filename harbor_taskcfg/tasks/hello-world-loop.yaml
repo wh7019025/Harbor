@@ -1,4 +1,5 @@
 version: 1
+uuid: e9034b72-8f16-45ad-a7c9-21d6be508f34
 id: hello-world-loop
 name: Hello World Loop
 workdir: "~"

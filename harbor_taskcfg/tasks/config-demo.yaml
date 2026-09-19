@@ -1,4 +1,5 @@
 version: "0.1.4"
+uuid: 7f2a61c4-3e98-4b57-b026-d14c9a835e60
 id: config-demo
 name: Config Demo
 description: 演示同一任务通过不同 Config 覆盖环境变量

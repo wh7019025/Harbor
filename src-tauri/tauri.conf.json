@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Harbor",
-  "version": "0.1.4",
+  "version": "0.2.0-preview",
   "identifier": "com.harbor.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run core:release && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run core:release && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -18,6 +18,7 @@
         "height": 820,
         "resizable": true,
         "decorations": false,
+        "backgroundColor": "#2a2a2a",
         "center": true
       }
     ],
@@ -30,7 +31,10 @@
     "targets": ["deb"],
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [],
+        "files": {
+          "/usr/bin/harbor_core": "target/release/harbor_core"
+        }
       }
     },
     "icon": [

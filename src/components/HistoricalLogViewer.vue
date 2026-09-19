@@ -2,14 +2,16 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { editor } from "monaco-editor";
 import { writeClipboardText } from "../lib/clipboard";
+import { tailLogLines, type LogCopyKind } from "../lib/logCopy";
 import { sanitizeLogText } from "../lib/logText";
 
 const props = defineProps<{
   content: string;
+  copyLineLimit: number | null;
 }>();
 
 const emit = defineEmits<{
-  copied: [];
+  copied: [kind: LogCopyKind, lineLimit?: number];
 }>();
 
 const container = ref<HTMLElement | null>(null);
@@ -35,22 +37,30 @@ function selectedLogText() {
   return model?.getValue() ?? displayText(props.content);
 }
 
-function notifyCopied() {
+function notifyCopied(kind: LogCopyKind, lineLimit?: number) {
   const now = Date.now();
   if (now - copiedAt < 400) return;
   copiedAt = now;
-  emit("copied");
+  emit("copied", kind, lineLimit);
 }
 
 async function copyLog() {
-  const text = selectedLogText();
+  const hasSelection = hasSelectionInEditor();
+  const kind: LogCopyKind = hasSelection
+    ? "selection"
+    : props.copyLineLimit === null
+      ? "full"
+      : "tail";
+  const text = hasSelection
+    ? selectedLogText()
+    : tailLogLines(instance?.getModel()?.getValue() ?? displayText(props.content), props.copyLineLimit);
   if (!text) return;
   await writeClipboardText(text);
-  notifyCopied();
+  notifyCopied(kind, kind === "tail" ? props.copyLineLimit ?? undefined : undefined);
 }
 
 function onEditorCopy() {
-  notifyCopied();
+  if (hasSelectionInEditor()) notifyCopied("selection");
 }
 
 function scrollToBottom() {

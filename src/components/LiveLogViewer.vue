@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { writeClipboardText } from "../lib/clipboard";
+import { tailLogLines, type LogCopyKind } from "../lib/logCopy";
 import { sanitizeLogText } from "../lib/logText";
 
 const props = defineProps<{
   content: string;
+  copyLineLimit: number | null;
 }>();
 
 const emit = defineEmits<{
-  copied: [];
+  copied: [kind: LogCopyKind, lineLimit?: number];
 }>();
 
 const viewport = ref<HTMLElement | null>(null);
@@ -124,19 +126,35 @@ function selectedLogText() {
 }
 
 async function copyLog() {
-  const text = selectedLogText();
+  const hasSelection = hasSelectionInside();
+  const kind: LogCopyKind = hasSelection
+    ? "selection"
+    : props.copyLineLimit === null
+      ? "full"
+      : "tail";
+  const text = hasSelection
+    ? selectedLogText()
+    : tailLogLines(displayContent.value, props.copyLineLimit);
   if (!text) return;
   await writeClipboardText(text);
-  emit("copied");
+  emit("copied", kind, kind === "tail" ? props.copyLineLimit ?? undefined : undefined);
 }
 
 function onCopy(event: ClipboardEvent) {
   if (!hasSelectionInside() && document.activeElement !== viewport.value) return;
   event.preventDefault();
-  const text = selectedLogText();
+  const hasSelection = hasSelectionInside();
+  const text = hasSelection
+    ? selectedLogText()
+    : tailLogLines(displayContent.value, props.copyLineLimit);
   if (!text) return;
   event.clipboardData?.setData("text/plain", text);
-  emit("copied");
+  const kind: LogCopyKind = hasSelection
+    ? "selection"
+    : props.copyLineLimit === null
+      ? "full"
+      : "tail";
+  emit("copied", kind, kind === "tail" ? props.copyLineLimit ?? undefined : undefined);
 }
 
 function onScroll() {
