@@ -54,7 +54,7 @@ jobs:
           args: --bundles deb
           uploadArtifacts: true
 
-      - name: Build Harbor and draft release
+      - name: Build Harbor and publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v1
         env:
@@ -66,4 +66,4 @@ jobs:
           releaseName: Harbor ${{ github.ref_name }}
           releaseBody: See the assets to download this version and install.
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
