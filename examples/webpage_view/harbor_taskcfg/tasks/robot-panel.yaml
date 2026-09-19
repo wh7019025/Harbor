@@ -1,0 +1,29 @@
+version: "0.2.0-preview"
+uuid: a35b7f18-9d64-4e2a-8f31-6c0d72b94511
+id: robot-panel
+name: Robot Panel
+description: WebPage_view 示例：支持 ROS 2、无 ROS 环境时使用 mock 的机器人控制面板
+workdir: $(harbor_taskcfg_dir)/..
+env: {}
+sudo: false
+panel_interface:
+  - panel_name: robot_panel
+    interface_port: 23681
+    localhost_only: false
+command:
+  shell: bash
+  script: |
+    # --- 阶段 1：兼容尚未升级的 Harbor Core ---
+    if [ -z "${HARBOR_PANEL_INTERFACE_PORT:-}" ]; then
+      task_yaml="harbor_taskcfg/tasks/robot-panel.yaml"
+      export HARBOR_PANEL_NAME="$(awk -F': *' '/panel_name:/ {print $2; exit}' "${task_yaml}")"
+      export HARBOR_PANEL_INTERFACE_PORT="$(awk -F': *' '/interface_port:/ {print $2; exit}' "${task_yaml}")"
+      export HARBOR_PANEL_LOCALHOST_ONLY="$(awk -F': *' '/localhost_only:/ {print $2; exit}' "${task_yaml}")"
+    fi
+
+    # --- 阶段 2：准备前端并启动示例 ---
+    if [ ! -f dist/index.html ]; then
+      npm install
+      npm run build
+    fi
+    python3 -u robot_panel.py --harbor_info
