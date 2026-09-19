@@ -5,38 +5,60 @@ createTime: 2026/09/20 01:30:00
 ---
 # Harbor Skill
 
-Harbor 启动时会把内置的 `harbor` Skill 安装到：
+## 创建 Task
 
-```text
-~/.agents/skills/harbor/
-├── SKILL.md
-├── agents/openai.yaml
-└── references/
+```txt
+使用 $harbor，为当前项目创建一个 Task，用 uv 运行 main.py。
 ```
 
-支持 Agent Skills 的工具可以自动发现它。首次安装或 Harbor 更新后，新建 Agent 会话即可加载新版本。
-
-## 使用方式
-
-可以明确调用：
-
-```text
-Use $harbor to create a Task for this program.
+```txt
+使用 $harbor，把 scripts/start_camera.sh 配置成 Harbor Task，工作目录使用项目根目录，并保留当前环境变量。
 ```
 
-也可以直接提出与 Harbor 有关的需求，例如创建 Task、编排 Group、维护 Workspace Search Paths、启动任务或读取日志。Skill 的描述会帮助 Agent 判断何时加载。
+## 创建 Group
 
-## Skill 包含什么
+```txt
+使用 $harbor，把 camera、perception 和 controller 编排成一个 Group，按顺序启动。
+```
 
-- 创建和维护 Task / Group 的工作流。
-- Task YAML 与 Group YAML 字段参考。
-- Workspace、项目发现和 `search_paths` 规则。
-- UUID 与 Harbor 版本规则。
-- `harbor_core` HTTP API、运行状态和日志操作。
-- 修改运行中任务前应遵守的安全检查。
+```txt
+使用 $harbor，创建一个 teleop Group。先启动底盘驱动，再启动手柄节点，并为手柄任务选择 dpvr config。
+```
 
-## 为什么不再使用 Harbor MCP
+## 接入 ROS 2
 
-旧 MCP 只把静态 `agent_doc` 文件暴露为 Resources，没有提供额外的运行工具。Skill 可以直接携带同一批工作流和参考资料，并按需加载；运行操作则直接调用 `harbor_core` HTTP API。因此不再需要单独配置 Harbor MCP。
+```txt
+使用 $harbor，为这个 ROS 2 package 创建一个 Task。启动前 source /opt/ros/humble/setup.bash 和 install/setup.bash，然后运行 ros2 launch。
+```
 
-Harbor 会在迁移时清理旧的 `~/.harbor/agent_doc/`、`~/.harbor/mcp/` 和 `~/.harbor/mcp.example.json`。
+## 接入 Web Panel
+
+```txt
+使用 $harbor，为当前程序增加一个 Web Panel Task。后端通过 WebSocket 推送视频帧，前端显示实时画面。
+```
+
+## 操作任务
+
+```txt
+使用 $harbor，启动当前项目的 perception Task，并确认它进入 running 状态。
+```
+
+```txt
+使用 $harbor，停止 teleop Group，然后修改 controller Task 的启动参数并重新启动。
+```
+
+## 查看日志
+
+```txt
+使用 $harbor，检查 camera Task 最后 128 行日志，找出启动失败的原因。
+```
+
+```txt
+使用 $harbor，查看 Harbor 日志，判断远端 harbor_core 为什么连接失败。
+```
+
+## 维护 Workspace
+
+```txt
+使用 $harbor，把当前项目加入当前 Workspace 的 search_paths，保留其他 Workspace 设置不变。
+```
