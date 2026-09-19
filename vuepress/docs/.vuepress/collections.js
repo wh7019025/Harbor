@@ -18,7 +18,7 @@ const integration = defineCollection({
   type: 'doc',
   dir: 'integration',
   title: '程序接入',
-  sidebar: ['', 'task-definition', 'runtime', 'web-panel', 'ros2'],
+  sidebar: ['', 'agent-skill', 'task-definition', 'runtime', 'web-panel', 'ros2'],
 })
 
 const operations = defineCollection({

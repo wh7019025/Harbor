@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harbor"
+  short_description: "Create and operate Harbor tasks and groups"
+  default_prompt: "Use $harbor to create, maintain, or operate this Harbor task workflow."

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   AppWindow,
+  BookOpen,
   ChevronDown,
   FolderSearch,
   KeyRound,
@@ -20,8 +21,9 @@ import {
   Trash2,
   X,
 } from "lucide-vue-next";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import AgentHelpPanel from "../components/AgentHelpPanel.vue";
+import AgentSkillPanel from "../components/AgentSkillPanel.vue";
 import HistoricalLogViewer from "../components/HistoricalLogViewer.vue";
 import LiveLogViewer from "../components/LiveLogViewer.vue";
 import MonacoEditor from "../components/MonacoEditor.vue";
@@ -86,10 +88,10 @@ const loading = ref(true);
 const refreshing = ref(false);
 const pathsPanelOpen = ref(false);
 const settingsPanelOpen = ref(false);
-const agentHelpPanelOpen = ref(false);
+const agentSkillPanelOpen = ref(false);
 const BACKDROP_DISMISS_GUARD_MS = 300;
 const settingsOpenedAt = ref(0);
-const agentHelpOpenedAt = ref(0);
+const agentSkillOpenedAt = ref(0);
 const yamlEditorOpenedAt = ref(0);
 const newSearchPath = ref("");
 const pathSuggestions = ref<string[]>([]);
@@ -730,6 +732,14 @@ function openSettingsPanel() {
   settingsPanelOpen.value = true;
 }
 
+async function openDocumentation() {
+  try {
+    await openUrl("https://harbor.hyln.space");
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
 function closeSettingsPanel() {
   settingsPanelOpen.value = false;
 }
@@ -738,17 +748,17 @@ function dismissSettingsBackdrop() {
   dismissOverlayBackdrop(settingsOpenedAt.value, closeSettingsPanel);
 }
 
-function openAgentHelpPanel() {
-  agentHelpOpenedAt.value = Date.now();
-  agentHelpPanelOpen.value = true;
+function openAgentSkillPanel() {
+  agentSkillOpenedAt.value = Date.now();
+  agentSkillPanelOpen.value = true;
 }
 
-function closeAgentHelpPanel() {
-  agentHelpPanelOpen.value = false;
+function closeAgentSkillPanel() {
+  agentSkillPanelOpen.value = false;
 }
 
-function dismissAgentHelpBackdrop() {
-  dismissOverlayBackdrop(agentHelpOpenedAt.value, closeAgentHelpPanel);
+function dismissAgentSkillBackdrop() {
+  dismissOverlayBackdrop(agentSkillOpenedAt.value, closeAgentSkillPanel);
 }
 
 function closeSudoPrompt() {
@@ -1232,10 +1242,13 @@ onBeforeUnmount(() => {
         >
           <Square class="h-3.5 w-3.5" />
         </button>
+        <button class="btn !px-2 !py-1" type="button" title="Harbor 官方文档" @click="openDocumentation">
+          <BookOpen class="h-3.5 w-3.5" />
+        </button>
         <button class="btn !px-2 !py-1" type="button" title="settings" @click="openSettingsPanel">
           <Settings class="h-3.5 w-3.5" />
         </button>
-        <button class="btn !px-2 !py-1" type="button" title="agent help" @click="openAgentHelpPanel">
+        <button class="btn !px-2 !py-1" type="button" title="Harbor Skill" @click="openAgentSkillPanel">
           <Bot class="h-3.5 w-3.5" />
         </button>
       </div>
@@ -1844,20 +1857,20 @@ onBeforeUnmount(() => {
     </div>
 
     <div
-      v-if="agentHelpPanelOpen"
+      v-if="agentSkillPanelOpen"
       class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
-      @click.self="dismissAgentHelpBackdrop"
+      @click.self="dismissAgentSkillBackdrop"
     >
       <div
         class="flex h-[min(720px,calc(100vh-2rem))] w-[min(820px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--bg-1)]"
       >
         <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
-          <h3 class="text-sm font-medium">AgentHelp</h3>
-          <button class="btn !px-2 !py-1" type="button" @click="closeAgentHelpPanel">
+          <h3 class="text-sm font-medium">Harbor Skill</h3>
+          <button class="btn !px-2 !py-1" type="button" @click="closeAgentSkillPanel">
             <X class="h-4 w-4" />
           </button>
         </div>
-        <AgentHelpPanel @close="closeAgentHelpPanel" />
+        <AgentSkillPanel @close="closeAgentSkillPanel" />
       </div>
     </div>
 

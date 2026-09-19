@@ -72,6 +72,6 @@ npm run docs:dev
 - 日志：core 所在机器的 `~/.harbor/workspace/<id>/log`，各 workspace 独立
 - 进程占用状态：core 所在机器的 `~/.harbor/runtime/run`，按 UUID 跨 workspace 共享
 - Harbor 自身日志：`~/.harbor/log/harbor.log`（GUI 与 core 聚合显示）
-- 设置：`~/.harbor/settings.json`（含当前 workspace 的 `search_paths`；Agent 可直接编辑，见 `agent_doc/settings.md`）
+- 设置：`~/.harbor/settings.json`（含当前 workspace 的 `search_paths`；Agent 可通过 `~/.agents/skills/harbor/` 中的 Harbor Skill 维护）
 - 本机 daemon：GUI 只执行 `~/.harbor/core/<version>/harbor_core` 中的托管副本（默认 `http://127.0.0.1:29385`）。该副本必须与 GUI 内固化的 release core SHA-256 一致；打包目录或 `/usr/bin/harbor_core` 仅作为安装来源，不能直接运行。GUI 关闭后 core 仍可运行。每台机器同一时间只运行一个 core，不区分版本；当前 GUI 访问时会自动关闭版本、API 或哈希不对应的旧 core 并启动匹配 core。
 - Task / Group YAML 都有全局 `uuid`。缺失时 core 自动写入；同一台机器发现重复 UUID 时禁止启动，需为其中一个配置重置 UUID。workspace 只决定当前发现哪些配置，不隔离运行实例。

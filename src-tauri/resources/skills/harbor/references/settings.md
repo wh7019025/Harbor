@@ -1,4 +1,4 @@
-# Search Paths 维护（settings.json）
+# Workspace 与 Search Paths
 
 配置文件路径：`~/.harbor/settings.json`
 

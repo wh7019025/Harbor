@@ -21,7 +21,7 @@ tasks:
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `version` | 是 | Harbor **应用**版本（`harbor --version` 原样输出），不是配置修订号；Agent 直接编辑时仅在旧值或与应用不一致时更新，**禁止自行递增 rc 号**。详见 [version.md](../version.md) |
+| `version` | 是 | Harbor **应用**版本（`harbor --version` 原样输出），不是配置修订号；Agent 直接编辑时仅在旧值或与应用不一致时更新，**禁止自行递增 rc 号**。详见 [version.md](version.md) |
 | `uuid` | 是 | Group 的稳定身份。缺失时 harbor_core 自动生成并写回；不要复制其他 YAML 的 UUID，冲突时通过 Harbor 重置其中一个 |
 | `id` | 是 | 字母数字、`-`、`_`；同一 `groups/` 目录内唯一 |
 | `name` | 否 | 显示名 |

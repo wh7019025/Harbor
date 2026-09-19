@@ -19,6 +19,7 @@ harbor_core
 
 ## 选择接入方式
 
+- **让 AI Agent 创建或操作任务**：阅读 [Harbor Skill](./agent-skill.md)。
 - **普通程序或脚本**：阅读[定义 Task](./task-definition.md)。
 - **需要运行参数或环境切换**：阅读[运行时约定](./runtime.md)。
 - **提供浏览器控制界面**：阅读[接入 Web Panel](./web-panel.md)。

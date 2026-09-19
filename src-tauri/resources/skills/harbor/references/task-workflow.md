@@ -8,7 +8,7 @@ Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 
 - 项目配置：`{project}/harbor_taskcfg/`
 
-创建项目配置前，Agent 必须按 [../settings.md](../settings.md) 检查**当前 workspace** 的 Search Paths。项目尚未被覆盖时，直接将项目根加入当前 workspace 的 `search_paths`，同时保留其他设置字段。
+创建项目配置前，Agent 必须按 [settings.md](settings.md) 检查**当前 workspace** 的 Search Paths。项目尚未被覆盖时，直接将项目根加入当前 workspace 的 `search_paths`，同时保留其他设置字段。
 
 ## 创建 Task
 
@@ -16,7 +16,7 @@ Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 
 1. 运行 `harbor --version`，将输出**原样**写入 `version`（勿自行递增 rc 号）；通过 core 模板/API 创建时会生成 `uuid`，直接写文件时可暂不填写，由 core 首次发现后自动写回。
 2. 创建 `harbor_taskcfg/tasks/` 目录（若不存在）。
-3. 按 [../yaml/task.md](../yaml/task.md) 写入 `{id}.yaml`。
+3. 按 [task-yaml.md](task-yaml.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**简要说明任务用途；无说明可留 `""`。
 5. 若同一程序只有环境变量参数不同，可在一个 Task 中使用 `configs`，不要复制多个几乎相同的 Task。
 6. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
@@ -35,7 +35,7 @@ harbor_taskcfg/tasks/build-assets.yaml
 
 1. 先确认 Group 引用的所有 Task 均已存在；不要为了填充 Group 而自行创建用户未要求的 Task。`uuid` 规则与 Task 相同。
 2. 创建 `harbor_taskcfg/groups/` 目录（若不存在）。
-3. 按 [../yaml/group.md](../yaml/group.md) 写入 `{id}.yaml`。
+3. 按 [group-yaml.md](group-yaml.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**说明编排目的。
 5. Group 仅填写 Task `id`；若跨目录搜索得到多个同名 Task，Harbor 会拒绝保存并列出候选位置。
 

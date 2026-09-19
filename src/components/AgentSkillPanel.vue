@@ -1,20 +1,20 @@
 <script setup lang="ts">
 import { Check, Copy, FolderOpen, RefreshCw } from "lucide-vue-next";
 import { onMounted, ref } from "vue";
-import { getAgentHelp, refreshAgentDoc, type AgentHelpInfo } from "../api/agentHelp";
+import { getAgentSkill, refreshAgentSkill, type AgentSkillInfo } from "../api/agentSkill";
 
 defineEmits<{
   close: [];
 }>();
 
-const info = ref<AgentHelpInfo | null>(null);
+const info = ref<AgentSkillInfo | null>(null);
 const error = ref("");
-const copied = ref<"prompt" | "mcp" | null>(null);
+const copied = ref(false);
 const refreshing = ref(false);
 
 async function load() {
   try {
-    info.value = await getAgentHelp();
+    info.value = await getAgentSkill();
     error.value = "";
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
@@ -24,7 +24,7 @@ async function load() {
 async function refresh() {
   refreshing.value = true;
   try {
-    info.value = await refreshAgentDoc();
+    info.value = await refreshAgentSkill();
     error.value = "";
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
@@ -33,12 +33,12 @@ async function refresh() {
   }
 }
 
-async function copyText(kind: "prompt" | "mcp", text: string) {
+async function copyPrompt(text: string) {
   try {
     await navigator.clipboard.writeText(text);
-    copied.value = kind;
+    copied.value = true;
     window.setTimeout(() => {
-      if (copied.value === kind) copied.value = null;
+      copied.value = false;
     }, 1600);
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
@@ -52,14 +52,16 @@ onMounted(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-4 py-3">
-    <p class="text-[12px] text-[var(--muted)]">复制下面这段 Harbor 使用规范发给 Agent。</p>
+    <p class="text-[12px] text-[var(--muted)]">
+      Harbor Skill 已安装到 Agent 的通用 Skill 目录。首次安装或更新后，新建 Agent 会话即可使用。
+    </p>
 
     <p v-if="error" class="text-sm text-[#f48771]">{{ error }}</p>
 
     <div class="rounded-md border border-[var(--line-soft)] bg-[var(--bg-1)] px-3 py-2">
       <div class="flex items-center gap-1.5 text-[11px] text-[var(--faint)]">
         <FolderOpen class="h-3.5 w-3.5" />
-        <span class="readout truncate">{{ info?.agent_doc_dir || "~/.harbor/agent_doc" }}</span>
+        <span class="readout truncate">{{ info?.skill_dir || "~/.agents/skills/harbor" }}</span>
       </div>
       <p v-if="info?.files?.length" class="readout mt-1.5 text-[11px] text-[var(--muted)]">
         {{ info.files.join(" · ") }}
@@ -68,18 +70,19 @@ onMounted(() => {
 
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--surface-2)]">
       <div class="flex items-center justify-between border-b border-[var(--line-soft)] px-3 py-1.5">
-        <span class="kicker">copy for agent</span>
+        <span class="kicker">invoke skill</span>
         <div class="flex items-center gap-1">
-          <button class="btn !px-2 !py-1" type="button" title="refresh docs" :disabled="refreshing" @click="refresh">
+          <button class="btn !px-2 !py-1" type="button" title="刷新 Harbor Skill" :disabled="refreshing" @click="refresh">
             <RefreshCw :class="['h-3.5 w-3.5', refreshing ? 'animate-spin' : '']" />
           </button>
           <button
             class="btn !px-2 !py-1"
             type="button"
             :disabled="!info?.prompt"
-            @click="info && copyText('prompt', info.prompt)"
+            title="复制 Skill 调用提示"
+            @click="info && copyPrompt(info.prompt)"
           >
-            <Check v-if="copied === 'prompt'" class="h-3.5 w-3.5 text-[var(--running)]" />
+            <Check v-if="copied" class="h-3.5 w-3.5 text-[var(--running)]" />
             <Copy v-else class="h-3.5 w-3.5" />
           </button>
         </div>
@@ -89,25 +92,8 @@ onMounted(() => {
       }}</pre>
     </div>
 
-    <div class="rounded-md border border-[var(--line-soft)] bg-[var(--bg-1)] px-3 py-2">
-      <div class="mb-1.5 flex items-center justify-between gap-2">
-        <span class="kicker">mcp example</span>
-        <button
-          class="btn !px-2 !py-1"
-          type="button"
-          :disabled="!info?.mcp_example"
-          @click="info && copyText('mcp', info.mcp_example)"
-        >
-          <Check v-if="copied === 'mcp'" class="h-3.5 w-3.5 text-[var(--running)]" />
-          <Copy v-else class="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <pre class="max-h-36 overflow-auto font-mono text-[11px] leading-relaxed text-[var(--muted)]">{{
-        info?.mcp_example || ""
-      }}</pre>
-      <p class="mt-1.5 text-[11px] text-[var(--faint)]">
-        合并进 Cursor MCP 配置后，Agent 可通过 resources 读取 harbor://agent_doc/*
-      </p>
-    </div>
+    <p class="text-[11px] text-[var(--faint)]">
+      Skill 已包含 Task、Group、Workspace、版本规则和 harbor_core API 参考，不再需要配置 Harbor MCP。
+    </p>
   </div>
 </template>

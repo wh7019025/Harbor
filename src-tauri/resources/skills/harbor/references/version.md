@@ -44,4 +44,4 @@ harbor --version
 
 并将结果写入 YAML，例如 `version: "0.2.0-preview"`（建议加引号）。同一应用版本下无论改多少次 Task / Group，此值保持不变。
 
-详见 [yaml/task.md](yaml/task.md)、[yaml/group.md](yaml/group.md)。
+详见 [task-yaml.md](task-yaml.md)、[group-yaml.md](group-yaml.md)。

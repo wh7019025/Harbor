@@ -1,4 +1,4 @@
-mod agent_home;
+mod agent_skill;
 mod core_client;
 mod core_process;
 mod path_open;
@@ -11,7 +11,7 @@ pub fn handle_cli_args() -> bool {
 
 use std::sync::Arc;
 
-use agent_home::{agent_help_info, sync_agent_doc, AgentHelpInfo};
+use agent_skill::{agent_skill_info, sync_agent_skill, AgentSkillInfo};
 use core_client::HarborCoreStatus;
 use harbor_core::settings::{
     load_settings, normalize_workspace_ssh, save_settings, unique_workspace_id,
@@ -632,13 +632,13 @@ fn check_app_update() -> update::AppUpdateInfo {
 }
 
 #[tauri::command]
-fn get_agent_help() -> AgentHelpInfo {
-    agent_help_info()
+fn get_agent_skill() -> AgentSkillInfo {
+    agent_skill_info()
 }
 
 #[tauri::command]
-fn refresh_agent_doc() -> Result<AgentHelpInfo, String> {
-    sync_agent_doc()
+fn refresh_agent_skill() -> Result<AgentSkillInfo, String> {
+    sync_agent_skill()
 }
 
 #[tauri::command]
@@ -665,8 +665,8 @@ fn taskcard_resolve_config_base_path(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     harbor_core::app_log::gui(&format!("Harbor GUI {}", harbor_core::version::APP_VERSION));
-    if let Err(error) = sync_agent_doc() {
-        harbor_core::app_log::gui(&format!("sync agent_doc failed: {error}"));
+    if let Err(error) = sync_agent_skill() {
+        harbor_core::app_log::gui(&format!("sync Harbor Skill failed: {error}"));
     }
     let settings = load_settings();
     if let Err(error) = core_process::ensure_core(&settings) {
@@ -724,8 +724,8 @@ pub fn run() {
             taskcard_read_log_chunk,
             app_version,
             check_app_update,
-            get_agent_help,
-            refresh_agent_doc,
+            get_agent_skill,
+            refresh_agent_skill,
             path_openers,
             path_open,
             taskcard_resolve_config_base_path,
