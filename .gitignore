@@ -15,6 +15,7 @@ dist-ssr
 *.local
 
 src-tauri/target
+src-tauri/tauri.git.conf.json
 
 # Editor directories and files
 .vscode/*

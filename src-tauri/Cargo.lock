@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "harbor"
-version = "0.2.0-preview"
+version = "0.0.0"
 dependencies = [
  "harbor_core",
  "libc",
@@ -1500,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "harbor_core"
-version = "0.2.0-preview"
+version = "0.0.0"
 dependencies = [
  "axum",
  "libc",

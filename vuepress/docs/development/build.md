@@ -5,6 +5,25 @@ createTime: 2026/09/20 00:44:43
 ---
 # 构建 Harbor
 
+## Git 版本
+
+Harbor 的有效版本只由 Git 管理。发布提交使用精确标签，例如：
+
+```bash
+git tag -a v0.2.0-preview -m "Harbor 0.2.0 preview"
+```
+
+查看当前构建将使用的版本：
+
+```bash
+scripts/git_version.sh
+```
+
+位于 Tag 上的干净提交输出 `0.2.0-preview`。Tag 之后的开发提交输出类似
+`0.2.0-preview+3.g4d65765`；有未提交改动时再附加 `.dirty`。
+
+`package.json`、Cargo manifest 与 `tauri.conf.json` 中统一使用 `0.0.0` 占位，不再保存或人工同步应用版本。源码包脱离 Git 时，构建脚本回退到基线版本 `0.2.0-preview`。
+
 ## 1. 前端检查
 
 ```bash
@@ -73,5 +92,7 @@ npm run docs:build
 - 手动触发 workflow。
 
 普通构建把安装包上传为 workflow artifact。推送 `v*` tag 时，GitHub Actions 还会创建对应 Release，并附加 `.deb` 安装包。
+
+Release workflow 要求当前提交存在精确的 `v*` Tag，并拒绝带未提交改动的发布构建。Rust GUI、`harbor_core`、Tauri Bundle 与 `.deb` 文件名使用同一个 Git 版本。
 
 文档由 `.github/workflows/docs.yml` 独立构建并部署到 GitHub Pages。修改 `vuepress/**`、根 `package.json` 或 lockfile 时会触发文档 workflow。

@@ -25,7 +25,7 @@ const form = ref<Settings>({
   metrics_fast_ms: 1000,
   metrics_slow_ms: 10000,
 });
-const version = ref("0.2.0-preview");
+const version = ref("");
 const coreStatus = ref<HarborCoreStatus | null>(null);
 const updateInfo = ref<AppUpdateInfo | null>(null);
 const checkingUpdate = ref(false);

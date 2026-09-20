@@ -1,6 +1,6 @@
 [package]
 name = "harbor_core"
-version = "0.2.0-preview"
+version = "0.0.0"
 description = "Harbor core daemon and HTTP API"
 authors = ["Harbor"]
 edition = "2021"

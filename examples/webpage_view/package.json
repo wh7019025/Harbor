@@ -1,7 +1,7 @@
 {
   "name": "harbor-webpage-view-example",
   "private": true,
-  "version": "0.2.0-preview",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

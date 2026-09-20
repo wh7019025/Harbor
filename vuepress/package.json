@@ -1,7 +1,7 @@
 {
   "name": "harbor-vuepress",
   "type": "module",
-  "version": "0.2.0-preview",
+  "version": "0.0.0",
   "description": "Harbor 官方文档",
   "author": "Harbor Contributors",
   "license": "MIT",

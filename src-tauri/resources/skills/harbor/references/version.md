@@ -3,12 +3,14 @@
 
 | 名称   | 当前值       | 命令行                |
 | ---- | --------- | ------------------ |
-| 应用版本 | 0.2.0-preview | `harbor --version` |
+| 应用版本 | 由 Git Tag 生成 | `harbor --version` |
 
 
 机器可读：`~/.harbor/version.json`（Harbor 启动时更新）
 
 Harbor GUI 与 `harbor_core` 的应用版本和 API revision **必须对应**。二进制按版本分开放在 `~/.harbor/core/<version>/harbor_core`（远端同样路径），但每台机器同一时间只允许运行一个 `harbor_core`，不区分版本。当前访问该机器的 Harbor GUI 占用这个唯一 core；发现版本或 API revision 不对应时，会关闭旧 core 并启动与当前 GUI 对应的 core，不会并行启动第二个。
+
+发布版本来自精确的 `v*` Git Tag，例如 `v0.2.0-preview` 对应应用版本 `0.2.0-preview`。Tag 后的开发构建会附加提交数量和短 SHA；Agent 仍应始终读取 `harbor --version`，不能从 Git 历史自行推测版本。
 
 GUI 只执行 `.harbor` 中的托管副本。构建 pipeline 先生成 release `harbor_core` 和 `harbor_core.sha256`，再把 SHA-256 固化进 GUI；安装和远端部署后必须再次校验哈希。版本相同但内容不同的 core 也会被替换，debug core 不得进入 `.harbor`。
 

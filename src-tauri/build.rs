@@ -5,9 +5,15 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+#[path = "build_support/git_version.rs"]
+mod git_version;
+
 fn main() {
-    // --- 阶段 1：定位已经完成构建的 release core ---
+    // --- 阶段 1：从 Git 注入 GUI 版本 ---
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    git_version::export(&manifest_dir.join(".."));
+
+    // --- 阶段 2：定位已经完成构建的 release core ---
     let core_path = env::var_os("HARBOR_CORE_BIN")
         .map(PathBuf::from)
         .unwrap_or_else(|| manifest_dir.join("target/release/harbor_core"));
@@ -25,7 +31,7 @@ fn main() {
         );
     }
 
-    // --- 阶段 2：计算哈希并固化到 GUI 二进制 ---
+    // --- 阶段 3：计算哈希并固化到 GUI 二进制 ---
     let core_hash = sha256_file(&core_path);
     let recorded_hash = std::fs::read_to_string(&hash_path)
         .unwrap_or_else(|error| panic!("read {} failed: {error}", hash_path.display()));
@@ -59,7 +65,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", hash_path.display());
     println!("cargo:rerun-if-changed={}", cached_core_path.display());
 
-    // --- 阶段 3：生成 Tauri 构建信息 ---
+    // --- 阶段 4：生成 Tauri 构建信息 ---
     tauri_build::build()
 }
 

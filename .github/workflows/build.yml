@@ -15,6 +15,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install Linux dependencies
         run: |
@@ -45,13 +47,25 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Resolve Git version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            version="$(scripts/git_version.sh --require-tag)"
+          else
+            version="$(scripts/git_version.sh)"
+          fi
+          printf 'HARBOR_VERSION=%s\n' "$version" >>"$GITHUB_ENV"
+          printf '{"version":"%s"}\n' "$version" >src-tauri/tauri.git.conf.json
+          printf 'Harbor version %s\n' "$version"
+
       - name: Build Harbor (.deb)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --bundles deb
+          args: --bundles deb --config src-tauri/tauri.git.conf.json
           uploadArtifacts: true
 
       - name: Build Harbor and publish release
@@ -60,7 +74,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --bundles deb
+          args: --bundles deb --config src-tauri/tauri.git.conf.json
           uploadArtifacts: true
           tagName: ${{ github.ref_name }}
           releaseName: Harbor ${{ github.ref_name }}

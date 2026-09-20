@@ -5,8 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORE_BIN="$ROOT_DIR/src-tauri/target/release/harbor_core"
 HASH_FILE="$CORE_BIN.sha256"
 CORE_CACHE_DIR="$ROOT_DIR/src-tauri/target/release/harbor_core-builds"
+HARBOR_VERSION="${HARBOR_VERSION:-$("$ROOT_DIR/scripts/git_version.sh")}"
+export HARBOR_VERSION
 
-# --- 阶段 1：只构建 release harbor_core ---
+# --- 阶段 1：解析 Git 版本并构建 release harbor_core ---
+printf 'Harbor version %s\n' "$HARBOR_VERSION"
 cargo build \
   --release \
   --manifest-path "$ROOT_DIR/src-tauri/Cargo.toml" \
