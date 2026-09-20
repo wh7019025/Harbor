@@ -221,8 +221,13 @@ fn delete_workspace(state: State<'_, Arc<AppState>>, id: String) -> Result<Setti
 }
 
 #[tauri::command]
-fn get_harbor_core_status(state: State<'_, Arc<AppState>>) -> HarborCoreStatus {
-    core_client::core_status(&current_settings(state.inner()))
+async fn get_harbor_core_status(
+    state: State<'_, Arc<AppState>>,
+) -> Result<HarborCoreStatus, String> {
+    let settings = current_settings(state.inner());
+    tauri::async_runtime::spawn_blocking(move || core_client::core_status(&settings))
+        .await
+        .map_err(|error| format!("core status worker failed: {error}"))
 }
 
 #[tauri::command]
@@ -321,8 +326,11 @@ fn open_panel_window(app: tauri::AppHandle, title: String, url: String) -> Resul
 }
 
 #[tauri::command]
-fn taskcard_snapshot(state: State<'_, Arc<AppState>>) -> Result<TaskCardSnapshot, String> {
-    with_core(state.inner(), core_client::snapshot)
+async fn taskcard_snapshot(state: State<'_, Arc<AppState>>) -> Result<TaskCardSnapshot, String> {
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || with_core(&app_state, core_client::snapshot))
+        .await
+        .map_err(|error| format!("snapshot worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -583,42 +591,59 @@ fn taskcard_group_template(state: State<'_, Arc<AppState>>) -> Result<YamlTempla
 }
 
 #[tauri::command]
-fn taskcard_logs(state: State<'_, Arc<AppState>>) -> Result<Vec<TaskLogSummary>, String> {
-    with_core(state.inner(), core_client::logs)
+async fn taskcard_logs(state: State<'_, Arc<AppState>>) -> Result<Vec<TaskLogSummary>, String> {
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || with_core(&app_state, core_client::logs))
+        .await
+        .map_err(|error| format!("logs worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn harbor_self_log(state: State<'_, Arc<AppState>>) -> String {
+async fn harbor_self_log(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let settings = current_settings(state.inner());
-    let local = harbor_core::app_log::read_text();
-    let remote = match settings.current() {
-        Ok(workspace) if workspace.mode == WorkspaceMode::Remote => {
-            core_client::harbor_log(&settings).unwrap_or_default()
-        }
-        _ => String::new(),
-    };
-    harbor_core::app_log::merge_pretty(&local, &remote)
+    tauri::async_runtime::spawn_blocking(move || {
+        let local = harbor_core::app_log::read_text();
+        let remote = match settings.current() {
+            Ok(workspace) if workspace.mode == WorkspaceMode::Remote => {
+                core_client::harbor_log(&settings).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        harbor_core::app_log::merge_pretty(&local, &remote)
+    })
+    .await
+    .map_err(|error| format!("harbor log worker failed: {error}"))
 }
 
 #[tauri::command]
-fn taskcard_read_log(
+async fn taskcard_read_log(
     state: State<'_, Arc<AppState>>,
     file: String,
 ) -> Result<TaskLogContent, String> {
-    with_core(state.inner(), |settings| {
-        core_client::read_log(settings, file.as_str())
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_core(&app_state, |settings| {
+            core_client::read_log(settings, file.as_str())
+        })
     })
+    .await
+    .map_err(|error| format!("read log worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn taskcard_read_log_chunk(
+async fn taskcard_read_log_chunk(
     state: State<'_, Arc<AppState>>,
     file: String,
     offset: u64,
 ) -> Result<TaskLogChunk, String> {
-    with_core(state.inner(), |settings| {
-        core_client::read_log_chunk(settings, file.as_str(), offset)
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_core(&app_state, |settings| {
+            core_client::read_log_chunk(settings, file.as_str(), offset)
+        })
     })
+    .await
+    .map_err(|error| format!("read log chunk worker failed: {error}"))?
 }
 
 #[tauri::command]

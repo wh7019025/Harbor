@@ -156,6 +156,7 @@ const historicalLogRef = ref<{ copyLog: () => Promise<void> } | null>(null);
 let timer: number | null = null;
 let logTimer: number | null = null;
 let copyProgressTimer: number | null = null;
+let pollingHarborLog = false;
 let pollingLog = false;
 let copyFlashTimer: number | null = null;
 let pathSuggestTimer: number | null = null;
@@ -1058,11 +1059,14 @@ async function loadSelectedLog() {
 }
 
 async function pollHarborLog() {
-  if (!harborLogOpen.value) return;
+  if (!harborLogOpen.value || pollingHarborLog) return;
+  pollingHarborLog = true;
   try {
     harborLogText.value = await fetchHarborLog();
   } catch {
     // Keep current buffer when a transient read fails.
+  } finally {
+    pollingHarborLog = false;
   }
 }
 
