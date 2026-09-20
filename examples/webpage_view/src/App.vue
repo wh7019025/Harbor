@@ -3,6 +3,7 @@ import { Camera, Gamepad2, Layers3 } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 type Mode = "idle" | "teleop" | "auto";
+type PanelPage = "drive" | "camera" | "arm";
 
 type RobotState = {
   backend: "mock" | "ros2";
@@ -22,6 +23,11 @@ type RobotState = {
 };
 
 const modes: Mode[] = ["idle", "teleop", "auto"];
+const panelPages: { id: PanelPage; label: string }[] = [
+  { id: "drive", label: "control" },
+  { id: "camera", label: "camera" },
+  { id: "arm", label: "arm" },
+];
 const driveKeys: Record<string, { vx: number; wz: number }> = {
   w: { vx: 1, wz: 0 },
   s: { vx: -1, wz: 0 },
@@ -32,6 +38,7 @@ const driveKeys: Record<string, { vx: number; wz: number }> = {
 };
 
 const state = ref<RobotState | null>(null);
+const activePanelPage = ref<PanelPage>("camera");
 const keys = ref(new Set<string>());
 const videoCanvas = ref<HTMLCanvasElement | null>(null);
 const videoStatus = ref("connecting");
@@ -212,8 +219,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="st-shell flex h-screen flex-col gap-2 overflow-auto px-3 py-2 md:overflow-hidden">
-    <div class="flex flex-wrap items-center justify-between gap-2">
+  <div class="st-shell flex h-screen min-h-0 flex-col gap-2 overflow-hidden px-3 py-2">
+    <div class="flex shrink-0 flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-2">
         <span class="kicker">mode</span>
         <button
@@ -258,10 +265,28 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div class="grid shrink-0 grid-cols-3 gap-1 md:hidden" role="tablist" aria-label="panel page">
+      <button
+        v-for="page in panelPages"
+        :key="page.id"
+        class="btn !px-2 !py-1 text-[11px] uppercase"
+        type="button"
+        role="tab"
+        :aria-selected="activePanelPage === page.id"
+        :class="activePanelPage === page.id ? 'bg-[var(--accent-soft)] shadow-[inset_2px_0_0_0_var(--accent)]' : ''"
+        @click="activePanelPage = page.id"
+      >
+        {{ page.label }}
+      </button>
+    </div>
+
     <div
-      class="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-visible md:grid-cols-[14rem_minmax(0,1fr)_15rem] md:grid-rows-1 md:overflow-hidden xl:grid-cols-[16.5rem_minmax(0,1fr)_18rem]"
+      class="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 gap-2 overflow-hidden md:grid-cols-[14rem_minmax(0,1fr)_15rem] xl:grid-cols-[16.5rem_minmax(0,1fr)_18rem]"
     >
-      <div class="flex min-h-[22rem] flex-col gap-2 md:min-h-0">
+      <div
+        class="min-h-0 flex-col gap-2 md:flex"
+        :class="activePanelPage === 'drive' ? 'flex' : 'hidden'"
+      >
         <section class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[var(--line-soft)]">
           <div class="flex items-center justify-between border-b border-[var(--line-soft)] bg-[var(--bg-1)] px-2 py-1">
             <div class="flex items-center gap-1.5">
@@ -322,7 +347,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="grid min-h-[30rem] grid-rows-[minmax(0,1fr)_11rem] gap-2 md:min-h-0">
+      <div
+        class="min-h-0 grid-rows-[minmax(0,1fr)_8rem] gap-2 md:grid md:grid-rows-[minmax(0,1fr)_11rem]"
+        :class="activePanelPage === 'camera' ? 'grid' : 'hidden'"
+      >
         <section class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[var(--line-soft)]">
           <div class="flex items-center justify-between border-b border-[var(--line-soft)] bg-[var(--bg-1)] px-2 py-1">
             <div class="flex items-center gap-1.5">
@@ -358,7 +386,10 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <section class="flex min-h-[20rem] flex-col overflow-hidden rounded-md border border-[var(--line-soft)] md:min-h-0">
+      <section
+        class="min-h-0 flex-col overflow-hidden rounded-md border border-[var(--line-soft)] md:flex"
+        :class="activePanelPage === 'arm' ? 'flex' : 'hidden'"
+      >
         <div class="flex items-center justify-between border-b border-[var(--line-soft)] bg-[var(--bg-1)] px-2 py-1">
           <span class="kicker">arm</span>
           <button
