@@ -17,6 +17,29 @@ Harbor 负责启动 Task、提供 Panel 入口并构造访问地址；你的程�
 Panel 不是 Harbor 托管的前端文件，也不是一个独立 Task。它跟随所属 Task 一起启动和停止。
 :::
 
+## 先运行完整示例
+
+Harbor 仓库提供了可以直接运行的 [Robot Panel 完整示例](https://github.com/wh7019025/Harbor/tree/main/examples/webpage_view)。它不是静态页面截图，而是一条完整接入通路：
+
+- Harbor Task 启动 Python 后端并注入 Panel 端口。
+- Vue 页面通过 HTTP 获取机器人状态和发送控制命令。
+- WebSocket 持续传输动态视频画面。
+- 存在 ROS 2 环境时接入真实 Topic，否则自动使用 mock 数据。
+- 默认窗口使用三栏布局，最小窗口切换为单视口功能页。
+
+体验步骤：
+
+1. 将 Harbor 仓库根目录或 `examples/webpage_view` 加入 Workspace 的 Search Paths。
+2. 启动 Task `robot-panel`。
+3. 点击 Task 行上的 Panel 按钮。
+
+直接查看关键文件：
+
+- [Task YAML](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/harbor_taskcfg/tasks/robot-panel.yaml)
+- [Vue Panel 页面](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/src/App.vue)
+- [Python / ROS 2 / WebSocket 后端](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/robot_panel.py)
+- [示例运行说明](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/README.md)
+
 ## Panel 如何工作
 
 ```text
@@ -146,9 +169,9 @@ Harbor 不会为 Panel 自动增加鉴权。监听非 localhost 地址时，只�
 - 使用 Harbor 的视觉规范和控件行为，不混用浏览器默认控件。
 - 为无硬件环境提供 mock 数据，便于独立开发和演示。
 
-## 完整示例
+## 按需复用示例
 
-Harbor 仓库中的 `examples/webpage_view` 是完整 Robot Panel：
+接入自己的程序时，可以直接从 [`examples/webpage_view`](https://github.com/wh7019025/Harbor/tree/main/examples/webpage_view) 复制最接近需求的部分：
 
 - Vue 3 + Vite 前端。
 - Python HTTP 与 WebSocket 后端。
@@ -157,7 +180,7 @@ Harbor 仓库中的 `examples/webpage_view` 是完整 Robot Panel：
 - 无 ROS 环境下自动使用 mock 数据。
 - 直接复用 Harbor 的设计变量与交互风格。
 
-把示例目录或 Harbor 仓库根目录加入搜索路径，启动 `robot-panel` Task，再点击任务行上的 Panel 按钮即可体验。
+不需要照搬整个示例。普通状态页可以只保留 HTTP；实时画面再增加 WebSocket；需要机器人通信时再接入 `Ros2Bridge`。
 
 让 AI 为现有程序接入 Panel：
 
