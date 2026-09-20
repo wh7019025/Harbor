@@ -22,7 +22,7 @@ harbor_core
 ├── Process supervisor
 ├── Runtime state
 ├── Log storage
-└── HTTP API v1 (revision 3)
+└── HTTP API v1 (revision 4)
 ```
 
 ## 数据职责
@@ -52,7 +52,7 @@ Core 负责扫描 YAML、补齐和校验 UUID、启动进程树、记录日志�
 
 ### 用户程序
 
-用户程序是 Core 托管的普通系统进程。程序通过 stdout/stderr 输出日志；需要交互界面时自行提供 Web Panel。
+用户程序是 Core 托管的普通系统进程，通过 stdout/stderr 输出日志。界面能力分为三类：无 UI 不做额外处理；`webview_interface` 由程序提供 HTTP 页面；`vnc_interface` 由远端 Core 为原生窗口建立临时 X11/noVNC 环境。
 
 ## 本地连接
 

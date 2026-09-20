@@ -8,7 +8,7 @@ createTime: 2026/09/20 00:44:43
 ## 完整示例
 
 ```yaml
-version: "0.2.0-preview"
+version: "0.2.0-preview.2"
 uuid: a35b7f18-9d64-4e2a-8f31-6c0d72b94511
 id: demo-ping
 name: Demo Ping
@@ -27,7 +27,7 @@ configs:
       LOG_LEVEL: info
 default_config: development
 sudo: false
-panel_interface:
+webview_interface:
   - panel_name: status
     interface_port: 23681
     localhost_only: false
@@ -51,7 +51,8 @@ command:
 | `configs` | 否 | 可选运行配置列表。 |
 | `default_config` | 否 | 默认 config id。 |
 | `sudo` | 否 | 是否通过 sudo 启动，默认 `false`。 |
-| `panel_interface` | 否 | Web 面板声明列表。 |
+| `webview_interface` | 否 | 程序自己提供的 Web 页面列表。 |
+| `vnc_interface` | 否 | 远端桌面程序的 VNC 页面，最多一个。 |
 | `command` | 是 | `argv` 或 `shell` + `script`。 |
 
 ## command
@@ -89,3 +90,30 @@ env → configs[].env → Group tasks[].env
 - `$(harbor_taskcfg_dir)`：当前配置目录变量。
 
 `folder`、`prefix_path`、`taskcfg_dir` 是扫描结果，不应写入 YAML。
+
+## 桌面程序可视化
+
+Qt、GTK 等桌面程序无需改造成 Web 应用，只需声明 VNC 接口：
+
+```yaml
+vnc_interface:
+  - panel_name: desktop
+    interface_port: 23682
+command:
+  argv: [your-gui-program]
+```
+
+local workspace 仍然直接打开原生窗口，不启动 VNC，也不显示该 Panel。只有在
+remote workspace 中，Harbor 才自动创建虚拟 X11、TigerVNC 和 noVNC 环境，
+并对当前局域网提供桌面入口。一个 Task 最多只能配置一个 `vnc_interface`。
+
+不要在这类 Task 的 `env` 或启动脚本中手写 `DISPLAY`、`XAUTHORITY`、
+`WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端显示环境由 Harbor
+管理，本地则继承当前图形会话；固定 `DISPLAY=:0` 会绕过 VNC。
+
+其中 `interface_port` 是 noVNC 页面使用的 HTTP/WebSocket 端口，不是 VNC TCP
+端口；TigerVNC 本身只使用临时 Unix Socket。
+
+远端机器需要安装 `tigervnc-standalone-server`、`novnc`、`websockify` 和 `openbox`。
+Harbor 会在启动 Task 前检查这些依赖；缺失时启动失败并直接显示缺失项以及适用于
+Debian/Ubuntu 的安装命令，同时把同一错误写入该次 Task Log。

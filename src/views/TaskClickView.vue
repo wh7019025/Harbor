@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import {
-  AppWindow,
   BookOpen,
   ChevronDown,
   FolderSearch,
+  Globe2,
   KeyRound,
   Layers3,
   LoaderCircle,
+  Monitor,
   Pencil,
   Play,
   Plus,
@@ -47,7 +48,7 @@ import {
   fetchTaskYaml,
   listPathSuggestions,
   openPanelWindow,
-  panelUrls,
+  interfaceUrls,
   readLog,
   readLogChunk,
   removeSearchPath,
@@ -72,6 +73,7 @@ import {
   deleteWorkspace,
   getHarborCopyProgress,
   getSettings,
+  openWorkspaceTerminal,
   switchWorkspace,
   updateWorkspace,
   verifyWorkspaceSsh as invokeVerifyWorkspaceSsh,
@@ -347,7 +349,21 @@ async function copyTaskName(task: TaskCardTask) {
 
 function taskCopyText(task: TaskCardTask) {
   const pwd = task.prefix_path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return `Harbor:${pwd}:${task.id}`;
+  return `Harbor:${harborTagScope()}:${pwd}:${task.id}`;
+}
+
+function harborTagScope() {
+  const workspace = currentWorkspace();
+  if (workspace?.mode !== "remote") return "local";
+
+  const ssh = workspace.ssh;
+  const host = ssh?.host.trim();
+  if (!host) return "remote";
+
+  const normalizedHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  const user = ssh?.user.trim();
+  const port = ssh?.port && ssh.port !== 22 ? `:${ssh.port}` : "";
+  return `remote@${user ? `${user}@` : ""}${normalizedHost}${port}`;
 }
 
 async function copyGroupTaskSnippet(task: TaskCardTask) {
@@ -666,7 +682,7 @@ function taskRunning(task: TaskCardTask | undefined) {
 }
 
 async function openTaskPanel(task: TaskCardTask, panelName: string) {
-  const match = panelUrls(task, settings.value).find((item) => item.name === panelName);
+  const match = interfaceUrls(task, settings.value).find((item) => item.name === panelName);
   if (!match) {
     error.value = `panel not found: ${panelName}`;
     return;
@@ -876,6 +892,10 @@ function hasUuidConflict(uuid: string) {
 }
 
 const isRemoteWorkspace = computed(() => currentWorkspace()?.mode === "remote");
+
+async function openRemoteWorkspaceTerminal() {
+  await run("workspace-terminal", "打开远端终端", openWorkspaceTerminal);
+}
 
 function requestWorkspaceSwitch(id: string) {
   if (!id || id === currentWorkspaceId.value) return;
@@ -1216,6 +1236,17 @@ onBeforeUnmount(() => {
       </div>
       <div class="flex items-center gap-1">
         <button
+          v-if="isRemoteWorkspace"
+          class="btn !px-2 !py-1"
+          type="button"
+          title="在 Harbor 中打开远端终端"
+          :disabled="isPending('workspace-terminal')"
+          @click="openRemoteWorkspaceTerminal"
+        >
+          <LoaderCircle v-if="isPending('workspace-terminal')" class="h-3.5 w-3.5 animate-spin" />
+          <Terminal v-else class="h-3.5 w-3.5" />
+        </button>
+        <button
           class="btn !px-2 !py-1"
           type="button"
           :title="isRemoteWorkspace ? 'remote search paths' : 'search paths'"
@@ -1479,15 +1510,16 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="flex shrink-0 items-center gap-0.5">
                       <button
-                        v-for="panel in panelUrls(task, settings)"
+                        v-for="panel in interfaceUrls(task, settings)"
                         :key="panel.name"
                         class="btn !px-1.5 !py-1"
                         type="button"
-                        :title="`open ${panel.name}`"
+                        :title="`open ${panel.kind === 'webview' ? 'WebView' : 'VNC'} ${panel.name}`"
                         :disabled="task.status !== 'running'"
                         @click="openTaskPanel(task, panel.name)"
                       >
-                        <AppWindow class="h-3.5 w-3.5" />
+                        <Globe2 v-if="panel.kind === 'webview'" class="h-3.5 w-3.5" />
+                        <Monitor v-else class="h-3.5 w-3.5" />
                       </button>
                       <button
                         class="btn !px-1.5 !py-1"

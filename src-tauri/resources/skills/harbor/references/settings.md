@@ -38,6 +38,13 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 
 每个 workspace 的日志独立保存在 **core 所在机器** 的 `~/.harbor/workspace/<id>/log/`。全机任务占用与进程注册保存在 `~/.harbor/runtime/run/`，按 UUID 跨 workspace 共享；因此切换 workspace 不会停止任务，但日志列表只显示当前 workspace 的日志。Task / Group YAML **不**放在这些目录，只来自当前 workspace 的 `search_paths`。
 
+远端 Workspace 的内置终端由 GUI 管理：GUI 通过现有 SSH 配置启动远端 `ttyd`，并用
+SSH Tunnel 映射到本机回环端口。远端端口会从 `29386–29486` 自动选择，避免残留进程
+占用固定端口。它不是 Task，不应为此创建 YAML，也不需要加入
+`search_paths`。Harbor 会校验并自动部署自带的静态 `ttyd` 到
+`~/.harbor/tools/ttyd/<sha256>/`；不要要求用户在远端安装 `ttyd`，也不要把它手动绑定
+到 `0.0.0.0`。
+
 `harbor_core` 二进制按版本分开放在 **core 所在机器** 的 `~/.harbor/core/<version>/harbor_core`，但每台机器同一时间只能运行一个 `harbor_core`，不区分版本。当前访问者占用这一个 core；Harbor GUI 发现其应用版本或 API revision 不对应时，会先关闭旧 core，再启动与当前 GUI 对应的 core，不会并行运行两个。
 
 本机 GUI 与本机 harbor_core 共用 `~/.harbor/settings.json`。直接改 search_paths 后需要重启 `harbor_core`，或改用 HTTP `POST /api/v1/workspaces/search-paths`。

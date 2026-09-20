@@ -29,23 +29,23 @@ except ImportError:
     Node = object
 
 def harbor_panel_port():
-    raw_port = os.environ.get("HARBOR_PANEL_INTERFACE_PORT")
+    raw_port = os.environ.get("HARBOR_WEBVIEW_INTERFACE_PORT")
     if raw_port is None:
         raise RuntimeError(
-            "HARBOR_PANEL_INTERFACE_PORT is missing; start this program through its Harbor Task"
+            "HARBOR_WEBVIEW_INTERFACE_PORT is missing; start this program through its Harbor Task"
         )
     try:
         port = int(raw_port)
     except ValueError as error:
-        raise RuntimeError("HARBOR_PANEL_INTERFACE_PORT must be an integer") from error
+        raise RuntimeError("HARBOR_WEBVIEW_INTERFACE_PORT must be an integer") from error
     if not 23000 <= port <= 24000:
-        raise RuntimeError("HARBOR_PANEL_INTERFACE_PORT must be between 23000 and 24000")
+        raise RuntimeError("HARBOR_WEBVIEW_INTERFACE_PORT must be between 23000 and 24000")
     return port
 
 
 PORT = harbor_panel_port()
-BIND = "127.0.0.1" if os.environ.get("HARBOR_PANEL_LOCALHOST_ONLY") == "true" else "0.0.0.0"
-TITLE = os.environ.get("HARBOR_PANEL_NAME", "Robot Panel")
+BIND = "127.0.0.1" if os.environ.get("HARBOR_WEBVIEW_LOCALHOST_ONLY") == "true" else "0.0.0.0"
+TITLE = os.environ.get("HARBOR_WEBVIEW_NAME", "Robot Panel")
 DIST = Path(__file__).resolve().parent / "dist"
 HARBOR_INFO_FLAG = "--harbor_info"
 ROS2_ENABLED = ROS2_IMPORTABLE

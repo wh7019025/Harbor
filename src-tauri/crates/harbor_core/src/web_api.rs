@@ -24,8 +24,8 @@ use crate::taskcard::{GroupDefinition, TaskCardService, TaskCardYamlDocument, Ta
 use crate::version::APP_VERSION;
 
 pub const WEB_API_PORT: u16 = 29385;
-pub const CORE_API_REVISION: u32 = 3;
-const CORE_API_REVISION_HEADER: &str = "3";
+pub const CORE_API_REVISION: u32 = 4;
+const CORE_API_REVISION_HEADER: &str = "4";
 
 #[derive(Clone)]
 pub struct WebApiState {
@@ -926,7 +926,8 @@ mod tests {
             default_config: None,
             running_config_id: None,
             requires_sudo: false,
-            panel_interface: Vec::new(),
+            webview_interface: Vec::new(),
+            vnc_interface: Vec::new(),
             folder: String::new(),
             status: "stopped".into(),
             pid: None,

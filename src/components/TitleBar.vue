@@ -13,6 +13,9 @@ const props = withDefaults(
     resizable: true,
   },
 );
+const emit = defineEmits<{
+  fullscreenChange: [fullscreen: boolean];
+}>();
 
 const appWindow = getCurrentWindow();
 const isFullscreen = ref(false);
@@ -20,6 +23,7 @@ let unlistenResized: (() => void) | null = null;
 
 async function syncFullscreen() {
   isFullscreen.value = await appWindow.isFullscreen();
+  emit("fullscreenChange", isFullscreen.value);
 }
 
 async function drag() {
@@ -39,7 +43,7 @@ async function toggleFullscreen() {
   if (!props.resizable) return;
   const next = !isFullscreen.value;
   await appWindow.setFullscreen(next);
-  isFullscreen.value = next;
+  await syncFullscreen();
 }
 
 async function close() {

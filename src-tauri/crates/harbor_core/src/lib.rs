@@ -2,6 +2,7 @@ pub mod app_log;
 pub mod settings;
 pub mod taskcard;
 pub mod version;
+mod vnc_interface;
 pub mod web_api;
 
 use std::fs::{self, File, OpenOptions};
@@ -68,12 +69,14 @@ fn acquire_core_instance() -> Result<CoreInstanceLock, String> {
 
 pub struct CoreArgs {
     pub localhost_only: bool,
+    pub remote_runtime: bool,
     pub workspace_id: Option<String>,
 }
 
 impl CoreArgs {
     pub fn from_env() -> Result<Self, String> {
         let mut localhost_only = true;
+        let mut remote_runtime = false;
         let mut workspace_id = None;
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -88,6 +91,9 @@ impl CoreArgs {
                         .ok_or_else(|| "--localhost-only requires true or false".to_string())?;
                     localhost_only = parse_bool(&value)?;
                 }
+                "--remote-runtime" => {
+                    remote_runtime = true;
+                }
                 "--workspace" => {
                     let value = args
                         .next()
@@ -99,6 +105,7 @@ impl CoreArgs {
         }
         Ok(Self {
             localhost_only,
+            remote_runtime,
             workspace_id,
         })
     }
@@ -155,6 +162,7 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         crate::app_log::core(&error);
         error
     })?;
+    taskcard.set_remote_runtime(args.remote_runtime);
     // --- 阶段 3：绑定 API 端口并提供服务 ---
     let addr = bind_addr(args.localhost_only);
     let listener = tokio::net::TcpListener::bind(addr)

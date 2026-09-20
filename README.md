@@ -11,7 +11,7 @@ Harbor 是一个面向开发者与 AI Agent 的本地任务管理工具，用统
 
 > 让每个任务，有序启航。
 
-把重复操作沉淀为简单、可复用的 Task 与 Group，在同一个界面中管理本地和远端程序、日志与 Web Panel。
+把重复操作沉淀为简单、可复用的 Task 与 Group，在同一个界面中管理本地和远端程序、日志与程序界面。
 
 ![Harbor 实际运行界面](vuepress/docs/.vuepress/public/images/harbor-app.png)
 
@@ -25,7 +25,7 @@ Harbor 是一个面向开发者与 AI Agent 的本地任务管理工具，用统
 - [快速开始](https://harbor.hyln.space/guide/getting-started/)
 - [Work with AI](https://harbor.hyln.space/guide/work-with-ai/)
 - [远端运行](https://harbor.hyln.space/guide/remote/)
-- [Web Panel](https://harbor.hyln.space/guide/panels/)
+- [程序界面](https://harbor.hyln.space/guide/panels/)
 
 ## 开发 Harbor
 

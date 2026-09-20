@@ -9,7 +9,7 @@ permalink: /guide/concepts/
 
 ## Harbor GUI
 
-桌面界面负责配置工作空间、展示任务、打开日志和面板。GUI 不直接托管任务进程，而是通过 HTTP 与 `harbor_core` 通信。
+桌面界面负责配置工作空间、展示任务、打开日志、WebView 和 VNC 页面。GUI 不直接托管任务进程，而是通过 HTTP 与 `harbor_core` 通信。
 
 ## harbor_core
 

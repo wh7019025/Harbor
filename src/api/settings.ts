@@ -69,6 +69,10 @@ export function verifyWorkspaceSsh(ssh: WorkspaceSsh) {
   return invoke<void>("verify_workspace_ssh_command", { ssh });
 }
 
+export function openWorkspaceTerminal() {
+  return invoke<void>("open_workspace_terminal");
+}
+
 export function getHarborCoreStatus() {
   return invoke<HarborCoreStatus>("get_harbor_core_status");
 }

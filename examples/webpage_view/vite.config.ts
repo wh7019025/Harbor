@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 const backendPort = (globalThis as typeof globalThis & {
   process?: { env?: Record<string, string | undefined> };
-}).process?.env?.HARBOR_PANEL_INTERFACE_PORT;
+}).process?.env?.HARBOR_WEBVIEW_INTERFACE_PORT;
 const backendUrl = backendPort ? `http://127.0.0.1:${backendPort}` : undefined;
 
 export default defineConfig({

@@ -3,7 +3,7 @@
 完整示例（Agent 直接写**新**文件时，`version` 原样设为 `harbor --version` 的输出；修改已有文件且 version 已正确时不必改）：
 
 ```yaml
-version: "0.2.0-preview"
+version: "0.2.0-preview.2"
 uuid: a35b7f18-9d64-4e2a-8f31-6c0d72b94511
 id: demo-ping
 name: Demo Ping
@@ -32,7 +32,7 @@ command:
 或 argv 形式：
 
 ```yaml
-version: "0.2.0-preview"
+version: "0.2.0-preview.2"
 uuid: 7f2a61c4-3e98-4b57-b026-d14c9a835e60
 id: uname-kernel
 name: Uname Kernel
@@ -63,7 +63,8 @@ command:
 | `configs[].env` | 否 | 此 config 的环境变量，默认 `{}` |
 | `default_config` | 否 | 默认 config `id`；省略时使用 `configs` 第一项 |
 | `sudo` | 否 | 默认 `false`；为 `true` 时启动需输入密码 |
-| `panel_interface` | 否 | 网页面板列表；Harbor 在任务运行后可打开这些地址 |
+| `webview_interface` | 否 | 程序自己提供的 Web 页面列表 |
+| `vnc_interface` | 否 | 远端桌面程序的 VNC 页面；最多一个 |
 | `command` | 是 | 执行方式：`argv` **或** `shell` + `script` 二选一 |
 
 ## command
@@ -82,18 +83,29 @@ command:
 - 同一 Task 同时只能运行一个 config。切换选择后，下一次启动或重启使用新 config。
 - Group 还可以通过 `tasks[].env` 再次覆盖 config 环境变量，完整顺序为：`task.env` → `config.env` → `group task env`。
 
+## 选择界面模式
+
+每个 Task 先按程序本身选择模式，与 local/remote 无关：
+
+- **无 UI**：不配置 `webview_interface` 和 `vnc_interface`。服务、脚本、ROS 2 节点和 headless 程序默认使用这种方式。
+- **WebView**：程序自身提供 HTTP 页面时配置 `webview_interface`。
+- **VNC**：程序只有原生 X11/Qt/GTK 窗口，并且远端需要操作它时配置 `vnc_interface`。
+
+远端 Task 不等于图形 Task。没有 UI 的远端程序不要配置 VNC。禁止使用旧字段
+`panel_interface` 和 `force_display`。
+
 ## description
 
 - **尽量用中文**写一句简短说明，描述任务做什么、在什么场景下用。
 - 用户未提供且一时无法概括时可写 `""`，但不要用英文占位敷衍。
 - `name` 可以是英文标识风格；`description` 面向人读，优先中文。
 
-## panel_interface
+## webview_interface
 
 可选。任务对外提供的网页面板，例如机器人控制页。Harbor 用这里的端口拼 URL，任务 **running** 后可打开。
 
 ```yaml
-panel_interface:
+webview_interface:
   - panel_name: robot_panel
     interface_port: 23842
     localhost_only: false
@@ -104,19 +116,43 @@ panel_interface:
 | `panel_name` | 面板 id，字符规则与 Task `id` 相同；同一 Task 内唯一 |
 | `interface_port` | 面板 HTTP 端口，不能为 0 |
 | `localhost_only` | 默认 `false`。`true` 表示面板只绑 127.0.0.1 |
-
 local workspace 打开 `http://127.0.0.1:<port>/`；remote 打开 `http://<ssh.host>:<port>/`。
 
 Harbor 启动 Task 时会把单个面板声明注入以下保留环境变量，程序应读取它们，
 不要在 `env` 或源码中重复保存端口：
 
-- `HARBOR_PANEL_NAME`
-- `HARBOR_PANEL_INTERFACE_PORT`
-- `HARBOR_PANEL_LOCALHOST_ONLY`
+- `HARBOR_WEBVIEW_NAME`
+- `HARBOR_WEBVIEW_INTERFACE_PORT`
+- `HARBOR_WEBVIEW_LOCALHOST_ONLY`
 
 每个面板还会获得带标准化面板名的变量，例如
-`robot-panel` 对应 `HARBOR_PANEL_ROBOT_PANEL_INTERFACE_PORT`。多面板 Task 应读取
+`robot-panel` 对应 `HARBOR_WEBVIEW_ROBOT_PANEL_INTERFACE_PORT`。多面板 Task 应读取
 带面板名的变量；只有单面板 Task 会获得不带面板名的三个快捷变量。
+
+## vnc_interface
+
+可选。用于无法提供 Web 页面的桌面程序，最多声明一个：
+
+```yaml
+vnc_interface:
+  - panel_name: desktop
+    interface_port: 23682
+```
+
+local workspace 会忽略该入口并直接打开原生窗口。remote workspace 会建立隔离的
+X11、TigerVNC 和 noVNC 环境，并在 `interface_port` 发布桌面页面。程序不会收到
+VNC 相关环境变量，也不需要知道 Harbor 的显示配置。
+
+使用 `vnc_interface` 时不要在 `env` 或启动脚本中设置 `DISPLAY`、`XAUTHORITY`、
+`WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端由 Harbor 设置隔离显示
+环境，本地则继承当前图形会话；手写 `DISPLAY=:0` 会绕过远端 VNC。
+
+`interface_port` 是浏览器访问 noVNC 的 HTTP/WebSocket 端口，不是 VNC TCP 端口。
+TigerVNC 的 TCP 监听会被关闭，只通过 Core 创建的临时 Unix Socket 通信。
+
+远端机器需要安装 `tigervnc-standalone-server`、`novnc`、`websockify` 和 `openbox`。
+Harbor 会在启动 Task 前检查这些依赖；缺失时启动失败并直接返回缺失项以及适用于
+Debian/Ubuntu 的安装命令，同时把同一错误写入该次 Task Log。
 
 ## workdir
 

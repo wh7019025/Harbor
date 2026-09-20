@@ -155,6 +155,14 @@ fn ssh_target(ssh: &WorkspaceSsh) -> String {
 }
 
 pub fn ssh_exec_command(ssh: &WorkspaceSsh, remote: &str) -> Result<SshVerifyCommand, String> {
+    ssh_exec_command_with_args(ssh, remote, &[])
+}
+
+pub fn ssh_exec_command_with_args(
+    ssh: &WorkspaceSsh,
+    remote: &str,
+    extra_args: &[String],
+) -> Result<SshVerifyCommand, String> {
     let target = ssh_target(ssh);
     let mut ssh_args = vec![
         "-o".to_string(),
@@ -166,6 +174,7 @@ pub fn ssh_exec_command(ssh: &WorkspaceSsh, remote: &str) -> Result<SshVerifyCom
         "-p".to_string(),
         ssh.port.to_string(),
     ];
+    ssh_args.extend(extra_args.iter().cloned());
     match ssh.auth {
         WorkspaceSshAuth::Key => {
             ssh_args.splice(
@@ -919,6 +928,32 @@ mod tests {
             .args
             .windows(2)
             .any(|pair| pair[0] == "-p" && pair[1] != "2222"));
+    }
+
+    #[test]
+    fn ssh_exec_command_places_tunnel_before_target() {
+        let ssh = WorkspaceSsh {
+            host: "box.example".into(),
+            user: "se".into(),
+            port: 22,
+            auth: WorkspaceSshAuth::Key,
+            identity_file: String::new(),
+            password: String::new(),
+        };
+        let command = ssh_exec_command_with_args(
+            &ssh,
+            "ttyd bash",
+            &["-L".into(), "127.0.0.1:1234:127.0.0.1:29386".into()],
+        )
+        .unwrap();
+        let target = command
+            .args
+            .iter()
+            .position(|arg| arg == "se@box.example")
+            .unwrap();
+        let tunnel = command.args.iter().position(|arg| arg == "-L").unwrap();
+        assert!(tunnel < target);
+        assert_eq!(command.args.last().unwrap(), "ttyd bash");
     }
 
     #[test]

@@ -22,7 +22,7 @@ Group 中的每个 Task 仍然是独立任务，同一时刻最多只有一个�
 - 机器人 Bringup：驱动 → 传感器 → 控制器。
 - 感知流程：相机 → 推理服务 → 可视化面板。
 - 仿真环境：仿真器 → Robot State Publisher → 算法节点。
-- 演示流程：后端服务 → Web Panel → 操作程序。
+- 演示流程：后端服务 → WebView → 操作程序。
 
 如果几个 Task 通常独立使用，就不必为了归类而创建 Group。Group 表达的是**一起运行的流程**，不是文件夹。
 
@@ -72,7 +72,7 @@ Harbor 会在启动第一个 Task 前检查完整引用，避免因为名称错�
 Group 配置保存在项目的 `harbor_taskcfg/groups/` 中：
 
 ```yaml
-version: "0.2.0-preview"
+version: "0.2.0-preview.2"
 id: robot-bringup
 name: Robot Bringup
 description: 依次启动驱动和控制面板

@@ -1,14 +1,18 @@
 mod agent_skill;
 mod core_client;
 mod core_process;
+mod panel_tunnel;
 mod path_open;
+mod ssh_tunnel;
 mod system_metrics;
 pub mod update;
+mod workspace_terminal;
 
 pub fn handle_cli_args() -> bool {
     harbor_core::version::handle_cli_args()
 }
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent_skill::{agent_skill_info, sync_agent_skill, AgentSkillInfo};
@@ -27,11 +31,13 @@ use serde::Serialize;
 use system_metrics::{
     sample_slow_metrics, FastSystemMetrics, SlowSystemMetrics, SystemMetrics, SystemMetricsSampler,
 };
-use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 struct AppState {
     settings: Mutex<Settings>,
     metrics: Mutex<SystemMetricsSampler>,
+    panel_tunnels: Mutex<HashMap<String, panel_tunnel::PanelTunnel>>,
+    workspace_terminal: Mutex<Option<workspace_terminal::WorkspaceTerminal>>,
 }
 
 fn persist_settings(state: &Arc<AppState>, settings: Settings) -> Result<Settings, String> {
@@ -42,6 +48,22 @@ fn persist_settings(state: &Arc<AppState>, settings: Settings) -> Result<Setting
 
 fn current_settings(state: &AppState) -> Settings {
     state.settings.lock().clone()
+}
+
+fn close_workspace_terminal(app: &tauri::AppHandle, state: &AppState) {
+    workspace_terminal::stop(&mut state.workspace_terminal.lock());
+    if let Some(window) = app.get_webview_window("workspace-terminal") {
+        let _ = window.close();
+    }
+}
+
+fn close_panel_tunnels(app: &tauri::AppHandle, state: &AppState) {
+    panel_tunnel::stop_all(&mut state.panel_tunnels.lock());
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("panel-") {
+            let _ = window.close();
+        }
+    }
 }
 
 fn is_core_connect_error(error: &str) -> bool {
@@ -100,7 +122,11 @@ fn update_settings(state: State<'_, Arc<AppState>>, next: Settings) -> Result<Se
 }
 
 #[tauri::command]
-async fn switch_workspace(state: State<'_, Arc<AppState>>, id: String) -> Result<Settings, String> {
+async fn switch_workspace(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Settings, String> {
     let mut settings = state.settings.lock().clone();
     if settings.current_workspace == id {
         return Ok(settings);
@@ -112,6 +138,8 @@ async fn switch_workspace(state: State<'_, Arc<AppState>>, id: String) -> Result
     {
         return Err(format!("workspace not found: {id}"));
     }
+    close_workspace_terminal(&app, state.inner());
+    close_panel_tunnels(&app, state.inner());
     settings.current_workspace = id;
     settings.normalize();
     persist_settings(state.inner(), settings.clone())?;
@@ -158,6 +186,7 @@ fn create_workspace(
 
 #[tauri::command]
 fn update_workspace(
+    app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     id: String,
     name: String,
@@ -170,6 +199,8 @@ fn update_workspace(
     }
     let mode = mode.unwrap_or_default();
     let ssh = normalize_workspace_ssh(&mode, ssh)?;
+    close_workspace_terminal(&app, state.inner());
+    close_panel_tunnels(&app, state.inner());
     let mut settings = state.settings.lock().clone();
     let workspace = settings
         .workspaces
@@ -191,7 +222,11 @@ fn verify_workspace_ssh_command(ssh: WorkspaceSsh) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_workspace(state: State<'_, Arc<AppState>>, id: String) -> Result<Settings, String> {
+fn delete_workspace(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Settings, String> {
     let mut settings = state.settings.lock().clone();
     if settings.workspaces.len() <= 1 {
         return Err("keep at least one workspace".into());
@@ -204,6 +239,8 @@ fn delete_workspace(state: State<'_, Arc<AppState>>, id: String) -> Result<Setti
         return Err(format!("workspace not found: {id}"));
     }
     if settings.current_workspace == id {
+        close_workspace_terminal(&app, state.inner());
+        close_panel_tunnels(&app, state.inner());
         settings.current_workspace = settings
             .workspaces
             .iter()
@@ -295,7 +332,45 @@ fn panel_window_label(title: &str, url: &str) -> String {
 }
 
 #[tauri::command]
-fn open_panel_window(app: tauri::AppHandle, title: String, url: String) -> Result<(), String> {
+async fn open_panel_window(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    title: String,
+    url: String,
+) -> Result<(), String> {
+    let label = panel_window_label(title.as_str(), url.as_str());
+    if let Some(existing) = app.get_webview_window(label.as_str()) {
+        existing.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    let workspace = current_settings(state.inner()).current()?.clone();
+    let app_state = state.inner().clone();
+    let tunnel_label = label.clone();
+    let panel_url = tauri::async_runtime::spawn_blocking(move || {
+        panel_tunnel::resolve(
+            &workspace,
+            tunnel_label.as_str(),
+            url.as_str(),
+            &mut app_state.panel_tunnels.lock(),
+        )
+    })
+    .await
+    .map_err(|error| format!("panel tunnel worker failed: {error}"))??;
+    if let Err(error) =
+        open_panel_window_with_label(&app, title.as_str(), panel_url.as_str(), label.as_str())
+    {
+        panel_tunnel::stop(&mut state.panel_tunnels.lock(), label.as_str());
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn open_panel_window_with_label(
+    app: &tauri::AppHandle,
+    title: &str,
+    url: &str,
+    label: &str,
+) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("panel url must be http or https".into());
     }
@@ -303,8 +378,7 @@ fn open_panel_window(app: tauri::AppHandle, title: String, url: String) -> Resul
     if title.is_empty() {
         return Err("panel title cannot be empty".into());
     }
-    let label = panel_window_label(title, url.as_str());
-    if let Some(existing) = app.get_webview_window(&label) {
+    if let Some(existing) = app.get_webview_window(label) {
         existing.set_focus().map_err(|error| error.to_string())?;
         return Ok(());
     }
@@ -313,7 +387,7 @@ fn open_panel_window(app: tauri::AppHandle, title: String, url: String) -> Resul
         serde_json::to_string(title).unwrap_or_else(|_| "\"Panel\"".into()),
         serde_json::to_string(&url).unwrap_or_else(|_| "\"\"".into()),
     );
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title(title)
         .inner_size(1100.0, 780.0)
         .min_inner_size(640.0, 480.0)
@@ -323,6 +397,24 @@ fn open_panel_window(app: tauri::AppHandle, title: String, url: String) -> Resul
         .build()
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+async fn open_workspace_terminal(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let settings = current_settings(state.inner());
+    let workspace = settings.current()?.clone();
+    let title = format!("{} · Terminal", workspace.name);
+    let app_state = state.inner().clone();
+    let url = tauri::async_runtime::spawn_blocking(move || {
+        let mut terminal = app_state.workspace_terminal.lock();
+        workspace_terminal::open(&workspace, &mut terminal)
+    })
+    .await
+    .map_err(|error| format!("workspace terminal worker failed: {error}"))??;
+    open_panel_window_with_label(&app, title.as_str(), url.as_str(), "workspace-terminal")
 }
 
 #[tauri::command]
@@ -700,9 +792,12 @@ pub fn run() {
     let state = Arc::new(AppState {
         settings: Mutex::new(settings),
         metrics: Mutex::new(SystemMetricsSampler::default()),
+        panel_tunnels: Mutex::new(HashMap::new()),
+        workspace_terminal: Mutex::new(None),
     });
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -755,7 +850,24 @@ pub fn run() {
             path_open,
             taskcard_resolve_config_base_path,
             open_panel_window,
+            open_workspace_terminal,
         ])
+        .on_window_event(|window, event| {
+            if window.label() == "task-click" && matches!(event, WindowEvent::CloseRequested { .. })
+            {
+                let state = window.state::<Arc<AppState>>();
+                workspace_terminal::stop(&mut state.workspace_terminal.lock());
+                panel_tunnel::stop_all(&mut state.panel_tunnels.lock());
+            }
+            if window.label() == "workspace-terminal" && matches!(event, WindowEvent::Destroyed) {
+                let state = window.state::<Arc<AppState>>();
+                workspace_terminal::stop(&mut state.workspace_terminal.lock());
+            }
+            if window.label().starts_with("panel-") && matches!(event, WindowEvent::Destroyed) {
+                let state = window.state::<Arc<AppState>>();
+                panel_tunnel::stop(&mut state.panel_tunnels.lock(), window.label());
+            }
+        })
         .setup(|app| {
             if let Some(window) = app.get_webview_window("task-click") {
                 let handle = app.handle().clone();

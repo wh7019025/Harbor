@@ -78,7 +78,7 @@ Harbor Skill 可以通过 API 直接读取状态和日志，不需要先手动�
 - 启动失败时先查看任务日志顶部的命令和工作目录。
 - 日志没有及时出现时，检查程序是否缓冲 stdout。
 - 远端失败时同时检查 Harbor Log 与 Task Log。
-- 图形程序报 `could not connect to display` 时，检查远端桌面会话是否存在，参见[远端运行](./remote.md)。
+- 图形程序报 `could not connect to display` 时，如果需要远端操作窗口就配置 `vnc_interface`；如果程序实际无需界面则改用 headless 模式。参见[远端运行](./remote.md)。
 
 ## 日志保存位置
 

@@ -23,6 +23,8 @@ use crate::core_client::{
 
 const EXPECTED_CORE_SHA256: &str = env!("HARBOR_CORE_SHA256");
 const BUILD_CORE_PATH: &str = env!("HARBOR_CORE_BUILD_PATH");
+const EXPECTED_TTYD_SHA256: &str = env!("HARBOR_TTYD_SHA256");
+const BUILD_TTYD_PATH: &str = env!("HARBOR_TTYD_BUILD_PATH");
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DeployProgress {
@@ -114,6 +116,25 @@ pub fn packaged_core_bin() -> Result<PathBuf, String> {
     ))
 }
 
+fn packaged_ttyd_bin() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|error| format!("current exe failed: {error}"))?;
+    let candidates = [
+        exe.parent()
+            .ok_or_else(|| "cannot resolve ttyd next to Harbor".to_string())?
+            .join("ttyd"),
+        PathBuf::from("/usr/lib/harbor/ttyd"),
+        PathBuf::from(BUILD_TTYD_PATH),
+    ];
+    for candidate in candidates {
+        if candidate.is_file() && sha256_file(&candidate)? == EXPECTED_TTYD_SHA256 {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "managed ttyd not found; expected sha256 {EXPECTED_TTYD_SHA256}; restart or reinstall Harbor"
+    ))
+}
+
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path)
         .map_err(|error| format!("open {} for hashing failed: {error}", path.display()))?;
@@ -139,17 +160,19 @@ fn managed_local_core_matches() -> bool {
             .unwrap_or(false)
 }
 
-fn core_shared_objects(bin: &Path) -> Result<Vec<PathBuf>, String> {
+fn shared_objects(bin: &Path) -> Result<Vec<PathBuf>, String> {
     let output = Command::new("ldd")
         .arg(bin)
         .output()
         .map_err(|error| format!("ldd failed: {error}"))?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let text = format!("{stdout}\n{stderr}");
     if text.contains("not a dynamic executable") {
         return Ok(Vec::new());
     }
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stderr = stderr.trim().to_string();
         return Err(if stderr.is_empty() {
             format!("ldd {} failed", bin.display())
         } else {
@@ -180,6 +203,30 @@ fn core_shared_objects(bin: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+fn runtime_fingerprint(binary_hash: &str, runtime: &[PathBuf]) -> Result<String, String> {
+    let mut entries = runtime
+        .iter()
+        .map(|path| {
+            let name = path
+                .file_name()
+                .ok_or_else(|| format!("invalid runtime path {}", path.display()))?
+                .to_string_lossy()
+                .into_owned();
+            Ok((name, sha256_file(path)?))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    entries.sort();
+    let mut hasher = Sha256::new();
+    hasher.update(binary_hash.as_bytes());
+    for (name, hash) in entries {
+        hasher.update(b"\n");
+        hasher.update(name.as_bytes());
+        hasher.update(b"=");
+        hasher.update(hash.as_bytes());
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 fn loader_basename(files: &[PathBuf]) -> Option<String> {
     files.iter().find_map(|path| {
         let name = path.file_name()?.to_string_lossy();
@@ -197,10 +244,14 @@ fn remote_core_dir() -> String {
 
 fn remote_core_exec(loader: Option<&str>, args: &str) -> String {
     let dir = remote_core_dir();
+    remote_runtime_exec(dir.as_str(), "harbor_core", loader, args)
+}
+
+fn remote_runtime_exec(dir: &str, binary: &str, loader: Option<&str>, args: &str) -> String {
     let args = args.trim();
     match loader {
         Some(loader) => format!(
-            r#""$HOME/{dir}/{loader}" --library-path "$HOME/{dir}" "$HOME/{dir}/harbor_core"{tail}"#,
+            r#""$HOME/{dir}/{loader}" --library-path "$HOME/{dir}" "$HOME/{dir}/{binary}"{tail}"#,
             tail = if args.is_empty() {
                 String::new()
             } else {
@@ -208,7 +259,7 @@ fn remote_core_exec(loader: Option<&str>, args: &str) -> String {
             }
         ),
         None => format!(
-            r#""$HOME/{dir}/harbor_core"{tail}"#,
+            r#""$HOME/{dir}/{binary}"{tail}"#,
             tail = if args.is_empty() {
                 String::new()
             } else {
@@ -218,22 +269,24 @@ fn remote_core_exec(loader: Option<&str>, args: &str) -> String {
     }
 }
 
-fn create_remote_runtime_bundle(bin: &Path, runtime: &[PathBuf]) -> Result<PathBuf, String> {
+fn create_remote_runtime_bundle(
+    bin: &Path,
+    binary_name: &str,
+    runtime: &[PathBuf],
+) -> Result<PathBuf, String> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let temp_root = std::env::temp_dir().join(format!(
-        "harbor-core-runtime-{}-{nonce}",
-        std::process::id()
-    ));
+    let temp_root =
+        std::env::temp_dir().join(format!("harbor-runtime-{}-{nonce}", std::process::id()));
     let staging = temp_root.join("files");
     let archive = temp_root.join("runtime.tar.gz");
 
     // --- 阶段 1：收集 core 与兼容运行库 ---
     fs::create_dir_all(&staging)
         .map_err(|error| format!("create {} failed: {error}", staging.display()))?;
-    let mut files = vec![(bin.to_path_buf(), "harbor_core".to_string())];
+    let mut files = vec![(bin.to_path_buf(), binary_name.to_string())];
     for lib in runtime {
         let name = lib
             .file_name()
@@ -267,7 +320,7 @@ fn create_remote_runtime_bundle(bin: &Path, runtime: &[PathBuf]) -> Result<PathB
 
 fn send_remote_runtime(ssh: &WorkspaceSsh, bin: &Path, runtime: &[PathBuf]) -> Result<(), String> {
     let dir = remote_core_dir();
-    let archive = create_remote_runtime_bundle(bin, runtime)?;
+    let archive = create_remote_runtime_bundle(bin, "harbor_core", runtime)?;
     let total = fs::metadata(&archive)
         .map_err(|error| format!("stat {} failed: {error}", archive.display()))?
         .len();
@@ -292,6 +345,73 @@ fn send_remote_runtime(ssh: &WorkspaceSsh, bin: &Path, runtime: &[PathBuf]) -> R
         &format!("tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive}"),
     )?;
     set_deploy_progress(90, total, total);
+    Ok(())
+}
+
+pub fn remote_ttyd_command(ssh: &WorkspaceSsh) -> Result<String, String> {
+    let local_bin = packaged_ttyd_bin()?;
+    let runtime = shared_objects(local_bin.as_path())?;
+    let runtime_hash = runtime_fingerprint(EXPECTED_TTYD_SHA256, &runtime)?;
+    let loader = loader_basename(&runtime);
+    let dir = format!(".harbor/tools/ttyd/{EXPECTED_TTYD_SHA256}");
+    let remote_state = ssh_run(
+        ssh,
+        &format!(
+            "if [ -x \"$HOME/{dir}/ttyd\" ]; then sha256sum \"$HOME/{dir}/ttyd\" | cut -d ' ' -f 1; cat \"$HOME/{dir}/.runtime-sha256\" 2>/dev/null || true; fi"
+        ),
+    )?;
+    let mut remote_state = remote_state.lines();
+    let binary_matches = remote_state.next() == Some(EXPECTED_TTYD_SHA256);
+    let runtime_matches = remote_state.next() == Some(runtime_hash.as_str());
+    if !binary_matches || !runtime_matches {
+        deploy_remote_ttyd(
+            ssh,
+            local_bin.as_path(),
+            &runtime,
+            dir.as_str(),
+            runtime_hash.as_str(),
+        )?;
+    }
+    Ok(remote_runtime_exec(
+        dir.as_str(),
+        "ttyd",
+        loader.as_deref(),
+        "",
+    ))
+}
+
+fn deploy_remote_ttyd(
+    ssh: &WorkspaceSsh,
+    local_bin: &Path,
+    runtime: &[PathBuf],
+    dir: &str,
+    runtime_hash: &str,
+) -> Result<(), String> {
+    // --- 阶段 1：打包并上传 ttyd 与兼容运行库 ---
+    let archive = create_remote_runtime_bundle(local_bin, "ttyd", runtime)?;
+    let remote_archive = format!("\"$HOME/{dir}/runtime.tar.gz.new\"");
+    ssh_run(ssh, &format!("mkdir -p \"$HOME/{dir}\""))?;
+    let send_result = ssh_send_file(ssh, &archive, remote_archive.as_str(), |_, _| {});
+    let _ = fs::remove_dir_all(archive.parent().unwrap_or_else(|| Path::new("/tmp")));
+    send_result?;
+
+    // --- 阶段 2：展开、授权并校验托管二进制 ---
+    ssh_run(
+        ssh,
+        &format!(
+            "tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive} && chmod +x \"$HOME/{dir}/ttyd\" && printf '%s\\n' '{runtime_hash}' > \"$HOME/{dir}/.runtime-sha256\""
+        ),
+    )?;
+    let remote_hash = ssh_run(
+        ssh,
+        &format!("sha256sum \"$HOME/{dir}/ttyd\" | cut -d ' ' -f 1"),
+    )?;
+    if remote_hash.trim() != EXPECTED_TTYD_SHA256 {
+        return Err(format!(
+            "remote managed ttyd hash mismatch: expected {EXPECTED_TTYD_SHA256}, got {}",
+            remote_hash.trim()
+        ));
+    }
     Ok(())
 }
 
@@ -568,7 +688,7 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
         .as_ref()
         .ok_or_else(|| "remote workspace requires SSH settings".to_string())?;
     let local_bin = install_local_core_bin()?;
-    let runtime = core_shared_objects(local_bin.as_path())?;
+    let runtime = shared_objects(local_bin.as_path())?;
     let loader = loader_basename(&runtime);
     let dir = remote_core_dir();
     ssh_run(
@@ -616,7 +736,7 @@ fi"#,
     let exec = remote_core_exec(
         loader.as_deref(),
         &format!(
-            "--localhost-only {localhost_only} --workspace {id}",
+            "--localhost-only {localhost_only} --remote-runtime --workspace {id}",
             id = shell_single_quote(&workspace.id),
         ),
     );
@@ -715,6 +835,27 @@ mod tests {
         assert_eq!(
             sha256_file(Path::new(BUILD_CORE_PATH)).unwrap(),
             EXPECTED_CORE_SHA256
+        );
+    }
+
+    #[test]
+    fn embedded_hash_matches_managed_ttyd() {
+        assert_eq!(
+            sha256_file(Path::new(BUILD_TTYD_PATH)).unwrap(),
+            EXPECTED_TTYD_SHA256
+        );
+    }
+
+    #[test]
+    fn remote_runtime_command_uses_bundled_loader() {
+        assert_eq!(
+            remote_runtime_exec(
+                ".harbor/tools/ttyd/hash",
+                "ttyd",
+                Some("ld-linux-x86-64.so.2"),
+                "-p 29386"
+            ),
+            r#""$HOME/.harbor/tools/ttyd/hash/ld-linux-x86-64.so.2" --library-path "$HOME/.harbor/tools/ttyd/hash" "$HOME/.harbor/tools/ttyd/hash/ttyd" -p 29386"#
         );
     }
 }

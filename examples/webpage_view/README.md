@@ -4,11 +4,11 @@ Harbor 风格的机器人控制面板示例。前端与 Harbor 相同：**Vue 3 
 
 ## 开发
 
-手动开发时，从 Task YAML 的 `panel_interface` 读取端口并导出环境变量，然后先起
+手动开发时，从 Task YAML 的 `webview_interface` 读取端口并导出环境变量，然后先起
 Python、再起 Vite：
 
 ```bash
-export HARBOR_PANEL_INTERFACE_PORT="<panel_interface 中声明的端口>"
+export HARBOR_WEBVIEW_INTERFACE_PORT="<webview_interface 中声明的端口>"
 python3 -u robot_panel.py --harbor_info
 npm install
 npm run dev
@@ -33,7 +33,7 @@ npm run build
 HARBOR_INFO {"kind":"webpage_view","title":"Robot Panel","url":"http://<lan-ip>:<panel-port>/","localhost_url":"http://127.0.0.1:<panel-port>/","bind":"0.0.0.0","port":<panel-port>}
 ```
 
-Harbor 当前根据 Task YAML 的 `panel_interface` 生成面板地址，不依赖解析这行信息。
+Harbor 当前根据 Task YAML 的 `webview_interface` 生成面板地址，不依赖解析这行信息。
 
 ## 接入 ROS 2
 
@@ -68,6 +68,6 @@ source ~/robot_ws/install/setup.bash
 
 ## Harbor 配置
 
-本示例自带 `harbor_taskcfg/tasks/robot-panel.yaml`，其中 `panel_interface` 是面板端口的唯一配置来源。Harbor 启动 Task 时会注入 `HARBOR_PANEL_INTERFACE_PORT`；程序不再保存第二份端口。把本目录或 Harbor 仓库根加进 Search Paths 后会出现 Task `robot-panel`。启动任务，等它 running，点 Task 行上的面板按钮即可打开。
+本示例自带 `harbor_taskcfg/tasks/robot-panel.yaml`，其中 `webview_interface` 是面板端口的唯一配置来源。Harbor 启动 Task 时会注入 `HARBOR_WEBVIEW_INTERFACE_PORT`；程序不再保存第二份端口。把本目录或 Harbor 仓库根加进 Search Paths 后会出现 Task `robot-panel`。启动任务，等它 running，点 Task 行上的网页图标即可打开。
 
 前端只请求 `/api/state` 和 `/api/command`，ROS 2 逻辑集中在 `robot_panel.py` 的 `Ros2Bridge` 中。

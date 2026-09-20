@@ -36,7 +36,9 @@ pub struct TaskDefinition {
     #[serde(default)]
     pub sudo: bool,
     #[serde(default)]
-    pub panel_interface: Vec<PanelInterface>,
+    pub webview_interface: Vec<WebviewInterface>,
+    #[serde(default)]
+    pub vnc_interface: Vec<VncInterface>,
     pub command: TaskCommand,
     #[serde(default, skip_deserializing)]
     pub folder: String,
@@ -49,11 +51,17 @@ pub struct TaskDefinition {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PanelInterface {
+pub struct WebviewInterface {
     pub panel_name: String,
     pub interface_port: u16,
     #[serde(default)]
     pub localhost_only: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct VncInterface {
+    pub panel_name: String,
+    pub interface_port: u16,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -152,7 +160,9 @@ pub struct TaskSummary {
     pub running_config_id: Option<String>,
     pub requires_sudo: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub panel_interface: Vec<PanelInterface>,
+    pub webview_interface: Vec<WebviewInterface>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vnc_interface: Vec<VncInterface>,
     pub folder: String,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -282,6 +292,7 @@ pub struct TaskCardService {
     discovered_group_dirs: Arc<Mutex<Vec<PathBuf>>>,
     discovery_cache: Arc<Mutex<HashMap<Vec<PathBuf>, DiscoveryCache>>>,
     state: Arc<Mutex<RuntimeState>>,
+    remote_runtime: Arc<Mutex<bool>>,
     _instance_lock: Arc<File>,
 }
 
@@ -305,6 +316,7 @@ impl TaskCardService {
             discovered_group_dirs: Arc::new(Mutex::new(Vec::new())),
             discovery_cache: Arc::new(Mutex::new(HashMap::new())),
             state: Arc::new(Mutex::new(RuntimeState::default())),
+            remote_runtime: Arc::new(Mutex::new(false)),
             _instance_lock: Arc::new(instance_lock),
         };
         let _ = service.research();
@@ -330,6 +342,10 @@ impl TaskCardService {
             .map_err(|error| format!("create log dir {} failed: {error}", path.display()))?;
         *self.log_dir.lock() = path;
         Ok(())
+    }
+
+    pub fn set_remote_runtime(&self, remote: bool) {
+        *self.remote_runtime.lock() = remote;
     }
 
     fn current_log_dir(&self) -> PathBuf {
@@ -449,7 +465,8 @@ impl TaskCardService {
                     default_config: task.default_config_id().map(str::to_string),
                     running_config_id: running.and_then(|item| item.config_id.clone()),
                     requires_sudo: task.sudo,
-                    panel_interface: task.panel_interface.clone(),
+                    webview_interface: task.webview_interface.clone(),
+                    vnc_interface: task.vnc_interface.clone(),
                     folder: task.folder.clone(),
                     status: if running.is_some() {
                         "running".to_string()
@@ -551,15 +568,29 @@ impl TaskCardService {
         } else {
             None
         };
-        let mut command = if task.sudo {
-            build_sudo_command(&task.command)?
-        } else {
-            build_command(&task.command)?
-        };
         let log_dir = self.current_log_dir();
-        let (started_at_ms, log_file, stdout) =
+        let (started_at_ms, log_file, mut stdout) =
             create_log_file(log_dir.as_path(), id, selected_config_id.as_deref())?;
         let log_path = log_dir.join(log_file.as_str());
+        let remote_runtime = *self.remote_runtime.lock();
+        let vnc_interface = remote_runtime.then(|| task.vnc_interface.first()).flatten();
+        let command = if let Some(panel) = vnc_interface {
+            crate::vnc_interface::validate_dependencies()
+                .and_then(|_| crate::vnc_interface::build_command(&task.command, panel, task.sudo))
+        } else if task.sudo {
+            build_sudo_command(&task.command)
+        } else {
+            build_command(&task.command)
+        };
+        let mut command = match command {
+            Ok(command) => command,
+            Err(error) => {
+                writeln!(stdout, "{error}").map_err(|write_error| {
+                    format!("write log {} failed: {write_error}", log_path.display())
+                })?;
+                return Err(error);
+            }
+        };
         let stderr = stdout
             .try_clone()
             .map_err(|e| format!("clone log {} failed: {e}", log_path.display()))?;
@@ -1458,11 +1489,11 @@ fn merged_task_env(
     env.extend(env_override.clone());
 
     // --- 阶段 2：注入 Harbor 管理的面板环境 ---
-    env.extend(panel_interface_env(&task.panel_interface));
+    env.extend(webview_interface_env(&task.webview_interface));
     env
 }
 
-fn panel_interface_env(panels: &[PanelInterface]) -> HashMap<String, String> {
+fn webview_interface_env(panels: &[WebviewInterface]) -> HashMap<String, String> {
     let mut env = HashMap::new();
     for panel in panels {
         let panel_key = panel
@@ -1473,7 +1504,7 @@ fn panel_interface_env(panels: &[PanelInterface]) -> HashMap<String, String> {
                 _ => character.to_ascii_uppercase(),
             })
             .collect::<String>();
-        let prefix = format!("HARBOR_PANEL_{panel_key}");
+        let prefix = format!("HARBOR_WEBVIEW_{panel_key}");
         env.insert(format!("{prefix}_NAME"), panel.panel_name.clone());
         env.insert(
             format!("{prefix}_INTERFACE_PORT"),
@@ -1486,13 +1517,13 @@ fn panel_interface_env(panels: &[PanelInterface]) -> HashMap<String, String> {
     }
 
     if let [panel] = panels {
-        env.insert("HARBOR_PANEL_NAME".into(), panel.panel_name.clone());
+        env.insert("HARBOR_WEBVIEW_NAME".into(), panel.panel_name.clone());
         env.insert(
-            "HARBOR_PANEL_INTERFACE_PORT".into(),
+            "HARBOR_WEBVIEW_INTERFACE_PORT".into(),
             panel.interface_port.to_string(),
         );
         env.insert(
-            "HARBOR_PANEL_LOCALHOST_ONLY".into(),
+            "HARBOR_WEBVIEW_LOCALHOST_ONLY".into(),
             panel.localhost_only.to_string(),
         );
     }
@@ -1701,7 +1732,8 @@ fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
         return Err("workdir cannot be empty".into());
     }
     let mut panel_names = std::collections::HashSet::new();
-    for panel in &task.panel_interface {
+    let mut interface_ports = std::collections::HashSet::new();
+    for panel in &task.webview_interface {
         validate_id(panel.panel_name.as_str())
             .map_err(|_| format!("invalid panel_name: {}", panel.panel_name))?;
         if panel.interface_port == 0 {
@@ -1712,6 +1744,34 @@ fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
         }
         if !panel_names.insert(panel.panel_name.as_str()) {
             return Err(format!("duplicate panel_name: {}", panel.panel_name));
+        }
+        if !interface_ports.insert(panel.interface_port) {
+            return Err(format!(
+                "duplicate interface_port: {}",
+                panel.interface_port
+            ));
+        }
+    }
+    if task.vnc_interface.len() > 1 {
+        return Err("task can declare at most one vnc_interface".into());
+    }
+    for panel in &task.vnc_interface {
+        validate_id(panel.panel_name.as_str())
+            .map_err(|_| format!("invalid panel_name: {}", panel.panel_name))?;
+        if panel.interface_port == 0 {
+            return Err(format!(
+                "interface_port cannot be 0 for VNC panel {}",
+                panel.panel_name
+            ));
+        }
+        if !panel_names.insert(panel.panel_name.as_str()) {
+            return Err(format!("duplicate panel_name: {}", panel.panel_name));
+        }
+        if !interface_ports.insert(panel.interface_port) {
+            return Err(format!(
+                "duplicate interface_port: {}",
+                panel.interface_port
+            ));
         }
     }
     build_command(&task.command)?;
@@ -2494,12 +2554,12 @@ command:
     }
 
     #[test]
-    fn panel_interface_parses_and_rejects_bad_values() {
+    fn webview_interface_parses_and_rejects_bad_values() {
         let task = validate_task_yaml(
             r#"version: 1
 id: robot-panel
 workdir: /tmp
-panel_interface:
+webview_interface:
   - panel_name: robot_panel
     interface_port: 23842
     localhost_only: false
@@ -2508,15 +2568,15 @@ command:
 "#,
         )
         .unwrap();
-        assert_eq!(task.panel_interface.len(), 1);
-        assert_eq!(task.panel_interface[0].panel_name, "robot_panel");
-        assert_eq!(task.panel_interface[0].interface_port, 23842);
-        assert!(!task.panel_interface[0].localhost_only);
+        assert_eq!(task.webview_interface.len(), 1);
+        assert_eq!(task.webview_interface[0].panel_name, "robot_panel");
+        assert_eq!(task.webview_interface[0].interface_port, 23842);
+        assert!(!task.webview_interface[0].localhost_only);
 
         let bad_port = r#"version: 1
 id: robot-panel
 workdir: /tmp
-panel_interface:
+webview_interface:
   - panel_name: robot_panel
     interface_port: 0
 command:
@@ -2528,14 +2588,14 @@ command:
     }
 
     #[test]
-    fn panel_interface_is_injected_as_reserved_task_environment() {
+    fn webview_interface_is_injected_as_reserved_task_environment() {
         let task = validate_task_yaml(
             r#"version: 1
 id: robot-panel
 workdir: /tmp
 env:
-  HARBOR_PANEL_INTERFACE_PORT: "9999"
-panel_interface:
+  HARBOR_WEBVIEW_INTERFACE_PORT: "9999"
+webview_interface:
   - panel_name: robot-panel
     interface_port: 23842
     localhost_only: false
@@ -2547,22 +2607,58 @@ command:
 
         let env = merged_task_env(&task, None, &HashMap::new());
         assert_eq!(
-            env.get("HARBOR_PANEL_NAME").map(String::as_str),
+            env.get("HARBOR_WEBVIEW_NAME").map(String::as_str),
             Some("robot-panel")
         );
         assert_eq!(
-            env.get("HARBOR_PANEL_INTERFACE_PORT").map(String::as_str),
+            env.get("HARBOR_WEBVIEW_INTERFACE_PORT").map(String::as_str),
             Some("23842")
         );
         assert_eq!(
-            env.get("HARBOR_PANEL_LOCALHOST_ONLY").map(String::as_str),
+            env.get("HARBOR_WEBVIEW_LOCALHOST_ONLY").map(String::as_str),
             Some("false")
         );
         assert_eq!(
-            env.get("HARBOR_PANEL_ROBOT_PANEL_INTERFACE_PORT")
+            env.get("HARBOR_WEBVIEW_ROBOT_PANEL_INTERFACE_PORT")
                 .map(String::as_str),
             Some("23842")
         );
+    }
+
+    #[test]
+    fn vnc_interface_is_managed_without_application_environment() {
+        let task = validate_task_yaml(
+            r#"version: 1
+id: desktop-app
+workdir: /tmp
+vnc_interface:
+  - panel_name: desktop
+    interface_port: 23843
+command:
+  argv: [demo]
+"#,
+        )
+        .unwrap();
+
+        let env = merged_task_env(&task, None, &HashMap::new());
+        assert_eq!(task.vnc_interface.len(), 1);
+        assert!(!env.contains_key("HARBOR_WEBVIEW_INTERFACE_PORT"));
+        assert!(!env.contains_key("HARBOR_WEBVIEW_DESKTOP_INTERFACE_PORT"));
+
+        let duplicate = r#"version: 1
+id: desktop-app
+workdir: /tmp
+vnc_interface:
+  - panel_name: first
+    interface_port: 23843
+  - panel_name: second
+    interface_port: 23844
+command:
+  argv: [demo]
+"#;
+        assert!(validate_task_yaml(duplicate)
+            .unwrap_err()
+            .contains("at most one vnc_interface"));
     }
 
     #[test]

@@ -1,27 +1,55 @@
 ---
-title: Web Panel
+title: 程序界面
 permalink: /guide/panels/
 createTime: 2026/09/20 00:44:43
 ---
-# Web Panel
+# 程序界面
 
 普通程序不需要链接 Harbor SDK。只要 Task 能启动它、程序能输出日志，就已经可以由 Harbor 管理。
 
-当程序还需要提供可视化、控制界面、实时视频或交互操作时，再接入 Panel。**Panel 是程序与 Harbor 之间唯一需要主动适配的界面能力。**
+当程序还需要提供可视化、控制界面、实时视频或交互操作时，可以选择两种入口：
+
+- `webview_interface`：程序主动提供 Web 页面，使用网页图标。
+- `vnc_interface`：Harbor 在远端临时接管原生窗口，使用显示器图标。
 
 ![Harbor 中运行的 Robot Panel](/images/harbor-app.png)
 
-::: important 核心边界
-Harbor 负责启动 Task、提供 Panel 入口并构造访问地址；你的程序负责运行 HTTP 服务和页面内容。
-
-Panel 不是 Harbor 托管的前端文件，也不是一个独立 Task。它跟随所属 Task 一起启动和停止。
+::: important 先判断是否有 UI
+没有 UI 的 Task 不配置任何 interface。只有程序自己提供网页时使用
+`webview_interface`；只有远端需要操作原生窗口时使用 `vnc_interface`。
 :::
 
-## 先运行完整示例
+## VNC：远端操作原生窗口
+
+如果程序已经有 Qt、GTK 或其他 X11 界面，不需要再开发网页。只需为 Task
+声明 VNC 接口：
+
+```yaml
+vnc_interface:
+  - panel_name: desktop
+    interface_port: 23682
+command:
+  argv: [your-gui-program]
+```
+
+程序不需要读取 Harbor 环境变量，也不需要知道 VNC 如何配置。local workspace
+仍直接打开程序的原生窗口，不启动 VNC；只有 remote workspace 会自动创建虚拟
+显示屏，并从远端机器发布 noVNC 页面。WebView 不受影响。完整配置见
+[VNC Interface 示例](https://github.com/wh7019025/Harbor/tree/main/examples/vnc_interface)。
+
+运行 Task 的机器需要安装 TigerVNC、noVNC、websockify 和 Openbox。
+
+## WebView：程序提供 Web 页面
+
+Harbor 负责启动 Task、提供 WebView 入口并构造访问地址；程序负责运行 HTTP 服务和页面内容。
+
+WebView 不是 Harbor 托管的前端文件，也不是一个独立 Task。它跟随所属 Task 一起启动和停止。
+
+### 先运行完整示例
 
 Harbor 仓库提供了可以直接运行的 [Robot Panel 完整示例](https://github.com/wh7019025/Harbor/tree/main/examples/webpage_view)。它不是静态页面截图，而是一条完整接入通路：
 
-- Harbor Task 启动 Python 后端并注入 Panel 端口。
+- Harbor Task 启动 Python 后端并注入 WebView 端口。
 - Vue 页面通过 HTTP 获取机器人状态和发送控制命令。
 - WebSocket 持续传输动态视频画面。
 - 存在 ROS 2 环境时接入真实 Topic，否则自动使用 mock 数据。
@@ -31,7 +59,7 @@ Harbor 仓库提供了可以直接运行的 [Robot Panel 完整示例](https://g
 
 1. 将 Harbor 仓库根目录或 `examples/webpage_view` 加入 Workspace 的 Search Paths。
 2. 启动 Task `robot-panel`。
-3. 点击 Task 行上的 Panel 按钮。
+3. 点击 Task 行上的网页图标。
 
 直接查看关键文件：
 
@@ -40,19 +68,19 @@ Harbor 仓库提供了可以直接运行的 [Robot Panel 完整示例](https://g
 - [Python / ROS 2 / WebSocket 后端](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/robot_panel.py)
 - [示例运行说明](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/README.md)
 
-## Panel 如何工作
+## WebView 如何工作
 
 ```text
 Harbor 启动 Task
        ↓ 注入名称、端口和监听范围
 程序启动 HTTP / WebSocket 服务
        ↓
-Harbor 在 Task 上显示 Panel 按钮
+Harbor 在 Task 上显示 WebView 按钮
        ↓
-用户在独立 Panel 窗口中操作程序
+用户在独立窗口中操作程序
 ```
 
-一个 Task 可以声明一个或多个 Panel。常见用途包括：
+一个 Task 可以声明一个或多个 WebView。常见用途包括：
 
 - 机器人状态、传感器数据和告警展示。
 - 模式切换、参数调整和任务控制。
@@ -60,14 +88,14 @@ Harbor 在 Task 上显示 Panel 按钮
 - ROS 2 Topic 观察与简单控制。
 - 程序自己的调试或运维界面。
 
-只需要启动和查看日志的程序，不必为了“接入 Harbor”额外开发 Panel。
+只需要启动和查看日志的程序，不必为了“接入 Harbor”额外开发界面。
 
-## 第一步：声明 Panel
+## 第一步：声明 WebView
 
-在 Task YAML 中添加 `panel_interface`：
+在 Task YAML 中添加 `webview_interface`：
 
 ```yaml
-panel_interface:
+webview_interface:
   - panel_name: robot_panel
     interface_port: 23681
     localhost_only: false
@@ -79,19 +107,19 @@ panel_interface:
 
 ## 第二步：读取运行信息
 
-Harbor 启动单 Panel Task 时注入：
+Harbor 启动单 WebView Task 时注入：
 
-- `HARBOR_PANEL_NAME`
-- `HARBOR_PANEL_INTERFACE_PORT`
-- `HARBOR_PANEL_LOCALHOST_ONLY`
+- `HARBOR_WEBVIEW_NAME`
+- `HARBOR_WEBVIEW_INTERFACE_PORT`
+- `HARBOR_WEBVIEW_LOCALHOST_ONLY`
 
 程序应从环境变量决定监听地址与端口：
 
 ```python
 import os
 
-port = int(os.environ["HARBOR_PANEL_INTERFACE_PORT"])
-localhost_only = os.environ["HARBOR_PANEL_LOCALHOST_ONLY"] == "true"
+port = int(os.environ["HARBOR_WEBVIEW_INTERFACE_PORT"])
+localhost_only = os.environ["HARBOR_WEBVIEW_LOCALHOST_ONLY"] == "true"
 host = "127.0.0.1" if localhost_only else "0.0.0.0"
 
 app.run(host=host, port=port)
@@ -99,16 +127,16 @@ app.run(host=host, port=port)
 
 缺少或无法解析端口时，程序应明确退出并打印错误，不要静默回退到另一个端口。
 
-多 Panel Task 使用带标准化名称的变量。例如 `robot-panel` 对应：
+多 WebView Task 使用带标准化名称的变量。例如 `robot-panel` 对应：
 
 ```text
-HARBOR_PANEL_ROBOT_PANEL_INTERFACE_PORT
-HARBOR_PANEL_ROBOT_PANEL_LOCALHOST_ONLY
+HARBOR_WEBVIEW_ROBOT_PANEL_INTERFACE_PORT
+HARBOR_WEBVIEW_ROBOT_PANEL_LOCALHOST_ONLY
 ```
 
 ## 第三步：提供页面
 
-Task 启动后，程序需要在声明端口的 `/` 路径提供 HTTP 页面。Harbor 检测到 Task 运行后，会在任务行显示对应的 Panel 按钮。
+Task 启动后，程序需要在声明端口的 `/` 路径提供 HTTP 页面。Harbor 检测到 Task 运行后，会在任务行显示对应的网页图标。
 
 Panel 窗口标题由 Harbor 提供，页面内容不要再次显示产品名、Task 名或 `Dashboard` 一类重复标题。首屏应直接用于状态、操作、告警和数据。
 
@@ -153,8 +181,8 @@ command:
 ## 本地与远端
 
 
-- 本地 Panel 通常使用 `localhost_only: true`，仅监听 `127.0.0.1`。
-- 远端 Panel 需要从 GUI 所在机器访问时，使用 `localhost_only: false` 并监听 `0.0.0.0`。
+- 本地 WebView 通常使用 `localhost_only: true`，仅监听 `127.0.0.1`。
+- 远端 WebView 需要从 GUI 所在机器访问时，使用 `localhost_only: false` 并监听 `0.0.0.0`。
 - 远端端口必须在网络和防火墙中可达。
 - 远端页面中的 HTTP 与 WebSocket 地址应使用当前 `location.host`，不要写死远端 IP。
 
@@ -182,8 +210,8 @@ Harbor 不会为 Panel 自动增加鉴权。监听非 localhost 地址时，只�
 
 不需要照搬整个示例。普通状态页可以只保留 HTTP；实时画面再增加 WebSocket；需要机器人通信时再接入 `Ros2Bridge`。
 
-让 AI 为现有程序接入 Panel：
+让 AI 为现有程序接入 WebView：
 
 ```txt
-使用 $harbor，为当前程序添加 Web Panel。
+使用 $harbor，为当前程序添加 WebView。
 ```

@@ -29,9 +29,9 @@
 ## 面板端口只有一个配置来源
 
 - 每个 WebPage View 在 `23000–24000` 范围内选择一个项目专用端口，并确认没有与已有 Task 重复。
-- 面板端口只能在 Task YAML 的 `panel_interface[].interface_port` 中保存一份。
+- 面板端口只能在 Task YAML 的 `webview_interface[].interface_port` 中保存一份。
 - 禁止在 YAML `env`、Python、TypeScript、Vite 配置或启动脚本中再次硬编码生产端口。
-- Harbor 将单面板声明注入为 `HARBOR_PANEL_NAME`、`HARBOR_PANEL_INTERFACE_PORT` 和 `HARBOR_PANEL_LOCALHOST_ONLY`。
+- Harbor 将单面板声明注入为 `HARBOR_WEBVIEW_NAME`、`HARBOR_WEBVIEW_INTERFACE_PORT` 和 `HARBOR_WEBVIEW_LOCALHOST_ONLY`。
 - 面板程序必须读取这些变量；缺少或非法端口时应明确失败，不能静默使用默认端口。
-- 多面板 Task 使用 `HARBOR_PANEL_<PANEL_NAME>_*`，其中面板名转为大写并将 `-` 替换为 `_`。
-- Vite 开发代理同样读取 `HARBOR_PANEL_INTERFACE_PORT`，未提供时不能偷偷代理到硬编码端口。
+- 多面板 Task 使用 `HARBOR_WEBVIEW_<PANEL_NAME>_*`，其中面板名转为大写并将 `-` 替换为 `_`。
+- Vite 开发代理同样读取 `HARBOR_WEBVIEW_INTERFACE_PORT`，未提供时不能偷偷代理到硬编码端口。

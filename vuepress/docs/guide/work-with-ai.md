@@ -42,6 +42,21 @@ Harbor GUI 与 AI 使用同一套 API。无论操作来自界面还是 AI，你�
 
 这类请求不只生成文件。AI 会先读取 `/health` 与 `/snapshot`，通过 YAML API 保存配置，再调用运行 API，并根据状态与日志判断结果。
 
+## 用 Harbor Tag 指定任务
+
+双击任务名称即可复制 Harbor Tag。Tag 同时包含运行位置、项目路径和任务 ID，可以直接粘贴给 AI：
+
+```text
+Harbor:local:/home/me/robot_ws:camera
+Harbor:remote@robot@10.43.30.29:/home/robot/robot_ws:camera
+```
+
+`local` 表示本机任务；`remote@SSH目标` 表示远端任务。这样即使本地与远端存在相同路径或同名任务，AI 也不会仅凭路径猜测运行位置。SSH 使用默认端口 `22` 时不会显示端口，其他端口会附在目标后。
+
+```txt
+使用 $harbor，重启 Harbor:remote@robot@10.43.30.29:/home/robot/robot_ws:camera，并检查最后 128 行日志。
+```
+
 ## 编排并运行流程
 
 AI 可以先发现已有任务，再把重复操作沉淀为 Group：

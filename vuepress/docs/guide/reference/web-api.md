@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # Web API
 
-Core 默认监听端口 `29385`，当前 API revision 为 **3**，基础路径为：
+Core 默认监听端口 `29385`，当前 API revision 为 **4**，基础路径为：
 
 ```text
 http://<host>:29385/api/v1

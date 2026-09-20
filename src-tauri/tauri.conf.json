@@ -33,7 +33,8 @@
       "deb": {
         "depends": [],
         "files": {
-          "/usr/bin/harbor_core": "target/release/harbor_core"
+          "/usr/bin/harbor_core": "target/release/harbor_core",
+          "/usr/lib/harbor/ttyd": "target/release/harbor_ttyd"
         }
       }
     },

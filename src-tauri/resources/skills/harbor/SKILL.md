@@ -1,6 +1,6 @@
 ---
 name: harbor
-description: Create, maintain, discover, start, stop, and inspect Harbor Task and Group workflows through Harbor YAML files, workspace search paths, logs, panels, and the harbor_core HTTP API. Use when a request mentions Harbor tasks, groups, task orchestration, harbor_taskcfg, workspace search_paths, task logs, Web Panels, ROS2 programs launched by Harbor, or operating a running Harbor instance.
+description: Create, maintain, discover, start, stop, and inspect Harbor Task and Group workflows through Harbor YAML files, workspace search paths, logs, WebView or VNC interfaces, and the harbor_core HTTP API. Use when a request mentions Harbor tasks, groups, task orchestration, harbor_taskcfg, workspace search_paths, task logs, program interfaces, ROS2 programs launched by Harbor, or operating a running Harbor instance.
 ---
 
 # Harbor
@@ -14,7 +14,7 @@ Use Harbor to turn repeatable commands into project-owned Task and Group workflo
 3. For configuration work, locate the project and current workspace before editing YAML.
 4. Stop a running Task before changing its definition.
 5. Preserve unspecified commands, fields, environment variables, and configuration.
-6. Validate YAML paths, Task references, UUID uniqueness, and the Harbor version rule.
+6. Validate YAML paths, Task references, UUID uniqueness, interface mode, and the Harbor version rule.
 7. For runtime work, call the HTTP API directly instead of instructing the user to click the GUI.
 8. Report the files changed and runtime actions performed.
 
@@ -24,6 +24,15 @@ Use Harbor to turn repeatable commands into project-owned Task and Group workflo
 - Create a **Group** only when the user explicitly requests composition, ordering, or orchestration of multiple Tasks.
 - Keep project configuration under `harbor_taskcfg/`; do not create a Group alongside every Task.
 - Write `description` in Chinese when practical.
+
+## Choose the Interface Mode
+
+- **No UI**: omit both interface fields. This is the default for services, ROS 2 nodes, scripts, and headless programs.
+- **WebView**: use `webview_interface` only when the program itself serves an HTTP page. The program reads `HARBOR_WEBVIEW_*` variables.
+- **VNC**: use `vnc_interface` only for a native X11/Qt/GTK window that must be operated remotely. Local workspaces still launch the native window directly.
+- Do not add an interface merely because a Task is remote. Headless remote Tasks need no interface.
+- Do not invent `panel_interface` or `force_display`; those fields are not part of the current schema.
+- Treat the remote Workspace terminal as a GUI-managed session over an SSH Tunnel. Harbor verifies and deploys its bundled ttyd automatically; do not ask the user to install ttyd or create a Task/interface field for it.
 
 ## Read References as Needed
 
@@ -38,6 +47,7 @@ Use Harbor to turn repeatable commands into project-owned Task and Group workflo
 
 ## Operational Rules
 
+- Recognize copied Harbor Tags in these forms: `Harbor:local:<prefix_path>:<task_id>` and `Harbor:remote@<ssh_target>:<prefix_path>:<task_id>`. The scope identifies where the Task configuration and runtime belong; do not silently operate a remote Tag through a local workspace.
 - Treat `(prefix_path, id)` as the configuration lookup key and `uuid` as the global runtime identity.
 - Allow the core to generate a missing UUID; never copy a UUID from another Task or Group.
 - Keep one running instance per Task UUID across local, remote, and workspace views.

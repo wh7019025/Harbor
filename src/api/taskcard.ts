@@ -1,10 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Settings } from "./settings";
 
-export interface TaskPanelInterface {
+export interface TaskWebviewInterface {
   panel_name: string;
   interface_port: number;
   localhost_only: boolean;
+}
+
+export interface TaskVncInterface {
+  panel_name: string;
+  interface_port: number;
 }
 
 export interface TaskCardConfig {
@@ -27,7 +32,8 @@ export interface TaskCardTask {
   default_config?: string;
   running_config_id?: string;
   requires_sudo: boolean;
-  panel_interface?: TaskPanelInterface[];
+  webview_interface?: TaskWebviewInterface[];
+  vnc_interface?: TaskVncInterface[];
   folder: string;
   status: "running" | "stopped";
   pid?: number;
@@ -234,16 +240,26 @@ export function readLogChunk(file: string, offset: number) {
   return invoke<TaskLogChunk>("taskcard_read_log_chunk", { file, offset });
 }
 
-export function panelUrls(task: TaskCardTask, settings: Settings | null) {
+export function interfaceUrls(task: TaskCardTask, settings: Settings | null) {
   const workspace = settings?.workspaces.find((item) => item.id === settings.current_workspace);
+  const remote = workspace?.mode === "remote";
   const host =
-    workspace?.mode === "remote" && workspace.ssh?.host.trim()
+    remote && workspace.ssh?.host.trim()
       ? workspace.ssh.host.trim()
       : "127.0.0.1";
-  return (task.panel_interface ?? []).map((panel) => ({
+  const webviews = (task.webview_interface ?? []).map((panel) => ({
+    kind: "webview" as const,
     name: panel.panel_name,
     url: `http://${host}:${panel.interface_port}/`,
   }));
+  const vnc = remote
+    ? (task.vnc_interface ?? []).map((panel) => ({
+        kind: "vnc" as const,
+        name: panel.panel_name,
+        url: `http://${host}:${panel.interface_port}/`,
+      }))
+    : [];
+  return [...webviews, ...vnc];
 }
 
 export function openPanelWindow(title: string, url: string) {

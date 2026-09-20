@@ -26,7 +26,7 @@ ssh <user>@<host>
 - 远端用户可以运行项目所需的命令和依赖。
 - 当前电脑可以访问远端 SSH 端口。
 - 当前电脑可以访问远端 TCP `29385`。
-- 使用 Web Panel 时，对应 Panel 端口也需要可达。
+- 使用 `webview_interface` 或 `vnc_interface` 时，对应 `interface_port` 也需要可达。
 
 如果这些网络路径被防火墙、容器或路由隔离，Harbor 无法替代底层网络配置。
 
@@ -66,7 +66,24 @@ Harbor 会自动完成以下工作：
 
 这里的 `~` 属于远端 SSH 用户，不是当前电脑。路径补全列出的也是远端目录。
 
-Harbor 会在这些路径下发现 `harbor_taskcfg`。任务出现后，启动、停止、config、Group、日志和 Web Panel 的操作方式都与本地一致。
+Harbor 会在这些路径下发现 `harbor_taskcfg`。任务出现后，启动、停止、config、Group、日志和界面入口的操作方式都与本地一致。
+
+## 在 Harbor 中打开远端终端
+
+远端 Workspace 的工具栏会显示终端按钮。点击后，Harbor 在远端启动 `ttyd`，同时
+建立仅监听本机 `127.0.0.1` 的 SSH Tunnel，并在 Harbor 内置窗口中打开终端。
+
+你不需要在远端安装或配置 `ttyd`。Harbor 自带匹配的 release 二进制；第一次打开
+终端时会检查 SHA-256，并在缺失或版本不匹配时自动部署到远端
+`~/.harbor/tools/ttyd/<sha256>/`。它是经过校验的静态二进制，不依赖远端的软件包版本。
+
+终端默认进入 Workspace 的第一条搜索路径，没有搜索路径时进入远端用户 HOME。每个
+Workspace 同时只允许一个终端客户端；关闭窗口、切换 Workspace 或修改连接配置时，
+Harbor 会终止 ttyd 和 SSH Tunnel。
+
+ttyd 只绑定远端 `127.0.0.1`，Harbor 会从 `29386–29486` 自动选择空闲端口，不会额外
+向局域网开放 Shell 端口。浏览器访问的是 Harbor 动态分配的本机回环端口，认证仍由
+Workspace 已保存的 SSH 配置完成。
 
 ## 判断连接状态
 
@@ -89,13 +106,17 @@ Harbor 会在这些路径下发现 `harbor_taskcfg`。任务出现后，启动�
 
 - 编辑器的 Remote SSH 功能。
 - 支持 SFTP 的文件管理器。
-- SSH 终端中的命令行工具。
+- Harbor 内置远端终端或普通 SSH 终端中的命令行工具。
 
 Harbor 的搜索路径用于发现和运行项目，不会把远端目录挂载到本机。
 
-## 远端图形程序
+## 远端程序是否需要界面
 
-Qt、RViz 和其他桌面程序需要远端机器上存在真实图形会话。仅能 SSH 登录并不代表可以打开窗口。
+远端不代表一定需要 VNC。先判断程序本身属于哪一种：
+
+- 服务、脚本、ROS 2 节点等没有 UI：不配置 interface，直接运行。
+- 程序自己提供 HTTP 页面：配置 `webview_interface`。
+- Qt、RViz、GTK 等只有原生窗口，并且需要远端操作：配置 `vnc_interface`。
 
 如果远端没有桌面会话，程序可能输出：
 
@@ -103,13 +124,18 @@ Qt、RViz 和其他桌面程序需要远端机器上存在真实图形会话。�
 qt.qpa.xcb: could not connect to display
 ```
 
-可根据程序类型选择：
+如果 Task 声明了 `vnc_interface`，远端 Core 会自动创建隔离的 X11、TigerVNC、
+noVNC 和 WebSocket 通路，再把原始命令运行到其中。程序无需读取 VNC 配置。
+local workspace 会忽略 VNC 包装，仍然直接打开原生窗口。
 
-- 无需显示界面：使用 offscreen 或 headless 模式。
-- 必须显示窗口：在远端配置物理桌面、VNC 或 RDP 会话。
-- 只需要操作界面：优先把功能做成 [Web Panel](./panels.md)，直接在 Harbor 中打开。
+如果程序可以提供 Web 页面，优先使用 `webview_interface`；它通常比传输整个桌面
+更轻量。完全不需要界面的程序应使用 offscreen 或 headless 模式，不要配置 VNC。
 
-Harbor 会尝试继承远端用户已有的 `DISPLAY`、`XAUTHORITY`、Wayland 和 DBus 环境，但不会创建虚拟显示设备。
+远端 VNC 依赖：
+
+```bash
+sudo apt-get install -y tigervnc-standalone-server novnc websockify openbox
+```
 
 ## 安全边界
 
@@ -117,7 +143,8 @@ Harbor 会尝试继承远端用户已有的 `DISPLAY`、`XAUTHORITY`、Wayland �
 
 - 只在可信局域网、VPN 或受控防火墙内使用。
 - 不要把 `29385` 直接暴露到公网。
-- Web Panel 若监听 `0.0.0.0`，同样需要限制网络访问或自行实现鉴权。
+- WebView 或 noVNC 页面监听远端网卡时，同样需要限制网络访问或自行实现鉴权。
+- Harbor 远端终端通过 SSH Tunnel 连接，ttyd 本身只监听远端回环地址；不要手动把它改成 `0.0.0.0`。
 
 ## 常见问题
 
@@ -137,6 +164,13 @@ Harbor 会尝试继承远端用户已有的 `DISPLAY`、`XAUTHORITY`、Wayland �
 
 确认搜索路径填写的是远端路径，并且项目中存在 `harbor_taskcfg`。不要填写当前电脑上的项目路径。
 
+### 远端终端无法打开
+
+确认远端 `~/.harbor` 可写、磁盘空间充足，并且远端具有 `ss` 命令。Harbor 会自动避开
+已占用的终端端口，并把托管 ttyd 的部署与启动日志写入本机
+`~/.harbor/log/workspace-terminal.log`。
+
 ### Task 启动但无法打开窗口
 
-检查远端图形会话和 `DISPLAY`。如果程序只需要一个控制页面，使用 Web Panel 通常比维护远端桌面更简单。
+如果程序需要原生窗口，确认 Task 配置了 `vnc_interface`，并检查远端 VNC 依赖。
+如果程序只需要控制页面，使用 `webview_interface` 通常更轻量；如果没有 UI，则不应配置任何 interface。

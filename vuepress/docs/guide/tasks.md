@@ -32,9 +32,18 @@ Task 是 Harbor 中最基本的运行单元，表示一个可以反复启动的�
 - **从哪里启动**：程序使用的工作目录。
 - **需要什么环境**：环境变量和初始化脚本。
 - **有哪些运行方式**：例如开发、生产或不同设备配置。
-- **如何查看界面**：可选的 Web Panel。
+- **如何查看界面**：无 UI、程序提供的 WebView，或远端原生窗口的 VNC 入口。
 
 这些内容保存在项目的 `harbor_taskcfg/tasks/` 中，可以与代码一起提交和维护。
+
+## 选择界面模式
+
+- **没有 UI**：不配置任何 interface。服务、ROS 2 节点、脚本和 headless 程序都属于这一类。
+- **程序自带 Web 页面**：配置 `webview_interface`，Harbor 显示网页图标。
+- **程序只有原生窗口**：需要远端操作时配置 `vnc_interface`，Harbor 显示显示器图标。
+
+本地运行带 `vnc_interface` 的 Task 时仍直接打开原生窗口；只有 remote workspace
+会创建 VNC 环境。远端无 UI 任务不需要 VNC。
 
 ## 创建 Task
 

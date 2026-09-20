@@ -4,6 +4,21 @@ Task 和 Group 是两种独立配置。Agent 只创建用户明确要求的类�
 
 Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 
+## 从 Harbor Tag 定位任务
+
+GUI 复制的 Harbor Tag 会显式携带运行位置：
+
+```text
+Harbor:local:/absolute/project/path:task-id
+Harbor:remote@user@host:/absolute/remote/path:task-id
+Harbor:remote@user@host:2222:/absolute/remote/path:task-id
+```
+
+- `local` 表示本机 Workspace。
+- `remote@...` 表示远端 Workspace，目标来自其 SSH 配置；默认端口 `22` 不显示。
+- 最后一段是 Task `id`，其前是该机器上的 `prefix_path`。
+- 处理远端 Tag 时，先匹配对应的远端 Workspace 和 Core，不要把远端绝对路径当成本地路径使用。
+
 ## 公共准备：确定配置位置
 
 - 项目配置：`{project}/harbor_taskcfg/`
@@ -19,7 +34,8 @@ Agent 应直接创建目录和 YAML 文件，不需要操作 Harbor 界面。
 3. 按 [task-yaml.md](task-yaml.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**简要说明任务用途；无说明可留 `""`。
 5. 若同一程序只有环境变量参数不同，可在一个 Task 中使用 `configs`，不要复制多个几乎相同的 Task。
-6. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
+6. 判断界面模式：无 UI 时不写接口；程序自带 HTTP 页面时写 `webview_interface`；远端需要操作原生窗口时写 `vnc_interface`。
+7. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
 
 文件名建议与 Task `id` 一致，例如：
 
@@ -50,4 +66,5 @@ harbor_taskcfg/groups/dev-pipeline.yaml
 - 只检查和交付用户要求的配置类型。
 - 确认 YAML 可以解析，且没有写入自动生成的顶层 `folder`、`prefix_path` 或 `taskcfg_dir`；不要复制其他配置的 `uuid`。
 - 不要覆盖同目录下已有的同名配置；修改已有配置时保留无关字段。
+- 不要写已经废弃的 `panel_interface` 或 `force_display`。
 - 完成后告知用户重新加载配置或重启 Harbor。

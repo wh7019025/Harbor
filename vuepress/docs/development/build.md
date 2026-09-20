@@ -10,7 +10,7 @@ createTime: 2026/09/20 00:44:43
 Harbor 的有效版本只由 Git 管理。发布提交使用精确标签，例如：
 
 ```bash
-git tag -a v0.2.0-preview -m "Harbor 0.2.0 preview"
+git tag -a v0.2.0-preview.2 -m "Harbor 0.2.0 preview.2"
 ```
 
 查看当前构建将使用的版本：
@@ -19,10 +19,10 @@ git tag -a v0.2.0-preview -m "Harbor 0.2.0 preview"
 scripts/git_version.sh
 ```
 
-位于 Tag 上的干净提交输出 `0.2.0-preview`。Tag 之后的开发提交输出类似
-`0.2.0-preview+3.g4d65765`；有未提交改动时再附加 `.dirty`。
+位于 Tag 上的干净提交输出 `0.2.0-preview.2`。Tag 之后的开发提交输出类似
+`0.2.0-preview.2+3.g4d65765`；有未提交改动时再附加 `.dirty`。
 
-`package.json`、Cargo manifest 与 `tauri.conf.json` 中统一使用 `0.0.0` 占位，不再保存或人工同步应用版本。源码包脱离 Git 时，构建脚本回退到基线版本 `0.2.0-preview`。
+`package.json`、Cargo manifest 与 `tauri.conf.json` 中统一使用 `0.0.0` 占位，不再保存或人工同步应用版本。源码包脱离 Git 时，构建脚本回退到基线版本 `0.2.0-preview.2`。
 
 ## 1. 前端检查
 
@@ -47,9 +47,15 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run core:release
 ```
 
-该命令构建 release `harbor_core`，并生成相邻的 `harbor_core.sha256`。GUI 构建时读取并固化这个哈希。
+该命令构建 release `harbor_core`，同时固化构建机上的 `ttyd`，并为两个二进制生成
+SHA-256。GUI 构建时读取并固化这些哈希，用于本机 Core 管理和远端终端自动部署。
 
-远端部署和 `~/.harbor/core/` 都必须使用 release Core，debug 产物不能替代。
+构建脚本会下载并校验固定版本的官方静态 `ttyd`，也可以通过 `HARBOR_TTYD_BIN` 指定
+另一份静态二进制。最终 Debian 包会携带这份 `ttyd`；构建机和使用 Harbor 的远端机器
+都不需要通过系统包管理器安装它。
+
+远端部署和 `~/.harbor/core/` 都必须使用 release Core，debug 产物不能替代。托管
+`ttyd` 同样按哈希存放，并与 GUI 构建保持一致。
 
 ## 4. 开发模式
 
