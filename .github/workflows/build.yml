@@ -78,6 +78,10 @@ jobs:
           uploadArtifacts: true
           tagName: ${{ github.ref_name }}
           releaseName: Harbor ${{ github.ref_name }}
-          releaseBody: See the assets to download this version and install.
+          releaseBody: |
+            ## 安装
+
+            在下方 **Assets** 下载 Linux amd64 的 `.deb` 安装包并安装。
+          generateReleaseNotes: true
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

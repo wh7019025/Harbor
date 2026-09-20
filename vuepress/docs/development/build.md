@@ -91,7 +91,7 @@ npm run docs:build
 - 创建或更新 Pull Request。
 - 手动触发 workflow。
 
-普通构建把安装包上传为 workflow artifact。推送 `v*` tag 时，GitHub Actions 还会创建对应 Release，并附加 `.deb` 安装包。
+普通构建把安装包上传为 workflow artifact。推送 `v*` tag 时，GitHub Actions 还会创建对应 Release，附加 `.deb` 安装包，并根据上一 Tag 自动生成版本变更说明。
 
 Release workflow 要求当前提交存在精确的 `v*` Tag，并拒绝带未提交改动的发布构建。Rust GUI、`harbor_core`、Tauri Bundle 与 `.deb` 文件名使用同一个 Git 版本。
 
