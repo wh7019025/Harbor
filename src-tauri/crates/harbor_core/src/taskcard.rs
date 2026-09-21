@@ -266,15 +266,56 @@ struct RunningTaskRecord {
     id: String,
     pid: u32,
     pgid: i32,
+    #[serde(default)]
+    sid: i32,
+    #[serde(default)]
+    leader_start_time_ticks: u64,
     started_at_ms: u128,
     log_file: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     config_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ManagedProcessInfo {
+    pub pid: i32,
+    pub ppid: i32,
+    pub name: String,
+    pub command: String,
+    pub state: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ManagedProcessGroup {
+    pub uuid: String,
+    pub prefix_path: String,
+    pub task_id: String,
+    pub leader_pid: u32,
+    pub pgid: i32,
+    pub started_at_ms: u128,
+    pub log_file: String,
+    pub config_id: Option<String>,
+    pub task_running: bool,
+    pub orphaned: bool,
+    pub processes: Vec<ManagedProcessInfo>,
+}
+
+#[derive(Clone, Debug)]
+struct ProcessInfo {
+    pid: i32,
+    ppid: i32,
+    pgid: i32,
+    sid: i32,
+    state: char,
+    start_time_ticks: u64,
+    name: String,
+    command: String,
+}
+
 #[derive(Default)]
 struct RuntimeState {
     running: HashMap<String, RunningTask>,
+    managed: HashMap<String, RunningTaskRecord>,
 }
 
 #[derive(Clone)]
@@ -305,9 +346,10 @@ impl TaskCardService {
             );
         }
         let instance_lock = acquire_instance_lock(root.join("run").as_path())?;
-        if let Err(error) = cleanup_orphan_tasks(root.as_path()) {
+        let recovered = cleanup_orphan_tasks(root.as_path()).unwrap_or_else(|error| {
             eprintln!("cleanup orphan tasks failed: {error}");
-        }
+            Vec::new()
+        });
         let service = Self {
             log_dir: Arc::new(Mutex::new(root.join("log"))),
             root,
@@ -315,7 +357,13 @@ impl TaskCardService {
             discovered_task_dirs: Arc::new(Mutex::new(Vec::new())),
             discovered_group_dirs: Arc::new(Mutex::new(Vec::new())),
             discovery_cache: Arc::new(Mutex::new(HashMap::new())),
-            state: Arc::new(Mutex::new(RuntimeState::default())),
+            state: Arc::new(Mutex::new(RuntimeState {
+                running: HashMap::new(),
+                managed: recovered
+                    .into_iter()
+                    .map(|record| (record.uuid.clone(), record))
+                    .collect(),
+            })),
             remote_runtime: Arc::new(Mutex::new(false)),
             _instance_lock: Arc::new(instance_lock),
         };
@@ -634,12 +682,13 @@ impl TaskCardService {
                         .map_err(|e| format!("write sudo password failed: {e}"))
                 });
             if let Err(error) = write_result {
-                let _ = terminate_task(id, &mut child);
+                let record = child_process_record(id, &child);
+                let _ = terminate_task(&record, &mut child);
                 return Err(error);
             }
         }
         state.running.insert(
-            runtime_key,
+            runtime_key.clone(),
             RunningTask {
                 id: task.id.clone(),
                 prefix_path: task.prefix_path.clone(),
@@ -650,6 +699,8 @@ impl TaskCardService {
                 config_id: selected_config_id,
             },
         );
+        let record = running_task_record(runtime_key.as_str(), &state.running[&runtime_key]);
+        state.managed.insert(runtime_key, record);
         drop(state);
         let _ = self.sync_running_registry();
         Ok(())
@@ -662,10 +713,23 @@ impl TaskCardService {
         let task = tasks
             .get(definition_key.as_str())
             .ok_or_else(|| format!("task not found: {id} @ {prefix_path}"))?;
-        let Some(mut running) = self.state.lock().running.remove(task.uuid.as_str()) else {
-            return Ok(());
+        let (mut running, record) = {
+            let mut state = self.state.lock();
+            (
+                state.running.remove(task.uuid.as_str()),
+                state.managed.get(task.uuid.as_str()).cloned(),
+            )
         };
-        terminate_task(id, &mut running.child)?;
+        match (running.as_mut(), record.as_ref()) {
+            (Some(running), Some(record)) => terminate_task(record, &mut running.child)?,
+            (Some(running), None) => {
+                let record = running_task_record(task.uuid.as_str(), running);
+                terminate_task(&record, &mut running.child)?;
+            }
+            (None, Some(record)) => terminate_orphan(record)?,
+            (None, None) => return Ok(()),
+        }
+        self.state.lock().managed.remove(task.uuid.as_str());
         let _ = self.sync_running_registry();
         Ok(())
     }
@@ -677,13 +741,94 @@ impl TaskCardService {
     }
 
     pub fn stop_all(&self) -> Vec<String> {
-        let running = self.state.lock().running.drain().collect::<Vec<_>>();
-        let errors = running
-            .into_iter()
-            .filter_map(|(_, mut running)| terminate_task(&running.id, &mut running.child).err())
-            .collect::<Vec<_>>();
+        let (running, managed) = {
+            let mut state = self.state.lock();
+            (
+                state.running.drain().collect::<HashMap<_, _>>(),
+                state.managed.clone(),
+            )
+        };
+        let mut errors = Vec::new();
+        for (uuid, record) in &managed {
+            if !running.contains_key(uuid) {
+                if let Err(error) = terminate_orphan(record) {
+                    errors.push(error);
+                }
+            }
+        }
+        for (uuid, mut running) in running {
+            let record = managed
+                .get(uuid.as_str())
+                .cloned()
+                .unwrap_or_else(|| running_task_record(uuid.as_str(), &running));
+            if let Err(error) = terminate_task(&record, &mut running.child) {
+                errors.push(error);
+            }
+        }
+        self.state
+            .lock()
+            .managed
+            .retain(|_, record| process_group_alive(record));
         let _ = self.sync_running_registry();
         errors
+    }
+
+    pub fn managed_processes(&self) -> Vec<ManagedProcessGroup> {
+        self.refresh_processes();
+        let state = self.state.lock();
+        let mut groups = state
+            .managed
+            .iter()
+            .map(|(uuid, record)| {
+                let processes = processes_in_group(record);
+                let task_running = state.running.contains_key(uuid);
+                ManagedProcessGroup {
+                    uuid: uuid.clone(),
+                    prefix_path: record.prefix_path.clone(),
+                    task_id: record.id.clone(),
+                    leader_pid: record.pid,
+                    pgid: record.pgid,
+                    started_at_ms: record.started_at_ms,
+                    log_file: record.log_file.clone(),
+                    config_id: record.config_id.clone(),
+                    task_running,
+                    orphaned: !task_running && !processes.is_empty(),
+                    processes: processes
+                        .into_iter()
+                        .map(|process| ManagedProcessInfo {
+                            pid: process.pid,
+                            ppid: process.ppid,
+                            name: process.name,
+                            command: process.command,
+                            state: process.state.to_string(),
+                        })
+                        .collect(),
+                }
+            })
+            .collect::<Vec<_>>();
+        groups.sort_by(|left, right| right.started_at_ms.cmp(&left.started_at_ms));
+        groups
+    }
+
+    pub fn stop_managed_processes(&self, uuid: &str) -> Result<(), String> {
+        let (mut running, record) = {
+            let mut state = self.state.lock();
+            (
+                state.running.remove(uuid),
+                state
+                    .managed
+                    .get(uuid)
+                    .cloned()
+                    .ok_or_else(|| format!("managed process group not found: {uuid}"))?,
+            )
+        };
+        if let Some(running) = running.as_mut() {
+            terminate_task(&record, &mut running.child)?;
+        } else {
+            terminate_orphan(&record)?;
+        }
+        self.state.lock().managed.remove(uuid);
+        self.sync_running_registry()
     }
 
     pub fn restart_task(
@@ -1131,7 +1276,7 @@ impl TaskCardService {
     fn refresh_processes(&self) {
         let changed = {
             let mut state = self.state.lock();
-            let before = state.running.len();
+            let before = (state.running.len(), state.managed.len());
             state
                 .running
                 .retain(|_, running| match running.child.try_wait() {
@@ -1139,7 +1284,10 @@ impl TaskCardService {
                     Ok(None) => true,
                     Err(_) => false,
                 });
-            before != state.running.len()
+            state
+                .managed
+                .retain(|_, record| process_group_alive(record));
+            before != (state.running.len(), state.managed.len())
         };
         if changed {
             let _ = self.sync_running_registry();
@@ -1149,20 +1297,7 @@ impl TaskCardService {
     fn sync_running_registry(&self) -> Result<(), String> {
         let records = {
             let state = self.state.lock();
-            state
-                .running
-                .iter()
-                .map(|(uuid, running)| RunningTaskRecord {
-                    uuid: uuid.clone(),
-                    prefix_path: running.prefix_path.clone(),
-                    id: running.id.clone(),
-                    pid: running.child.id(),
-                    pgid: running.child.id() as i32,
-                    started_at_ms: running.started_at_ms,
-                    log_file: running.log_file.clone(),
-                    config_id: running.config_id.clone(),
-                })
-                .collect::<Vec<_>>()
+            state.managed.values().cloned().collect::<Vec<_>>()
         };
         write_running_registry(self.root.as_path(), &records)
     }
@@ -1919,77 +2054,188 @@ fn acquire_instance_lock(run_dir: &Path) -> Result<File, String> {
     Ok(file)
 }
 
-fn cleanup_orphan_tasks(root: &Path) -> Result<(), String> {
+fn cleanup_orphan_tasks(root: &Path) -> Result<Vec<RunningTaskRecord>, String> {
     let path = running_registry_path(root);
     if !path.is_file() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let raw =
         fs::read_to_string(&path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
     let records: Vec<RunningTaskRecord> = serde_json::from_str(&raw).unwrap_or_default();
+    let mut remaining = Vec::new();
     for record in records {
-        if let Err(error) = terminate_orphan(record.id.as_str(), record.pid as i32, record.pgid) {
+        if let Err(error) = terminate_orphan(&record) {
             eprintln!(
                 "cleanup orphan task {} (pid {}): {error}",
                 record.id, record.pid
             );
+            if process_group_alive(&record) {
+                remaining.push(record);
+            }
         }
     }
-    write_running_registry(root, &[])
+    write_running_registry(root, &remaining)?;
+    Ok(remaining)
 }
 
-fn process_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
+fn running_task_record(uuid: &str, running: &RunningTask) -> RunningTaskRecord {
+    let pid = running.child.id();
+    let process = read_process_info(pid as i32);
+    RunningTaskRecord {
+        uuid: uuid.to_string(),
+        prefix_path: running.prefix_path.clone(),
+        id: running.id.clone(),
+        pid,
+        pgid: process.as_ref().map(|item| item.pgid).unwrap_or(pid as i32),
+        sid: process.as_ref().map(|item| item.sid).unwrap_or_default(),
+        leader_start_time_ticks: process
+            .as_ref()
+            .map(|item| item.start_time_ticks)
+            .unwrap_or_default(),
+        started_at_ms: running.started_at_ms,
+        log_file: running.log_file.clone(),
+        config_id: running.config_id.clone(),
     }
-    unsafe { libc::kill(pid, 0) == 0 }
 }
 
-fn process_group_id(pid: i32) -> Option<i32> {
-    let pgid = unsafe { libc::getpgid(pid) };
-    if pgid < 0 {
-        None
-    } else {
-        Some(pgid)
+fn child_process_record(id: &str, child: &Child) -> RunningTaskRecord {
+    let pid = child.id();
+    let process = read_process_info(pid as i32);
+    RunningTaskRecord {
+        uuid: String::new(),
+        prefix_path: String::new(),
+        id: id.to_string(),
+        pid,
+        pgid: process.as_ref().map(|item| item.pgid).unwrap_or(pid as i32),
+        sid: process.as_ref().map(|item| item.sid).unwrap_or_default(),
+        leader_start_time_ticks: process
+            .as_ref()
+            .map(|item| item.start_time_ticks)
+            .unwrap_or_default(),
+        started_at_ms: now_ms(),
+        log_file: String::new(),
+        config_id: None,
     }
 }
 
-fn terminate_orphan(id: &str, pid: i32, pgid: i32) -> Result<(), String> {
-    if !process_alive(pid) {
+fn read_process_info(pid: i32) -> Option<ProcessInfo> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let name_start = stat.find('(')?;
+    let name_end = stat.rfind(')')?;
+    let name = stat[name_start + 1..name_end].to_string();
+    let fields = stat[name_end + 1..].split_whitespace().collect::<Vec<_>>();
+    let state = fields.first()?.chars().next()?;
+    let ppid = fields.get(1)?.parse().ok()?;
+    let pgid = fields.get(2)?.parse().ok()?;
+    let sid = fields.get(3)?.parse().ok()?;
+    let start_time_ticks = fields.get(19)?.parse().ok()?;
+    let command = fs::read(format!("/proc/{pid}/cmdline"))
+        .ok()
+        .map(|raw| {
+            raw.split(|byte| *byte == 0)
+                .filter(|part| !part.is_empty())
+                .map(|part| String::from_utf8_lossy(part))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|command| !command.is_empty())
+        .unwrap_or_else(|| name.clone());
+    Some(ProcessInfo {
+        pid,
+        ppid,
+        pgid,
+        sid,
+        state,
+        start_time_ticks,
+        name,
+        command,
+    })
+}
+
+fn processes_in_group(record: &RunningTaskRecord) -> Vec<ProcessInfo> {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut processes = entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<i32>().ok())
+        .filter_map(read_process_info)
+        .filter(|process| process.state != 'Z')
+        .filter(|process| process.pgid == record.pgid)
+        .filter(|process| record.sid <= 0 || process.sid == record.sid)
+        .filter(|process| {
+            record.leader_start_time_ticks == 0
+                || process.start_time_ticks >= record.leader_start_time_ticks
+        })
+        .collect::<Vec<_>>();
+    processes.sort_by_key(|process| process.pid);
+    processes
+}
+
+fn process_group_alive(record: &RunningTaskRecord) -> bool {
+    !processes_in_group(record).is_empty()
+}
+
+fn wait_for_process_group_exit(record: &RunningTaskRecord, attempts: usize) -> bool {
+    for _ in 0..attempts {
+        if !process_group_alive(record) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    !process_group_alive(record)
+}
+
+fn terminate_orphan(record: &RunningTaskRecord) -> Result<(), String> {
+    if !process_group_alive(record) {
         return Ok(());
     }
-    if process_group_id(pid) != Some(pgid) {
+    signal_process_group(record, libc::SIGTERM)?;
+    if wait_for_process_group_exit(record, 20) {
         return Ok(());
     }
-    signal_process_group(id, pid, libc::SIGTERM)?;
-    std::thread::sleep(Duration::from_millis(100));
-    if process_alive(pid) {
-        signal_process_group(id, pid, libc::SIGKILL)?;
+    signal_process_group(record, libc::SIGKILL)?;
+    if !wait_for_process_group_exit(record, 20) {
+        return Err(format!(
+            "task {} process group {} is still alive after SIGKILL",
+            record.id, record.pgid
+        ));
     }
     Ok(())
 }
 
-fn signal_process_group(id: &str, pid: i32, signal: i32) -> Result<(), String> {
-    if unsafe { libc::killpg(pid, signal) } != 0 {
-        if unsafe { libc::kill(pid, signal) } != 0 {
-            return Err(format!("signal task {id} (pid {pid}) failed"));
+fn signal_process_group(record: &RunningTaskRecord, signal: i32) -> Result<(), String> {
+    if unsafe { libc::killpg(record.pgid, signal) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(format!(
+                "signal task {} process group {} failed: {error}",
+                record.id, record.pgid
+            ));
         }
     }
     Ok(())
 }
 
-fn terminate_task(id: &str, child: &mut Child) -> Result<(), String> {
-    let pid = child.id() as i32;
-    signal_process_group(id, pid, libc::SIGTERM)?;
+fn terminate_task(record: &RunningTaskRecord, child: &mut Child) -> Result<(), String> {
+    signal_process_group(record, libc::SIGTERM)?;
     for _ in 0..20 {
-        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+        let exited = child.try_wait().map_err(|e| e.to_string())?.is_some();
+        if exited && !process_group_alive(record) {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    signal_process_group(id, pid, libc::SIGKILL)?;
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
+    signal_process_group(record, libc::SIGKILL)?;
+    let _ = child.wait();
+    if wait_for_process_group_exit(record, 20) {
+        Ok(())
+    } else {
+        Err(format!(
+            "task {} process group {} is still alive after SIGKILL",
+            record.id, record.pgid
+        ))
+    }
 }
 
 fn create_log_file(
@@ -3490,6 +3736,8 @@ command:
             id: "demo".into(),
             pid: 4242,
             pgid: 4242,
+            sid: 4242,
+            leader_start_time_ticks: 1,
             started_at_ms: 1,
             log_file: "demo.log".into(),
             config_id: None,
@@ -3506,6 +3754,34 @@ command:
             "[]"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn orphan_cleanup_kills_group_after_leader_exits() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "trap '' HUP; sleep 30 &"]);
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+        let mut leader = command.spawn().unwrap();
+        let record = child_process_record("orphan-test", &leader);
+        leader.wait().unwrap();
+        for _ in 0..20 {
+            if process_group_alive(&record) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(process_group_alive(&record));
+        terminate_orphan(&record).unwrap();
+        assert!(!process_group_alive(&record));
     }
 
     #[test]

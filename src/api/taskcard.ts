@@ -168,6 +168,36 @@ export function stopAllTasks() {
   return invoke<string[]>("taskcard_stop_all");
 }
 
+export interface ManagedProcessInfo {
+  pid: number;
+  ppid: number;
+  name: string;
+  command: string;
+  state: string;
+}
+
+export interface ManagedProcessGroup {
+  uuid: string;
+  prefix_path: string;
+  task_id: string;
+  leader_pid: number;
+  pgid: number;
+  started_at_ms: number;
+  log_file: string;
+  config_id?: string | null;
+  task_running: boolean;
+  orphaned: boolean;
+  processes: ManagedProcessInfo[];
+}
+
+export function fetchManagedProcesses() {
+  return invoke<ManagedProcessGroup[]>("managed_processes");
+}
+
+export function stopManagedProcesses(uuid: string) {
+  return invoke<void>("stop_managed_processes", { uuid });
+}
+
 export function resetDefinitionUuid(path: string) {
   return invoke<string>("taskcard_reset_uuid", { path });
 }

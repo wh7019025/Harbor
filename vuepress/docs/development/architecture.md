@@ -22,7 +22,7 @@ harbor_core
 ├── Process supervisor
 ├── Runtime state
 ├── Log storage
-└── HTTP API v1 (revision 4)
+└── HTTP API v1 (revision 6)
 ```
 
 ## 数据职责
@@ -45,6 +45,8 @@ GUI 不直接启动用户 Task，也不保存任务运行状态。
 Core 负责扫描 YAML、补齐和校验 UUID、启动进程树、记录日志，并通过 HTTP API 暴露实时状态。
 
 一台机器只允许一个 Core 实例。GUI 退出不会终止 Core 或它已经托管的 Task。
+
+Core 自身正常退出时会回收全部托管进程组。GUI 退出与 Core 退出是两个不同的生命周期事件。
 
 ### 项目配置
 
@@ -88,6 +90,8 @@ GUI 使用 `~/.harbor/core/<version>/harbor_core` 中的 release 产物，并校
 ## 运行原则
 
 Task UUID 是进程唯一键。同一台机器不允许相同 UUID 同时运行多个实例；Workspace 和项目路径仅决定如何发现定义，不决定进程身份。
+
+Core 为每次 Task 启动记录 leader PID、PGID、session 和启动时刻，并从 `/proc` 读取实际进程成员、程序名与命令。任务状态由 leader 决定，但托管记录会保留到整个进程组退出，因此 leader 先退出时仍能发现和终止残留子进程。运行记录保存在机器级 `~/.harbor/runtime/run/tasks.json`，不放在 `/tmp`，避免 Core 异常退出后丢失清理依据。
 
 ## 数据位置
 

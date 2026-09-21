@@ -490,9 +490,8 @@ fn terminate_pid(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGTERM);
     }
-    for _ in 0..20 {
-        let alive = unsafe { libc::kill(pid, 0) == 0 };
-        if !alive {
+    for _ in 0..200 {
+        if !pid_is_running(pid) {
             return;
         }
         thread::sleep(Duration::from_millis(50));
@@ -500,6 +499,32 @@ fn terminate_pid(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGKILL);
     }
+}
+
+fn pid_is_running(pid: i32) -> bool {
+    if unsafe { libc::kill(pid, 0) != 0 } {
+        return false;
+    }
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| stat.rfind(')').map(|end| stat[end + 1..].to_string()))
+        .and_then(|fields| fields.split_whitespace().next().map(str::to_string))
+        .is_none_or(|state| state != "Z")
+}
+
+fn remote_terminate_script(pid: &str) -> String {
+    format!(
+        r#"if kill -0 {pid} 2>/dev/null; then
+  kill {pid} 2>/dev/null || true
+  for attempt in $(seq 1 100); do
+    kill -0 {pid} 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 {pid} 2>/dev/null; then
+    kill -9 {pid} 2>/dev/null || true
+  fi
+fi"#
+    )
 }
 
 fn stop_local_core() {
@@ -749,21 +774,17 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
         ));
     }
     let stop = if let Some(pid) = running_pid {
-        format!(
-            r#"if kill -0 {pid} 2>/dev/null; then
-  kill {pid} 2>/dev/null || true
-  sleep 0.4
-fi"#
-        )
+        remote_terminate_script(pid.to_string().as_str())
     } else {
-        r#"if [ -f "$HOME/.harbor/run/harbor_core.pid" ]; then
+        format!(
+            r#"if [ -f "$HOME/.harbor/run/harbor_core.pid" ]; then
   old=$(cat "$HOME/.harbor/run/harbor_core.pid")
-  if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then
-    kill "$old" 2>/dev/null || true
-    sleep 0.4
+  if [ -n "$old" ]; then
+{}
   fi
-fi"#
-        .to_string()
+fi"#,
+            remote_terminate_script("\"$old\"")
+        )
     };
     ssh_run(ssh, stop.as_str())?;
     let dest = format!("\"$HOME/{dir}/harbor_core\"");

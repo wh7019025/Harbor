@@ -24,8 +24,8 @@ use crate::taskcard::{GroupDefinition, TaskCardService, TaskCardYamlDocument, Ta
 use crate::version::APP_VERSION;
 
 pub const WEB_API_PORT: u16 = 29385;
-pub const CORE_API_REVISION: u32 = 5;
-const CORE_API_REVISION_HEADER: &str = "5";
+pub const CORE_API_REVISION: u32 = 6;
+const CORE_API_REVISION_HEADER: &str = "6";
 const ACCESS_LEASE_TTL: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Debug, Default)]
@@ -42,7 +42,9 @@ struct AccessClaim {
 }
 
 fn access_status(lease: &mut CoreAccessLease) -> Value {
-    let elapsed = lease.refreshed_at.map(|refreshed_at| refreshed_at.elapsed());
+    let elapsed = lease
+        .refreshed_at
+        .map(|refreshed_at| refreshed_at.elapsed());
     if elapsed.is_some_and(|elapsed| elapsed >= ACCESS_LEASE_TTL) {
         *lease = CoreAccessLease::default();
     }
@@ -128,6 +130,11 @@ struct TaskAction {
     sudo_password: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ManagedProcessAction {
+    uuid: String,
+}
+
 pub fn bind_addr(localhost_only: bool) -> SocketAddr {
     if localhost_only {
         SocketAddr::from(([127, 0, 0, 1], WEB_API_PORT))
@@ -159,6 +166,8 @@ pub fn router(state: WebApiState) -> Router {
         .route("/api/v1/tasks/stop", post(stop_task))
         .route("/api/v1/tasks/restart", post(restart_task))
         .route("/api/v1/tasks/stop-all", post(stop_all_tasks))
+        .route("/api/v1/processes", get(list_managed_processes))
+        .route("/api/v1/processes/stop", post(stop_managed_processes))
         .route(
             "/api/v1/tasks/yaml",
             get(read_task_yaml)
@@ -293,7 +302,9 @@ async fn claim_access(
     State(state): State<WebApiState>,
     payload: Result<Json<AccessClaim>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
-    let claim = payload.map_err(|error| ApiError::BadRequest(error.body_text()))?.0;
+    let claim = payload
+        .map_err(|error| ApiError::BadRequest(error.body_text()))?
+        .0;
     if claim.client_id.trim().is_empty() || claim.gui_version.trim().is_empty() {
         return Err(ApiError::BadRequest(
             "client_id and gui_version are required".into(),
@@ -317,7 +328,9 @@ async fn release_access(
     State(state): State<WebApiState>,
     payload: Result<Json<AccessClaim>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
-    let claim = payload.map_err(|error| ApiError::BadRequest(error.body_text()))?.0;
+    let claim = payload
+        .map_err(|error| ApiError::BadRequest(error.body_text()))?
+        .0;
     let mut lease = state.access.lock();
     access_status(&mut lease);
     if lease.client_id.as_deref() == Some(claim.client_id.as_str()) {
@@ -463,6 +476,23 @@ async fn restart_task(
 
 async fn stop_all_tasks(State(state): State<WebApiState>) -> Json<Value> {
     Json(json!({ "errors": state.taskcard.lock().stop_all() }))
+}
+
+async fn list_managed_processes(State(state): State<WebApiState>) -> Json<Value> {
+    Json(json!({ "groups": state.taskcard.lock().managed_processes() }))
+}
+
+async fn stop_managed_processes(
+    State(state): State<WebApiState>,
+    payload: Result<Json<ManagedProcessAction>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let Json(action) = payload.map_err(|error| ApiError::BadRequest(error.body_text()))?;
+    state
+        .taskcard
+        .lock()
+        .stop_managed_processes(action.uuid.trim())
+        .map_err(map_service_error)?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn start_group(
@@ -1171,7 +1201,10 @@ command:
 
         let (status, body) = send(state.clone(), claim("gui-b")).await;
         assert_eq!(status, StatusCode::CONFLICT);
-        assert!(body["error"].as_str().unwrap().contains("managed by Harbor"));
+        assert!(body["error"]
+            .as_str()
+            .unwrap()
+            .contains("managed by Harbor"));
 
         let release = Request::builder()
             .method("POST")
@@ -1279,6 +1312,7 @@ command:
             "/api/v1/tasks/status",
             "/api/v1/tasks/yaml",
             "/api/v1/tasks/template",
+            "/api/v1/processes",
             "/api/v1/groups",
             "/api/v1/groups/yaml",
             "/api/v1/groups/template",
@@ -1299,6 +1333,7 @@ command:
             "/api/v1/tasks/stop",
             "/api/v1/tasks/restart",
             "/api/v1/tasks/stop-all",
+            "/api/v1/processes/stop",
             "/api/v1/tasks/yaml",
             "/api/v1/groups/start",
             "/api/v1/groups/stop",

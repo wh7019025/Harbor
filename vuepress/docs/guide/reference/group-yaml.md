@@ -6,7 +6,7 @@ createTime: 2026/09/20 00:44:43
 # Group YAML
 
 ```yaml
-version: "0.2.0-preview.3"
+version: "0.2.0-preview.4"
 uuid: 4c9e2d73-6b15-4f80-a271-95d38c7e1a42
 id: system-info
 name: System Info

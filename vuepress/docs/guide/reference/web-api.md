@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # Web API
 
-Core 默认监听端口 `29385`，当前 API revision 为 **5**，基础路径为：
+Core 默认监听端口 `29385`，当前 API revision 为 **6**，基础路径为：
 
 ```text
 http://<host>:29385/api/v1
@@ -51,6 +51,15 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | `POST` | `/groups/stop` | 停止 Group。 |
 | `GET/POST/PUT/DELETE` | `/groups/yaml` | 读取、新建、更新或删除 Group YAML。 |
 | `GET` | `/groups/template` | 获取 Group 模板。 |
+
+## 托管进程
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/processes` | 列出 Harbor 启动且仍存活的进程组与成员进程。 |
+| `POST` | `/processes/stop` | 使用 Task UUID 终止一个托管进程组。 |
+
+任务主进程退出后，只要原进程组仍有成员，记录就不会消失。GUI 的任务管理器会将这种运行单元标记为“残留进程”。
 
 ## 日志、Workspace 与路径
 

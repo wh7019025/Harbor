@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`5`。
+- 当前 `api_revision`：`6`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -56,6 +56,8 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 | POST | `/api/v1/tasks/stop` | `{ "id", "prefix_path?" }` | `{ "ok": true }` |
 | POST | `/api/v1/tasks/restart` | 同 start | `{ "ok": true }` |
 | POST | `/api/v1/tasks/stop-all` | `{}` | `{ "errors": string[] }`；逐个停止，返回失败项 |
+| GET | `/api/v1/processes` | - | Harbor 启动且仍存活的进程组、PID、程序名与命令 |
+| POST | `/api/v1/processes/stop` | `{ "uuid" }` | 终止指定 Task UUID 的整个托管进程组 |
 | GET | `/api/v1/groups` | - | `{ "groups": GroupDefinition[] }` |
 | POST | `/api/v1/groups/start` | `{ "id", "prefix_path?", "sudo_password?" }` | `{ "ok": true }` |
 | POST | `/api/v1/groups/stop` | `{ "id", "prefix_path?" }` | `{ "ok": true }` |

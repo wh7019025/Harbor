@@ -72,7 +72,7 @@ Harbor 会在启动第一个 Task 前检查完整引用，避免因为名称错�
 Group 配置保存在项目的 `harbor_taskcfg/groups/` 中：
 
 ```yaml
-version: "0.2.0-preview.3"
+version: "0.2.0-preview.4"
 id: robot-bringup
 name: Robot Bringup
 description: 依次启动驱动和控制面板

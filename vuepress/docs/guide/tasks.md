@@ -72,6 +72,14 @@ Harbor 会为新 Task 生成 UUID。不要从其他 Task 复制 UUID，它是 Ha
 
 ![Task 在 Stopped 与单实例 Running 状态之间切换](/images/task-lifecycle.svg)
 
+## 查看托管进程
+
+顶部的任务管理器按钮会列出 Harbor 启动且仍然存活的进程，包括 PID、程序名和命令。
+
+正常运行的 Task 显示为“运行中”。如果 Task 主进程已经退出，但它启动的相机、驱动或其他子进程仍留在原进程组中，Harbor 会将其标记为“残留进程”；可以在任务管理器中手动终止整个运行单元。
+
+Core 正常退出时会停止全部托管进程组。若 Core 被强制结束，新 Core 会根据 `~/.harbor/runtime/run/tasks.json` 清理上次留下的运行单元。
+
 ## 使用运行配置
 
 同一个程序需要几种稳定运行方式时，可以为 Task 添加 config。例如：

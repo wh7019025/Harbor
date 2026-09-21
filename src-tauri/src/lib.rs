@@ -533,6 +533,20 @@ fn taskcard_stop_all(state: State<'_, Arc<AppState>>) -> Result<Vec<String>, Str
 }
 
 #[tauri::command]
+fn managed_processes(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<harbor_core::taskcard::ManagedProcessGroup>, String> {
+    with_core(state.inner(), core_client::managed_processes)
+}
+
+#[tauri::command]
+fn stop_managed_processes(state: State<'_, Arc<AppState>>, uuid: String) -> Result<(), String> {
+    with_core(state.inner(), |settings| {
+        core_client::stop_managed_processes(settings, uuid.as_str())
+    })
+}
+
+#[tauri::command]
 fn taskcard_reset_uuid(state: State<'_, Arc<AppState>>, path: String) -> Result<String, String> {
     with_core(state.inner(), |settings| {
         core_client::reset_definition_uuid(settings, path.as_str())
@@ -837,6 +851,8 @@ pub fn run() {
             taskcard_stop_task,
             taskcard_restart_task,
             taskcard_stop_all,
+            managed_processes,
+            stop_managed_processes,
             taskcard_reset_uuid,
             taskcard_start_group,
             taskcard_stop_group,

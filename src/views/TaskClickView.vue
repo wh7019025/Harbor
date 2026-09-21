@@ -6,6 +6,7 @@ import {
   Globe2,
   KeyRound,
   Layers3,
+  ListTree,
   LoaderCircle,
   Monitor,
   Pencil,
@@ -28,6 +29,7 @@ import AgentSkillPanel from "../components/AgentSkillPanel.vue";
 import HistoricalLogViewer from "../components/HistoricalLogViewer.vue";
 import LiveLogViewer from "../components/LiveLogViewer.vue";
 import MonacoEditor from "../components/MonacoEditor.vue";
+import ProcessManagerPanel from "../components/ProcessManagerPanel.vue";
 import SettingPanel from "../components/SettingPanel.vue";
 import SelectField from "../components/SelectField.vue";
 import TaskMetricsFooter from "../components/TaskMetricsFooter.vue";
@@ -91,9 +93,11 @@ const refreshing = ref(false);
 const pathsPanelOpen = ref(false);
 const settingsPanelOpen = ref(false);
 const agentSkillPanelOpen = ref(false);
+const processManagerOpen = ref(false);
 const BACKDROP_DISMISS_GUARD_MS = 300;
 const settingsOpenedAt = ref(0);
 const agentSkillOpenedAt = ref(0);
+const processManagerOpenedAt = ref(0);
 const yamlEditorOpenedAt = ref(0);
 const newSearchPath = ref("");
 const pathSuggestions = ref<string[]>([]);
@@ -778,6 +782,19 @@ function dismissAgentSkillBackdrop() {
   dismissOverlayBackdrop(agentSkillOpenedAt.value, closeAgentSkillPanel);
 }
 
+function openProcessManager() {
+  processManagerOpenedAt.value = Date.now();
+  processManagerOpen.value = true;
+}
+
+function closeProcessManager() {
+  processManagerOpen.value = false;
+}
+
+function dismissProcessManagerBackdrop() {
+  dismissOverlayBackdrop(processManagerOpenedAt.value, closeProcessManager);
+}
+
 function closeSudoPrompt() {
   sudoPassword.value = "";
   sudoPrompt.value = null;
@@ -1276,6 +1293,9 @@ onBeforeUnmount(() => {
           @click="run('stop-all', '停止全部', () => stopAllTasks().then(() => undefined))"
         >
           <Square class="h-3.5 w-3.5" />
+        </button>
+        <button class="btn !px-2 !py-1" type="button" title="Harbor 任务管理器" @click="openProcessManager">
+          <ListTree class="h-3.5 w-3.5" />
         </button>
         <button class="btn !px-2 !py-1" type="button" title="Harbor 官方文档" @click="openDocumentation">
           <BookOpen class="h-3.5 w-3.5" />
@@ -1907,6 +1927,24 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <AgentSkillPanel @close="closeAgentSkillPanel" />
+      </div>
+    </div>
+
+    <div
+      v-if="processManagerOpen"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      @click.self="dismissProcessManagerBackdrop"
+    >
+      <div
+        class="flex h-[min(700px,calc(100vh-2rem))] w-[min(900px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border border-[var(--line)] bg-[var(--bg-1)]"
+      >
+        <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
+          <h3 class="text-sm font-medium">Harbor 任务管理器</h3>
+          <button class="btn !px-2 !py-1" type="button" @click="closeProcessManager">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <ProcessManagerPanel />
       </div>
     </div>
 

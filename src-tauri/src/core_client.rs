@@ -4,8 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use harbor_core::settings::{Settings, Workspace, WorkspaceMode};
 use harbor_core::taskcard::{
-    ResearchResult, TaskCardSnapshot, TaskCardYamlDocument, TaskLogChunk, TaskLogContent,
-    TaskLogSummary,
+    ManagedProcessGroup, ResearchResult, TaskCardSnapshot, TaskCardYamlDocument, TaskLogChunk,
+    TaskLogContent, TaskLogSummary,
 };
 use harbor_core::version::APP_VERSION;
 use harbor_core::web_api::{CORE_API_REVISION, WEB_API_PORT};
@@ -447,6 +447,16 @@ pub fn stop_task(settings: &Settings, prefix_path: &str, id: &str) -> Result<(),
         "/api/v1/tasks/stop",
         json!({ "id": id, "prefix_path": prefix_path }),
     )
+}
+
+pub fn managed_processes(settings: &Settings) -> Result<Vec<ManagedProcessGroup>, String> {
+    let body: Value = core_get(settings, "/api/v1/processes")?;
+    serde_json::from_value(body.get("groups").cloned().unwrap_or_else(|| json!([])))
+        .map_err(|error| format!("decode managed processes failed: {error}"))
+}
+
+pub fn stop_managed_processes(settings: &Settings, uuid: &str) -> Result<(), String> {
+    core_post_ok(settings, "/api/v1/processes/stop", json!({ "uuid": uuid }))
 }
 
 pub fn restart_task(

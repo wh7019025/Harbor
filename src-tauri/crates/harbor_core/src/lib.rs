@@ -190,12 +190,35 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         access: Arc::new(Mutex::new(CoreAccessLease::default())),
         localhost_only: args.localhost_only,
     };
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+    let shutdown_taskcard = state.taskcard.clone();
+    let serve_result = axum::serve(listener, router(state))
+        .with_graceful_shutdown(shutdown_signal())
         .await
-        .map_err(|error| format!("harbor_core server failed: {error}"))
+        .map_err(|error| format!("harbor_core server failed: {error}"));
+
+    // --- 阶段 4：Core 正常退出前回收所有托管进程组 ---
+    let errors = shutdown_taskcard.lock().stop_all();
+    for error in errors {
+        crate::app_log::core(&format!("stop task during core shutdown failed: {error}"));
+    }
+    serve_result
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 #[cfg(test)]
