@@ -76,6 +76,13 @@ const coreConnection = computed(() => {
     return { text: `已连接 ${target} · 正常`, tone: "text-[var(--muted)]", dot: "bg-[var(--running)]" };
   }
   if (status.reachable) {
+    if (status.access_occupied && status.access_owner_version) {
+      return {
+        text: `已连接 ${target} · Harbor ${status.access_owner_version} 使用中`,
+        tone: "text-[var(--warn)]",
+        dot: "bg-[var(--warn)]",
+      };
+    }
     return { text: `已连接 ${target} · 版本不符`, tone: "text-[var(--warn)]", dot: "bg-[var(--warn)]" };
   }
   return { text: `未连接 ${target} · 已关闭`, tone: "text-[var(--danger)]", dot: "bg-[var(--danger)]" };

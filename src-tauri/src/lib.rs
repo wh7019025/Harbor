@@ -140,6 +140,7 @@ async fn switch_workspace(
     }
     close_workspace_terminal(&app, state.inner());
     close_panel_tunnels(&app, state.inner());
+    core_process::release_core(&settings);
     settings.current_workspace = id;
     settings.normalize();
     persist_settings(state.inner(), settings.clone())?;
@@ -199,6 +200,9 @@ fn update_workspace(
     }
     let mode = mode.unwrap_or_default();
     let ssh = normalize_workspace_ssh(&mode, ssh)?;
+    if state.settings.lock().current_workspace == id {
+        core_process::release_core(&current_settings(state.inner()));
+    }
     close_workspace_terminal(&app, state.inner());
     close_panel_tunnels(&app, state.inner());
     let mut settings = state.settings.lock().clone();
@@ -239,6 +243,7 @@ fn delete_workspace(
         return Err(format!("workspace not found: {id}"));
     }
     if settings.current_workspace == id {
+        core_process::release_core(&settings);
         close_workspace_terminal(&app, state.inner());
         close_panel_tunnels(&app, state.inner());
         settings.current_workspace = settings
@@ -262,9 +267,16 @@ async fn get_harbor_core_status(
     state: State<'_, Arc<AppState>>,
 ) -> Result<HarborCoreStatus, String> {
     let settings = current_settings(state.inner());
-    tauri::async_runtime::spawn_blocking(move || core_client::core_status(&settings))
-        .await
-        .map_err(|error| format!("core status worker failed: {error}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut status = core_client::core_status(&settings);
+        if status.compatible && core_process::heartbeat_core(&settings).is_ok() {
+            status.access_occupied = true;
+            status.access_owner_version = Some(harbor_core::version::APP_VERSION.to_string());
+        }
+        status
+    })
+    .await
+    .map_err(|error| format!("core status worker failed: {error}"))
 }
 
 #[tauri::command]
@@ -873,6 +885,8 @@ pub fn run() {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        let state = handle.state::<Arc<AppState>>();
+                        core_process::release_core(&current_settings(state.inner()));
                         handle.exit(0);
                     }
                 });

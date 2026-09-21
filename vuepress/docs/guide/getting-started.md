@@ -36,7 +36,7 @@ GitHub Releases 提供的是可直接安装的发行二进制文件。普通用�
 在任意项目中创建 `harbor_taskcfg/tasks/hello.yaml`：
 
 ```yaml
-version: "0.2.0-preview.2"
+version: "0.2.0-preview.3"
 id: hello
 name: Hello Harbor
 description: 每秒输出一条问候信息

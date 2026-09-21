@@ -1,4 +1,6 @@
+use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use harbor_core::settings::{Settings, Workspace, WorkspaceMode};
 use harbor_core::taskcard::{
@@ -23,6 +25,16 @@ pub struct CoreHealth {
     pub localhost_only: bool,
     #[serde(default)]
     pub pid: u32,
+    #[serde(default)]
+    pub access: Option<CoreAccessStatus>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CoreAccessStatus {
+    pub occupied: bool,
+    pub owner_version: Option<String>,
+    #[serde(default)]
+    pub expires_in_ms: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -37,6 +49,8 @@ pub struct HarborCoreStatus {
     pub pid: Option<u32>,
     pub error: Option<String>,
     pub mode: String,
+    pub access_occupied: bool,
+    pub access_owner_version: Option<String>,
 }
 
 impl HarborCoreStatus {
@@ -55,8 +69,21 @@ impl HarborCoreStatus {
             mode: workspace
                 .map(|item| format!("{:?}", item.mode).to_lowercase())
                 .unwrap_or_else(|| "local".into()),
+            access_occupied: false,
+            access_owner_version: None,
         }
     }
+}
+
+pub fn gui_client_id() -> &'static str {
+    static CLIENT_ID: OnceLock<String> = OnceLock::new();
+    CLIENT_ID.get_or_init(|| {
+        let started_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        format!("gui-{}-{started_at}", std::process::id())
+    })
 }
 
 pub fn local_core_url() -> String {
@@ -209,6 +236,41 @@ pub fn fetch_health_url(base: &str) -> Result<CoreHealth, String> {
         .map_err(|error| format!("decode /api/v1/health failed: {error}"))
 }
 
+pub fn fetch_access_url(base: &str) -> Result<CoreAccessStatus, String> {
+    let url = format!("{base}/api/v1/access");
+    http_agent(probe_timeout())
+        .get(url.as_str())
+        .call()
+        .map_err(map_ureq)?
+        .into_json()
+        .map_err(|error| format!("decode /api/v1/access failed: {error}"))
+}
+
+pub fn claim_access_url(base: &str) -> Result<CoreAccessStatus, String> {
+    let url = format!("{base}/api/v1/access/claim");
+    http_agent(probe_timeout())
+        .post(url.as_str())
+        .send_json(json!({
+            "client_id": gui_client_id(),
+            "gui_version": APP_VERSION,
+        }))
+        .map_err(map_ureq)?
+        .into_json()
+        .map_err(|error| format!("decode /api/v1/access/claim failed: {error}"))
+}
+
+pub fn release_access(settings: &Settings) -> Result<(), String> {
+    let url = format!("{}/api/v1/access/release", core_base_url(settings)?);
+    http_agent(probe_timeout())
+        .post(url.as_str())
+        .send_json(json!({
+            "client_id": gui_client_id(),
+            "gui_version": APP_VERSION,
+        }))
+        .map_err(map_ureq)?;
+    Ok(())
+}
+
 pub fn core_status(settings: &Settings) -> HarborCoreStatus {
     let base = match core_base_url(settings) {
         Ok(base) => base,
@@ -258,6 +320,8 @@ pub fn core_status(settings: &Settings) -> HarborCoreStatus {
                 } else {
                     "local".into()
                 },
+                access_occupied: health.access.as_ref().is_some_and(|access| access.occupied),
+                access_owner_version: health.access.and_then(|access| access.owner_version),
             }
         }
         Ok(health) => {
@@ -276,6 +340,8 @@ pub fn core_status(settings: &Settings) -> HarborCoreStatus {
             } else {
                 Some(health.pid)
             };
+            status.access_occupied = health.access.as_ref().is_some_and(|access| access.occupied);
+            status.access_owner_version = health.access.and_then(|access| access.owner_version);
             status
         }
         Err(error) => HarborCoreStatus::from_error(settings, error),

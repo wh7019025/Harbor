@@ -1,4 +1,4 @@
-version: "0.2.0-preview.2"
+version: "0.2.0-preview.3"
 uuid: "cc965e33-8ec1-414a-b6cd-32db5f39e201"
 id: vnc-demo
 name: VNC Interface Demo

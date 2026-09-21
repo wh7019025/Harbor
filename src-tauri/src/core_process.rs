@@ -18,7 +18,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::core_client::{
-    fetch_health, fetch_health_url, local_core_url, switch_workspace, CoreHealth,
+    claim_access_url, fetch_access_url, fetch_health, fetch_health_url, local_core_url,
+    release_access, switch_workspace, CoreHealth,
 };
 
 const EXPECTED_CORE_SHA256: &str = env!("HARBOR_CORE_SHA256");
@@ -502,10 +503,15 @@ fn terminate_pid(pid: i32) {
 }
 
 fn stop_local_core() {
-    if let Ok(raw) = fs::read_to_string(core_pid_path()) {
-        if let Ok(pid) = raw.trim().parse::<i32>() {
-            terminate_pid(pid);
-        }
+    let health_pid = fetch_health_url(local_core_url().as_str())
+        .ok()
+        .and_then(|health| i32::try_from(health.pid).ok())
+        .filter(|pid| *pid > 0);
+    let file_pid = fs::read_to_string(core_pid_path())
+        .ok()
+        .and_then(|raw| raw.trim().parse::<i32>().ok());
+    if let Some(pid) = health_pid.or(file_pid) {
+        terminate_pid(pid);
     }
 }
 
@@ -535,7 +541,36 @@ fn spawn_local_core(workspace: &Workspace) -> Result<(), String> {
         .spawn()
         .map_err(|error| format!("start harbor_core failed: {error}"))?;
     wait_health(local_core_url().as_str(), Some(workspace.id.as_str()))?;
+    claim_compatible_access(local_core_url().as_str())?;
     Ok(())
+}
+
+fn claim_compatible_access(base: &str) -> Result<(), String> {
+    match claim_access_url(base) {
+        Ok(_) => Ok(()),
+        Err(error) => match fetch_access_url(base) {
+            Ok(access) if access.owner_version.as_deref() == Some(APP_VERSION) => Ok(()),
+            _ => Err(error),
+        },
+    }
+}
+
+fn require_replaceable_core(base: &str, health: &CoreHealth) -> Result<(), String> {
+    match claim_access_url(base) {
+        Ok(_) => Ok(()),
+        Err(claim_error) => match fetch_access_url(base) {
+            Ok(access) if access.occupied => Err(format!(
+            "harbor_core {} is in use by Harbor {}; automatic replacement is disabled",
+            health.version,
+            access.owner_version.as_deref().unwrap_or("unknown")
+        )),
+            Ok(_) => Err(claim_error),
+            Err(_) => Err(format!(
+                "harbor_core {} does not support access leases; automatic replacement is disabled, use force deploy after closing other Harbor windows",
+                health.version
+            )),
+        },
+    }
 }
 
 fn ensure_local_core(settings: &Settings, workspace: &Workspace) -> Result<(), String> {
@@ -548,7 +583,7 @@ fn ensure_local_core(settings: &Settings, workspace: &Workspace) -> Result<(), S
                 && managed_core_matches
                 && health.workspace_id == workspace.id =>
         {
-            Ok(())
+            claim_compatible_access(local_core_url().as_str())
         }
         Ok(health)
             if health.ok
@@ -556,13 +591,11 @@ fn ensure_local_core(settings: &Settings, workspace: &Workspace) -> Result<(), S
                 && health.api_revision == CORE_API_REVISION
                 && managed_core_matches =>
         {
+            claim_compatible_access(local_core_url().as_str())?;
             switch_workspace(settings, workspace.id.as_str())
         }
         Ok(health) if health.ok => {
-            harbor_core::app_log::gui(&format!(
-                "replace occupied harbor_core {} api={} pid={} with GUI core {APP_VERSION} api={CORE_API_REVISION}",
-                health.version, health.api_revision, health.pid
-            ));
+            require_replaceable_core(local_core_url().as_str(), &health)?;
             spawn_local_core(workspace)
         }
         _ => spawn_local_core(workspace),
@@ -577,9 +610,9 @@ fn remote_base(workspace: &Workspace) -> Result<String, String> {
     Ok(format!("http://{}:{WEB_API_PORT}", ssh.host.trim()))
 }
 
-fn remote_core_ready(settings: &Settings, workspace: &Workspace) -> bool {
+fn remote_core_ready(settings: &Settings, workspace: &Workspace) -> Result<bool, String> {
     let Ok(base) = remote_base(workspace) else {
-        return false;
+        return Ok(false);
     };
     match fetch_health_url(&base) {
         Ok(health)
@@ -588,23 +621,23 @@ fn remote_core_ready(settings: &Settings, workspace: &Workspace) -> bool {
                 && health.api_revision == CORE_API_REVISION
                 && health.workspace_id == workspace.id =>
         {
-            true
+            claim_compatible_access(base.as_str())?;
+            Ok(true)
         }
         Ok(health)
             if health.ok
                 && health.version == APP_VERSION
                 && health.api_revision == CORE_API_REVISION =>
         {
-            switch_workspace(settings, workspace.id.as_str()).is_ok()
+            claim_compatible_access(base.as_str())?;
+            switch_workspace(settings, workspace.id.as_str())?;
+            Ok(true)
         }
         Ok(health) if health.ok => {
-            harbor_core::app_log::gui(&format!(
-                "remote harbor_core {} api={} pid={} is occupied but incompatible; deploying {APP_VERSION} api={CORE_API_REVISION}",
-                health.version, health.api_revision, health.pid
-            ));
-            false
+            require_replaceable_core(base.as_str(), &health)?;
+            Ok(false)
         }
-        _ => false,
+        _ => Ok(false),
     }
 }
 
@@ -665,7 +698,7 @@ fn ensure_remote_core(settings: &Settings, workspace: &Workspace) -> Result<(), 
     if workspace.ssh.is_none() {
         return Err("remote workspace requires SSH settings".into());
     }
-    if remote_core_ready(settings, workspace) {
+    if remote_core_ready(settings, workspace)? {
         return Ok(());
     }
     kick_remote_deploy(workspace.clone());
@@ -691,6 +724,11 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
     let runtime = shared_objects(local_bin.as_path())?;
     let loader = loader_basename(&runtime);
     let dir = remote_core_dir();
+    let running_pid = remote_base(workspace)
+        .ok()
+        .and_then(|base| fetch_health_url(base.as_str()).ok())
+        .map(|health| health.pid)
+        .filter(|pid| *pid > 0);
     ssh_run(
         ssh,
         &format!("mkdir -p \"$HOME/{dir}\" \"$HOME/.harbor/run\" \"$HOME/.harbor/log\""),
@@ -710,16 +748,24 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
             "remote managed harbor_core hash mismatch: expected {EXPECTED_CORE_SHA256}, got {remote_hash}"
         ));
     }
-    ssh_run(
-        ssh,
+    let stop = if let Some(pid) = running_pid {
+        format!(
+            r#"if kill -0 {pid} 2>/dev/null; then
+  kill {pid} 2>/dev/null || true
+  sleep 0.4
+fi"#
+        )
+    } else {
         r#"if [ -f "$HOME/.harbor/run/harbor_core.pid" ]; then
   old=$(cat "$HOME/.harbor/run/harbor_core.pid")
   if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then
     kill "$old" 2>/dev/null || true
     sleep 0.4
   fi
-fi"#,
-    )?;
+fi"#
+        .to_string()
+    };
+    ssh_run(ssh, stop.as_str())?;
     let dest = format!("\"$HOME/{dir}/harbor_core\"");
     let mut chmod = format!("chmod +x {dest}");
     if let Some(loader) = loader.as_deref() {
@@ -767,6 +813,7 @@ fi
         }
         return Err(format!("{error}; remote log:\n{remote_log}"));
     }
+    claim_compatible_access(remote_base(workspace)?.as_str())?;
     bump_deploy_percent(100);
     Ok(())
 }
@@ -791,6 +838,14 @@ pub fn restart_core(settings: &Settings) -> Result<(), String> {
     } else {
         spawn_local_core(&workspace)
     }
+}
+
+pub fn heartbeat_core(settings: &Settings) -> Result<(), String> {
+    claim_compatible_access(crate::core_client::core_base_url(settings)?.as_str())
+}
+
+pub fn release_core(settings: &Settings) {
+    let _ = release_access(settings);
 }
 
 pub fn probe_core(settings: &Settings) -> Result<(), String> {

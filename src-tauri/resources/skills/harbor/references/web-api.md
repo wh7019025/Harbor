@@ -2,7 +2,7 @@
 
 `harbor_core` 在 **29385** 端口提供无需登录或令牌的 HTTP 接口。Harbor GUI 关闭后 **core 继续运行**，接口也还在。每台机器同一时间只允许一个 `harbor_core` 进程运行，不区分版本。
 
-Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且只执行 `.harbor/core/<version>/harbor_core` 中通过 SHA-256 校验的 release 托管副本。SSH 只用来把 **与 GUI 固化哈希一致** 的 release `harbor_core` 及其动态链接器/依赖库复制到远端 `.harbor` 后启动。所有响应带 `X-Harbor-Version` 和 `X-Harbor-Api-Revision`；版本、API 或托管文件哈希不对应时，当前 GUI 会关闭旧 core，再部署并启动匹配 core。
+Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且只执行 `.harbor/core/<version>/harbor_core` 中通过 SHA-256 校验的 release 托管副本。SSH 只用来把 **与 GUI 固化哈希一致** 的 release `harbor_core` 及其动态链接器/依赖库复制到远端 `.harbor` 后启动。所有响应带 `X-Harbor-Version` 和 `X-Harbor-Api-Revision`。GUI 通过短时访问租约协调 core 生命周期；版本不符但仍被其他 GUI 使用时，不会自动关闭或重装。
 
 启动参数 `--localhost-only`：
 
@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`4`。
+- 当前 `api_revision`：`5`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -38,6 +38,9 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 | 方法 | 路径 | 请求 | 成功响应 |
 |------|------|------|----------|
 | GET | `/api/v1/health` | - | `{ "ok", "version", "api_revision", "workspace_id", "localhost_only", "pid" }` |
+| GET | `/api/v1/access` | - | 当前 GUI 访问租约状态 |
+| POST | `/api/v1/access/claim` | `{ "client_id", "gui_version" }` | 获取或刷新租约；其他 GUI 已占用时返回 `409` |
+| POST | `/api/v1/access/release` | `{ "client_id", "gui_version" }` | 主动释放自己的租约 |
 | GET | `/api/v1/snapshot` | - | `TaskCardSnapshot`：当前 workspace 的 paths、tasks、groups、UUID 冲突与错误 |
 | POST | `/api/v1/discovery/refresh` | `{}` | `ResearchResult`：重新扫描后的目录与 search paths |
 | POST | `/api/v1/workspaces/switch` | `{ "id" }` | `{ "ok": true, "workspace_id" }` |

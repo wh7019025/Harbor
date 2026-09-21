@@ -39,6 +39,8 @@ export interface HarborCoreStatus {
   pid: number | null;
   error: string | null;
   mode: string;
+  access_occupied: boolean;
+  access_owner_version: string | null;
 }
 
 export function getSettings() {

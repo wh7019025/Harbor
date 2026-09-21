@@ -133,7 +133,13 @@ async function runCoreAction(key: string, action: () => Promise<HarborCoreStatus
         <span v-if="coreStatus.workspace_id"> · workspace {{ coreStatus.workspace_id }}</span>
       </p>
       <p class="readout mt-1 text-xs text-[var(--faint)]">
-        每台机器只运行一个 core；当前 Harbor 会自动替换版本不匹配的 core
+        每台机器只运行一个 core；使用中的 core 不会被其他 Harbor 自动替换
+      </p>
+      <p
+        v-if="coreStatus?.access_occupied && coreStatus.access_owner_version"
+        class="readout mt-1 text-xs text-[var(--warn)]"
+      >
+        Harbor {{ coreStatus.access_owner_version }} 正在管理此 core
       </p>
       <p
         v-if="coreStatus?.version && coreStatus.version !== version"
@@ -165,11 +171,11 @@ async function runCoreAction(key: string, action: () => Promise<HarborCoreStatus
           :disabled="!!coreBusy"
           @click="runCoreAction('restart', restartHarborCore)"
         >
-          {{ coreBusy === "restart" ? (isRemote ? "部署中…" : "重启中…") : isRemote ? "部署并重启" : "重启 core" }}
+          {{ coreBusy === "restart" ? (isRemote ? "强制部署中…" : "强制重启中…") : isRemote ? "强制部署" : "强制重启" }}
         </button>
       </div>
       <p class="readout mt-2 text-[11px] text-[var(--faint)]">
-        检查连接只读取状态；{{ isRemote ? "部署并重启会在需要时上传匹配版本，然后替换远程 core。" : "重启 core 会替换本机当前进程。" }}
+        检查连接只读取状态；{{ isRemote ? "强制部署会上传匹配版本并替换远程 core，请先关闭正在使用它的 Harbor。" : "强制重启会替换本机 core，请先关闭其他 Harbor。" }}
       </p>
     </div>
 

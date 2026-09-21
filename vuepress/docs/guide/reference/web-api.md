@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # Web API
 
-Core 默认监听端口 `29385`，当前 API revision 为 **4**，基础路径为：
+Core 默认监听端口 `29385`，当前 API revision 为 **5**，基础路径为：
 
 ```text
 http://<host>:29385/api/v1
@@ -15,11 +15,16 @@ http://<host>:29385/api/v1
 当前 API 没有鉴权。远端 Core 只能部署在可信局域网或受控网络中，禁止直接暴露到公网。
 :::
 
+Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理。其他版本发现 Core 正在使用时只显示占用状态，不会自动重装；该租约不是安全认证。
+
 ## 状态与发现
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/health` | Core 版本、API revision、进程和监听状态。 |
+| `GET` | `/access` | 查看 GUI 访问租约。 |
+| `POST` | `/access/claim` | 获取或刷新 GUI 访问租约。 |
+| `POST` | `/access/release` | 释放 GUI 访问租约。 |
 | `GET` | `/snapshot` | 一次获取 Workspace、Task、Group 与状态快照。 |
 | `POST` | `/discovery/refresh` | 重新扫描搜索路径。 |
 

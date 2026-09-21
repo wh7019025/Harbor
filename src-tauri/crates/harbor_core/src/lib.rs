@@ -14,7 +14,7 @@ use settings::{
     Workspace, WorkspaceMode,
 };
 use taskcard::TaskCardService;
-use web_api::{bind_addr, router, WebApiState};
+use web_api::{bind_addr, router, CoreAccessLease, WebApiState};
 
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -22,6 +22,16 @@ use std::sync::Arc;
 #[derive(Debug)]
 struct CoreInstanceLock {
     _file: File,
+}
+
+#[cfg(unix)]
+impl Drop for CoreInstanceLock {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        unsafe {
+            libc::flock(self._file.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 
 fn acquire_core_instance_at(path: &Path) -> Result<CoreInstanceLock, String> {
@@ -177,6 +187,7 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
     let state = WebApiState {
         taskcard: Arc::new(Mutex::new(taskcard)),
         settings: Arc::new(Mutex::new(settings)),
+        access: Arc::new(Mutex::new(CoreAccessLease::default())),
         localhost_only: args.localhost_only,
     };
     axum::serve(listener, router(state))
@@ -203,6 +214,8 @@ mod tests {
                 .as_nanos()
         ));
         let first = acquire_core_instance_at(&path).unwrap();
+        let owner = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(owner.trim().parse::<u32>().unwrap(), std::process::id());
         let error = acquire_core_instance_at(&path).unwrap_err();
         assert!(error.contains("already running"));
         drop(first);

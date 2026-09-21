@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener as StdTcpListener};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Json, Query, State};
@@ -24,13 +24,48 @@ use crate::taskcard::{GroupDefinition, TaskCardService, TaskCardYamlDocument, Ta
 use crate::version::APP_VERSION;
 
 pub const WEB_API_PORT: u16 = 29385;
-pub const CORE_API_REVISION: u32 = 4;
-const CORE_API_REVISION_HEADER: &str = "4";
+pub const CORE_API_REVISION: u32 = 5;
+const CORE_API_REVISION_HEADER: &str = "5";
+const ACCESS_LEASE_TTL: Duration = Duration::from_secs(8);
+
+#[derive(Clone, Debug, Default)]
+pub struct CoreAccessLease {
+    client_id: Option<String>,
+    gui_version: Option<String>,
+    refreshed_at: Option<Instant>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AccessClaim {
+    client_id: String,
+    gui_version: String,
+}
+
+fn access_status(lease: &mut CoreAccessLease) -> Value {
+    let elapsed = lease.refreshed_at.map(|refreshed_at| refreshed_at.elapsed());
+    if elapsed.is_some_and(|elapsed| elapsed >= ACCESS_LEASE_TTL) {
+        *lease = CoreAccessLease::default();
+    }
+    let remaining_ms = lease
+        .refreshed_at
+        .map(|refreshed_at| {
+            ACCESS_LEASE_TTL
+                .saturating_sub(refreshed_at.elapsed())
+                .as_millis() as u64
+        })
+        .unwrap_or_default();
+    json!({
+        "occupied": lease.client_id.is_some(),
+        "owner_version": lease.gui_version.clone(),
+        "expires_in_ms": remaining_ms,
+    })
+}
 
 #[derive(Clone)]
 pub struct WebApiState {
     pub taskcard: Arc<Mutex<TaskCardService>>,
     pub settings: Arc<Mutex<Settings>>,
+    pub access: Arc<Mutex<CoreAccessLease>>,
     pub localhost_only: bool,
 }
 
@@ -112,6 +147,9 @@ pub fn listen_url(localhost_only: bool) -> String {
 pub fn router(state: WebApiState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/access", get(get_access))
+        .route("/api/v1/access/claim", post(claim_access))
+        .route("/api/v1/access/release", post(release_access))
         .route("/api/v1/snapshot", get(serve_snapshot))
         .route("/api/v1/discovery/refresh", post(refresh_discovery))
         .route("/api/v1/tasks", get(list_tasks))
@@ -235,6 +273,7 @@ fn bind_listener(addr: SocketAddr) -> std::io::Result<StdTcpListener> {
 
 async fn health(State(state): State<WebApiState>) -> Json<Value> {
     let workspace_id = state.settings.lock().current_workspace.clone();
+    let access = access_status(&mut state.access.lock());
     Json(json!({
         "ok": true,
         "version": APP_VERSION,
@@ -242,7 +281,49 @@ async fn health(State(state): State<WebApiState>) -> Json<Value> {
         "workspace_id": workspace_id,
         "localhost_only": state.localhost_only,
         "pid": std::process::id(),
+        "access": access,
     }))
+}
+
+async fn get_access(State(state): State<WebApiState>) -> Json<Value> {
+    Json(access_status(&mut state.access.lock()))
+}
+
+async fn claim_access(
+    State(state): State<WebApiState>,
+    payload: Result<Json<AccessClaim>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let claim = payload.map_err(|error| ApiError::BadRequest(error.body_text()))?.0;
+    if claim.client_id.trim().is_empty() || claim.gui_version.trim().is_empty() {
+        return Err(ApiError::BadRequest(
+            "client_id and gui_version are required".into(),
+        ));
+    }
+    let mut lease = state.access.lock();
+    let status = access_status(&mut lease);
+    if status["occupied"] == true && lease.client_id.as_deref() != Some(claim.client_id.as_str()) {
+        let owner = lease.gui_version.as_deref().unwrap_or("unknown");
+        return Err(ApiError::Conflict(format!(
+            "harbor_core is managed by Harbor {owner}; close it or wait for its access lease to expire"
+        )));
+    }
+    lease.client_id = Some(claim.client_id);
+    lease.gui_version = Some(claim.gui_version);
+    lease.refreshed_at = Some(Instant::now());
+    Ok(Json(access_status(&mut lease)))
+}
+
+async fn release_access(
+    State(state): State<WebApiState>,
+    payload: Result<Json<AccessClaim>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let claim = payload.map_err(|error| ApiError::BadRequest(error.body_text()))?.0;
+    let mut lease = state.access.lock();
+    access_status(&mut lease);
+    if lease.client_id.as_deref() == Some(claim.client_id.as_str()) {
+        *lease = CoreAccessLease::default();
+    }
+    Ok(Json(access_status(&mut lease)))
 }
 
 async fn serve_snapshot(State(state): State<WebApiState>) -> Json<Value> {
@@ -991,6 +1072,7 @@ command:
             WebApiState {
                 taskcard: Arc::new(Mutex::new(service)),
                 settings: Arc::new(Mutex::new(Settings::default())),
+                access: Arc::new(Mutex::new(CoreAccessLease::default())),
                 localhost_only: true,
             },
             root,
@@ -1070,6 +1152,54 @@ command:
     }
 
     #[tokio::test]
+    async fn access_lease_rejects_a_second_gui() {
+        let (state, root) = test_service();
+        let claim = |client_id: &str| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/access/claim")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "client_id": client_id, "gui_version": APP_VERSION }).to_string(),
+                ))
+                .unwrap()
+        };
+        let (status, body) = send(state.clone(), claim("gui-a")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["occupied"], true);
+        assert_eq!(body["owner_version"], APP_VERSION);
+
+        let (status, body) = send(state.clone(), claim("gui-b")).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body["error"].as_str().unwrap().contains("managed by Harbor"));
+
+        let release = Request::builder()
+            .method("POST")
+            .uri("/api/v1/access/release")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({ "client_id": "gui-a", "gui_version": APP_VERSION }).to_string(),
+            ))
+            .unwrap();
+        let (status, body) = send(state, release).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["occupied"], false);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn expired_access_lease_becomes_available() {
+        let mut lease = CoreAccessLease {
+            client_id: Some("gui-a".into()),
+            gui_version: Some(APP_VERSION.into()),
+            refreshed_at: Some(Instant::now() - ACCESS_LEASE_TTL),
+        };
+        let status = access_status(&mut lease);
+        assert_eq!(status["occupied"], false);
+        assert!(lease.client_id.is_none());
+    }
+
+    #[tokio::test]
     async fn uuid_routes_generate_report_and_reset_conflicts() {
         let (state, root) = test_service();
         let task_dir = root.join("project/harbor_taskcfg/tasks");
@@ -1142,6 +1272,7 @@ command:
     async fn all_public_routes_are_registered() {
         const GET_ROUTES: &[&str] = &[
             "/api/v1/health",
+            "/api/v1/access",
             "/api/v1/snapshot",
             "/api/v1/tasks",
             "/api/v1/tasks/running",
@@ -1161,6 +1292,8 @@ command:
             "/api/v1/uuids/conflicts",
         ];
         const POST_ROUTES: &[&str] = &[
+            "/api/v1/access/claim",
+            "/api/v1/access/release",
             "/api/v1/discovery/refresh",
             "/api/v1/tasks/start",
             "/api/v1/tasks/stop",
