@@ -1,5 +1,7 @@
 export type LogCopyKind = "full" | "selection" | "tail";
 
+export const LIVE_LOG_LINE_LIMIT = 2048;
+
 export function tailLogLines(text: string, lineLimit: number | null) {
   if (lineLimit === null) return text;
   if (lineLimit <= 0 || !text) return "";

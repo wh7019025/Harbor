@@ -66,7 +66,7 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/logs/tasks` | 列出任务历史日志。 |
-| `GET` | `/logs/task` | 读取任务日志。 |
+| `GET` | `/logs/task` | 读取任务日志；传入 `offset` 时增量读取，`tail_lines` 可让首次读取直接定位到末尾指定行数。 |
 | `GET` | `/logs/core` | 读取 Core 日志。 |
 | `POST` | `/workspaces/switch` | 切换 Core 当前 Workspace。 |
 | `GET/POST/DELETE` | `/workspaces/search-paths` | 列出、添加或删除当前 Workspace 搜索路径。 |

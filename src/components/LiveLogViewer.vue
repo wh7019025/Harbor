@@ -15,7 +15,7 @@ const emit = defineEmits<{
 
 const viewport = ref<HTMLElement | null>(null);
 const stickToBottom = ref(true);
-let renderedLength = 0;
+let renderedContent = "";
 let ignoreScroll = false;
 let pointerSelecting = false;
 
@@ -60,32 +60,32 @@ function syncContent(reset = false) {
   if (!reset && shouldFreezeDom()) return;
 
   const next = displayContent.value;
-  if (reset || next.length < renderedLength) {
+  if (reset || !next.startsWith(renderedContent)) {
     el.textContent = next;
-    renderedLength = next.length;
+    renderedContent = next;
     if (shouldFollowLive()) scrollToBottom();
     return;
   }
 
-  if (next.length === renderedLength) return;
+  if (next === renderedContent) return;
 
   if (shouldFollowLive()) {
     let node = el.firstChild;
     if (!(node instanceof Text)) {
       el.textContent = next;
-      renderedLength = next.length;
+      renderedContent = next;
       scrollToBottom();
       return;
     }
-    node.appendData(next.slice(renderedLength));
-    renderedLength = next.length;
+    node.appendData(next.slice(renderedContent.length));
+    renderedContent = next;
     scrollToBottom();
     return;
   }
 
   const scrollTop = el.scrollTop;
   el.textContent = next;
-  renderedLength = next.length;
+  renderedContent = next;
   el.scrollTop = scrollTop;
 }
 
@@ -110,7 +110,7 @@ function onDocumentMouseUp() {
     return;
   }
   stickToBottom.value = isNearBottom(el);
-  if (renderedLength < displayContent.value.length) {
+  if (renderedContent !== displayContent.value) {
     syncContent(true);
     if (shouldFollowLive()) scrollToBottom();
     return;

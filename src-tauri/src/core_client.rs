@@ -688,12 +688,16 @@ pub fn read_log_chunk(
     settings: &Settings,
     file: &str,
     offset: u64,
+    tail_lines: Option<usize>,
 ) -> Result<TaskLogChunk, String> {
+    let tail_query = tail_lines
+        .map(|lines| format!("&tail_lines={lines}"))
+        .unwrap_or_default();
     core_get(
         settings,
         &format!(
-            "/api/v1/logs/task?file={}&offset={offset}",
-            urlencoding_loose(file)
+            "/api/v1/logs/task?file={}&offset={offset}{tail_query}",
+            urlencoding_loose(file),
         ),
     )
 }

@@ -2,10 +2,11 @@
 import {
   BookOpen,
   ChevronDown,
+  ExternalLink,
   FolderSearch,
-  Globe2,
   KeyRound,
   Layers3,
+  Link2,
   ListTree,
   LoaderCircle,
   Monitor,
@@ -35,7 +36,7 @@ import SettingPanel from "../components/SettingPanel.vue";
 import SelectField from "../components/SelectField.vue";
 import TaskMetricsFooter from "../components/TaskMetricsFooter.vue";
 import PathActions from "../components/PathActions.vue";
-import type { LogCopyKind } from "../lib/logCopy";
+import { LIVE_LOG_LINE_LIMIT, tailLogLines, type LogCopyKind } from "../lib/logCopy";
 import {
   addSearchPath,
   createGroupYaml,
@@ -183,6 +184,20 @@ const copyBarPercent = computed(() =>
 const logCopyLineLimit = computed(() => Number(logCopyLineChoice.value));
 const taskFolders = computed(() => groupByFolder(snapshot.value?.tasks ?? []));
 const groupFolders = computed(() => groupByFolder(snapshot.value?.groups ?? []));
+const webPanelShortcuts = computed(() =>
+  (snapshot.value?.tasks ?? [])
+    .filter((task) => task.status === "running")
+    .flatMap((task) =>
+      taskInterfaceUrls(task)
+        .filter((panel) => panel.kind === "webview")
+        .map((panel) => ({
+          key: `${task.uuid}:${panel.name}`,
+          task,
+          panelName: panel.name,
+          title: `打开 ${task.name} · ${panel.name}`,
+        })),
+    ),
+);
 const listedLogs = computed(() =>
   [...logs.value]
     .sort((left, right) => {
@@ -687,8 +702,12 @@ function taskRunning(task: TaskCardTask | undefined) {
   return task?.status === "running";
 }
 
+function taskInterfaceUrls(task: TaskCardTask) {
+  return interfaceUrls(task, settings.value, snapshot.value?.default_route_ip);
+}
+
 async function openTaskPanel(task: TaskCardTask, panelName: string) {
-  const match = interfaceUrls(task, settings.value).find((item) => item.name === panelName);
+  const match = taskInterfaceUrls(task).find((item) => item.name === panelName);
   if (!match) {
     error.value = `panel not found: ${panelName}`;
     return;
@@ -698,6 +717,17 @@ async function openTaskPanel(task: TaskCardTask, panelName: string) {
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   }
+}
+
+async function copyTaskPanelUrl(task: TaskCardTask, panelName: string) {
+  const match = taskInterfaceUrls(task).find(
+    (item) => item.kind === "webview" && item.name === panelName,
+  );
+  if (!match) {
+    error.value = `web panel not found: ${panelName}`;
+    return;
+  }
+  await flashCopy(`已复制：${match.name} URL`, () => navigator.clipboard.writeText(match.url));
 }
 
 function taskHoverTitle(task: TaskCardTask) {
@@ -1130,7 +1160,7 @@ async function pollHarborLog() {
   if (!harborLogOpen.value || pollingHarborLog) return;
   pollingHarborLog = true;
   try {
-    harborLogText.value = await fetchHarborLog();
+    harborLogText.value = tailLogLines(await fetchHarborLog(), LIVE_LOG_LINE_LIMIT);
   } catch {
     // Keep current buffer when a transient read fails.
   } finally {
@@ -1160,9 +1190,11 @@ async function pollLog() {
   }
   pollingLog = true;
   try {
-    const chunk = await readLogChunk(selectedLog.value, logOffset.value);
+    const chunk = await readLogChunk(selectedLog.value, logOffset.value, LIVE_LOG_LINE_LIMIT);
     if (chunk.reset) logText.value = "";
-    if (chunk.content) logText.value += chunk.content;
+    if (chunk.content) {
+      logText.value = tailLogLines(logText.value + chunk.content, LIVE_LOG_LINE_LIMIT);
+    }
     logOffset.value = chunk.next_offset;
   } catch {
     // Keep current buffer when a transient read fails.
@@ -1257,7 +1289,7 @@ onBeforeUnmount(() => {
     </Teleport>
     <header class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex min-w-0 items-center gap-2">
-        <span class="readout shrink-0 text-[11px] text-[var(--faint)]">Workspace</span>
+        <span class="readout shrink-0 select-none text-[11px] text-[var(--faint)]">Workspace</span>
         <SelectField
           compact
           :model-value="currentWorkspaceId"
@@ -1294,6 +1326,17 @@ onBeforeUnmount(() => {
         <span v-if="copyFlash" class="readout shrink-0 text-[10px] text-[var(--accent)]">{{ copyFlash }}</span>
       </div>
       <div class="flex items-center gap-1">
+        <button
+          v-for="shortcut in webPanelShortcuts"
+          :key="shortcut.key"
+          class="btn !px-2 !py-1"
+          type="button"
+          :title="shortcut.title"
+          @click="openTaskPanel(shortcut.task, shortcut.panelName)"
+        >
+          <ExternalLink class="h-3.5 w-3.5 shrink-0" />
+          <span class="readout max-w-32 truncate text-[11px]">{{ shortcut.panelName }}</span>
+        </button>
         <button
           v-if="isRemoteWorkspace"
           class="btn !px-2 !py-1"
@@ -1386,7 +1429,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div
-      class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-2 xl:grid-cols-[3fr_7fr] xl:grid-rows-1"
+      class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-2 xl:grid-cols-[4fr_6fr] xl:grid-rows-1"
     >
       <aside
         v-if="pathsPanelOpen"
@@ -1572,15 +1615,19 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="flex shrink-0 items-center gap-0.5">
                       <button
-                        v-for="panel in interfaceUrls(task, settings)"
+                        v-for="panel in taskInterfaceUrls(task)"
                         :key="panel.name"
                         class="btn !px-1.5 !py-1"
                         type="button"
-                        :title="`open ${panel.kind === 'webview' ? 'WebView' : 'VNC'} ${panel.name}`"
-                        :disabled="task.status !== 'running'"
-                        @click="openTaskPanel(task, panel.name)"
+                        :title="panel.kind === 'webview' ? `复制 ${panel.name} URL` : `打开 VNC ${panel.name}`"
+                        :disabled="panel.kind === 'vnc' && task.status !== 'running'"
+                        @click="
+                          panel.kind === 'webview'
+                            ? copyTaskPanelUrl(task, panel.name)
+                            : openTaskPanel(task, panel.name)
+                        "
                       >
-                        <Globe2 v-if="panel.kind === 'webview'" class="h-3.5 w-3.5" />
+                        <Link2 v-if="panel.kind === 'webview'" class="h-3.5 w-3.5" />
                         <Monitor v-else class="h-3.5 w-3.5" />
                       </button>
                       <button

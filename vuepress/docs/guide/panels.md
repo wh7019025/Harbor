@@ -183,6 +183,7 @@ command:
 
 - 本地 WebView 通常使用 `localhost_only: true`，仅监听 `127.0.0.1`。
 - 远端 WebView 需要从 GUI 所在机器访问时，使用 `localhost_only: false` 并监听 `0.0.0.0`。
+- Harbor 复制 WebView URL 时，`localhost_only: true` 使用 `127.0.0.1`；`false` 使用运行该 Task 的机器默认路由 IP。
 - 远端端口必须在网络和防火墙中可达。
 - 远端页面中的 HTTP 与 WebSocket 地址应使用当前 `location.host`，不要写死远端 IP。
 

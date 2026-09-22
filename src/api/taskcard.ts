@@ -62,6 +62,7 @@ export interface TaskCardGroup {
 
 export interface TaskCardSnapshot {
   root: string;
+  default_route_ip: string;
   search_paths: string[];
   discovered_task_dirs: string[];
   discovered_group_dirs: string[];
@@ -266,27 +267,33 @@ export function readLog(file: string) {
   return invoke<TaskLogContent>("taskcard_read_log", { file });
 }
 
-export function readLogChunk(file: string, offset: number) {
-  return invoke<TaskLogChunk>("taskcard_read_log_chunk", { file, offset });
+export function readLogChunk(file: string, offset: number, tailLines?: number) {
+  return invoke<TaskLogChunk>("taskcard_read_log_chunk", { file, offset, tailLines });
 }
 
-export function interfaceUrls(task: TaskCardTask, settings: Settings | null) {
+export function interfaceUrls(
+  task: TaskCardTask,
+  settings: Settings | null,
+  defaultRouteIp?: string,
+) {
   const workspace = settings?.workspaces.find((item) => item.id === settings.current_workspace);
   const remote = workspace?.mode === "remote";
-  const host =
+  const workspaceHost =
     remote && workspace.ssh?.host.trim()
       ? workspace.ssh.host.trim()
       : "127.0.0.1";
   const webviews = (task.webview_interface ?? []).map((panel) => ({
     kind: "webview" as const,
     name: panel.panel_name,
-    url: `http://${host}:${panel.interface_port}/`,
+    url: `http://${
+      panel.localhost_only ? "127.0.0.1" : defaultRouteIp?.trim() || workspaceHost
+    }:${panel.interface_port}/`,
   }));
   const vnc = remote
     ? (task.vnc_interface ?? []).map((panel) => ({
         kind: "vnc" as const,
         name: panel.panel_name,
-        url: `http://${host}:${panel.interface_port}/`,
+        url: `http://${workspaceHost}:${panel.interface_port}/`,
       }))
     : [];
   return [...webviews, ...vnc];

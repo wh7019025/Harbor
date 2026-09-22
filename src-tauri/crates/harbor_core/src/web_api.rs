@@ -120,6 +120,7 @@ struct IdQuery {
     prefix_path: Option<String>,
     file: Option<String>,
     offset: Option<u64>,
+    tail_lines: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -403,7 +404,7 @@ async fn read_task_log(
         let chunk = state
             .taskcard
             .lock()
-            .read_log_chunk(file.as_str(), offset)
+            .read_log_chunk(file.as_str(), offset, query.tail_lines)
             .map_err(map_service_error)?;
         Ok(Json(chunk).into_response())
     } else {

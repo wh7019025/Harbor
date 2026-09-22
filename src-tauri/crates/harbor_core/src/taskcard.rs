@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::net::UdpSocket;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -176,6 +177,8 @@ pub struct TaskSummary {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskCardSnapshot {
     pub root: String,
+    #[serde(default = "loopback_address")]
+    pub default_route_ip: String,
     pub search_paths: Vec<String>,
     pub discovered_task_dirs: Vec<String>,
     pub discovered_group_dirs: Vec<String>,
@@ -553,6 +556,7 @@ impl TaskCardService {
 
         TaskCardSnapshot {
             root: absolutize(&self.root),
+            default_route_ip: default_route_ip(),
             search_paths: self.search_paths(),
             discovered_task_dirs: self
                 .discovered_task_dirs
@@ -1266,20 +1270,33 @@ impl TaskCardService {
         })
     }
 
-    pub fn read_log_chunk(&self, file: &str, offset: u64) -> Result<TaskLogChunk, String> {
+    pub fn read_log_chunk(
+        &self,
+        file: &str,
+        offset: u64,
+        tail_lines: Option<usize>,
+    ) -> Result<TaskLogChunk, String> {
         validate_log_file(file)?;
         let path = self.current_log_dir().join(file);
         let mut handle = fs::File::open(&path)
             .map_err(|e| format!("open log {} failed: {e}", path.display()))?;
         let bytes = handle.metadata().map_err(|e| e.to_string())?.len();
         let reset = offset > bytes;
-        let start = if reset { 0 } else { offset };
+        let tail_read = (offset == 0 || reset) && tail_lines.is_some();
+        let start = if tail_read {
+            tail_start_offset(&mut handle, bytes, tail_lines.unwrap_or_default())?
+        } else if reset {
+            0
+        } else {
+            offset
+        };
         handle
             .seek(SeekFrom::Start(start))
             .map_err(|e| e.to_string())?;
         let mut content = Vec::new();
+        let read_limit = if tail_read { bytes - start } else { 64 * 1024 };
         handle
-            .take(64 * 1024)
+            .take(read_limit)
             .read_to_end(&mut content)
             .map_err(|e| e.to_string())?;
         Ok(TaskLogChunk {
@@ -1599,6 +1616,55 @@ impl TaskCardService {
         }
         Ok(group)
     }
+}
+
+fn tail_start_offset(handle: &mut File, bytes: u64, line_limit: usize) -> Result<u64, String> {
+    if bytes == 0 || line_limit == 0 {
+        return Ok(bytes);
+    }
+    let mut position = bytes;
+    let mut newlines = 0usize;
+    let mut skip_trailing_newline = true;
+    let mut buffer = vec![0u8; 64 * 1024];
+    while position > 0 {
+        let read_size = usize::try_from(position.min(buffer.len() as u64)).unwrap_or(buffer.len());
+        position -= read_size as u64;
+        handle
+            .seek(SeekFrom::Start(position))
+            .map_err(|error| error.to_string())?;
+        handle
+            .read_exact(&mut buffer[..read_size])
+            .map_err(|error| error.to_string())?;
+        for index in (0..read_size).rev() {
+            if buffer[index] != b'\n' {
+                skip_trailing_newline = false;
+                continue;
+            }
+            if skip_trailing_newline {
+                skip_trailing_newline = false;
+                continue;
+            }
+            newlines += 1;
+            if newlines == line_limit {
+                return Ok(position + index as u64 + 1);
+            }
+        }
+    }
+    Ok(0)
+}
+
+fn loopback_address() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_route_ip() -> String {
+    UdpSocket::bind("0.0.0.0:0")
+        .and_then(|socket| {
+            socket.connect("192.0.2.1:9")?;
+            socket.local_addr()
+        })
+        .map(|address| address.ip().to_string())
+        .unwrap_or_else(|_| loopback_address())
 }
 
 fn uuid_conflicts_from_definitions(
@@ -3080,6 +3146,20 @@ tasks:
         assert_eq!(t, 1710000000000);
     }
 
+    #[test]
+    fn tail_start_offset_keeps_requested_lines() {
+        let path = unique_temp("harbor-log-tail").with_extension("log");
+        fs::write(&path, "one\ntwo\nthree\nfour\n").unwrap();
+        let mut file = File::open(&path).unwrap();
+        let bytes = file.metadata().unwrap().len();
+        let offset = tail_start_offset(&mut file, bytes, 2).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        let mut content = String::new();
+        file.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "three\nfour\n");
+        fs::remove_file(path).unwrap();
+    }
+
     #[tokio::test]
     async fn loads_starts_and_stops_tasks_and_groups() {
         let root = unique_temp("ucgraph-taskcard-test");
@@ -3130,11 +3210,13 @@ tasks:
         let content = service.read_log(logs[0].file.as_str()).unwrap();
         assert!(content.content.contains("hello"));
         assert!(content.content.contains("error"));
-        let chunk = service.read_log_chunk(logs[0].file.as_str(), 0).unwrap();
+        let chunk = service
+            .read_log_chunk(logs[0].file.as_str(), 0, None)
+            .unwrap();
         assert!(chunk.content.contains("hello"));
         assert_eq!(chunk.next_offset, logs[0].bytes);
         let empty_chunk = service
-            .read_log_chunk(logs[0].file.as_str(), chunk.next_offset)
+            .read_log_chunk(logs[0].file.as_str(), chunk.next_offset, None)
             .unwrap();
         assert!(empty_chunk.content.is_empty());
         service

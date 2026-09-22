@@ -833,11 +833,12 @@ async fn taskcard_read_log_chunk(
     state: State<'_, Arc<AppState>>,
     file: String,
     offset: u64,
+    tail_lines: Option<usize>,
 ) -> Result<TaskLogChunk, String> {
     let app_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_core(&app_state, |settings| {
-            core_client::read_log_chunk(settings, file.as_str(), offset)
+            core_client::read_log_chunk(settings, file.as_str(), offset, tail_lines)
         })
     })
     .await

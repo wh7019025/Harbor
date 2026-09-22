@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { editor } from "monaco-editor";
+import { writeClipboardText } from "../lib/clipboard";
 
 const props = defineProps<{
   modelValue: string;
@@ -17,7 +18,25 @@ const container = ref<HTMLElement | null>(null);
 let instance: editor.IStandaloneCodeEditor | null = null;
 let subscription: { dispose(): void } | null = null;
 
-function onEditorCopy() {
+function selectedText() {
+  const model = instance?.getModel();
+  const selection = instance?.getSelection();
+  if (!model || !selection || selection.isEmpty()) return "";
+  return model.getValueInRange(selection);
+}
+
+async function copySelection() {
+  const text = selectedText();
+  if (!text) return;
+  await writeClipboardText(text);
+  emit("copied");
+}
+
+function onEditorCopy(event: ClipboardEvent) {
+  const text = selectedText();
+  if (!text) return;
+  event.preventDefault();
+  event.clipboardData?.setData("text/plain", text);
   emit("copied");
 }
 
@@ -51,6 +70,9 @@ onMounted(async () => {
   });
   subscription = instance.onDidChangeModelContent(() => {
     emit("update:modelValue", instance?.getValue() ?? "");
+  });
+  instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC, () => {
+    void copySelection();
   });
   container.value.addEventListener("copy", onEditorCopy, true);
 });

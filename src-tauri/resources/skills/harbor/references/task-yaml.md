@@ -115,7 +115,7 @@ webview_interface:
 |------|------|
 | `panel_name` | 面板 id，字符规则与 Task `id` 相同；同一 Task 内唯一 |
 | `interface_port` | 面板 HTTP 端口，不能为 0 |
-| `localhost_only` | 默认 `false`。`true` 表示面板只绑 127.0.0.1 |
+| `localhost_only` | 默认 `false`。`true` 表示面板只绑 127.0.0.1，复制 URL 时使用 127.0.0.1；`false` 时使用 Task 所在机器的默认路由 IP |
 local workspace 打开 `http://127.0.0.1:<port>/`；remote 打开 `http://<ssh.host>:<port>/`。
 
 Harbor 启动 Task 时会把单个面板声明注入以下保留环境变量，程序应读取它们，
