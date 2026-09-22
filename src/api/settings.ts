@@ -31,6 +31,7 @@ export interface Settings {
 export interface HarborCoreStatus {
   reachable: boolean;
   compatible: boolean;
+  connected: boolean;
   version: string | null;
   workspace_id: string | null;
   localhost_only: boolean;
@@ -77,6 +78,10 @@ export function openWorkspaceTerminal() {
 
 export function getHarborCoreStatus() {
   return invoke<HarborCoreStatus>("get_harbor_core_status");
+}
+
+export function connectRemoteWorkspaceCore() {
+  return invoke<HarborCoreStatus>("connect_remote_workspace_core");
 }
 
 export interface HarborCopyProgress {

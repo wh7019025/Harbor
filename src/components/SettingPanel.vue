@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   checkAppUpdate,
+  connectRemoteWorkspaceCore,
   getAppVersion,
   getHarborCoreStatus,
   getSettings,
@@ -169,13 +170,13 @@ async function runCoreAction(key: string, action: () => Promise<HarborCoreStatus
           class="btn !px-2 !py-1 text-[11px]"
           type="button"
           :disabled="!!coreBusy"
-          @click="runCoreAction('restart', restartHarborCore)"
+          @click="runCoreAction('restart', isRemote ? connectRemoteWorkspaceCore : restartHarborCore)"
         >
-          {{ coreBusy === "restart" ? (isRemote ? "强制部署中…" : "强制重启中…") : isRemote ? "强制部署" : "强制重启" }}
+          {{ coreBusy === "restart" ? (isRemote ? "连接中…" : "重启中…") : isRemote ? "连接" : "重启" }}
         </button>
       </div>
       <p class="readout mt-2 text-[11px] text-[var(--faint)]">
-        检查连接只读取状态；{{ isRemote ? "强制部署会上传匹配版本并替换远程 core，请先关闭正在使用它的 Harbor。" : "强制重启会替换本机 core，请先关闭其他 Harbor。" }}
+        检查连接只读取状态；{{ isRemote ? "连接会先检查 SSH、运行中的 Core 与版本，只有缺少匹配 release 时才复制。使用中的 Core 不会被替换。" : "重启会替换本机 core，请先关闭其他 Harbor。" }}
       </p>
     </div>
 

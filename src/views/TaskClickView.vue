@@ -11,6 +11,7 @@ import {
   Monitor,
   Pencil,
   Play,
+  PlugZap,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -72,6 +73,7 @@ import {
 } from "../api/taskcard";
 import {
   createWorkspace,
+  connectRemoteWorkspaceCore,
   deleteWorkspace,
   getHarborCopyProgress,
   getSettings,
@@ -450,7 +452,7 @@ async function pollCopyProgress() {
       notice.value = "";
     }
     if (next.active && !copyNoticeDismissed.value && !notice.value) {
-      notice.value = "copying harbor_core to remote…";
+      notice.value = "正在复制匹配的 harbor_core 到远端…";
     }
   } catch {
     // Keep the last known progress if a poll fails.
@@ -471,13 +473,13 @@ function dismissCopyNotice() {
 }
 
 function isCoreCopyNotice(message: string) {
-  return message.includes("copying harbor_core to remote");
+  return message.includes("copying harbor_core to remote") || message.includes("正在复制匹配的 harbor_core 到远端");
 }
 
 function showFailure(message: string, options: { preserveError?: boolean } = {}) {
   if (isCoreCopyNotice(message) || copyProgress.value.active) {
     copyNoticeDismissed.value = false;
-    notice.value = isCoreCopyNotice(message) ? message : notice.value || "copying harbor_core to remote…";
+    notice.value = isCoreCopyNotice(message) ? message : notice.value || "正在复制匹配的 harbor_core 到远端…";
     error.value = "";
     return;
   }
@@ -911,7 +913,35 @@ function hasUuidConflict(uuid: string) {
 const isRemoteWorkspace = computed(() => currentWorkspace()?.mode === "remote");
 
 async function openRemoteWorkspaceTerminal() {
-  await run("workspace-terminal", "打开远端终端", openWorkspaceTerminal);
+  pending.value = { key: "workspace-terminal", label: "打开远端终端" };
+  error.value = "";
+  openHarborLog();
+  try {
+    await openWorkspaceTerminal();
+    await pollHarborLog();
+  } catch (err) {
+    showFailure(failureMessage(err));
+    await pollHarborLog();
+  } finally {
+    pending.value = null;
+  }
+}
+
+async function connectRemoteWorkspace() {
+  pending.value = { key: "connect-remote-workspace", label: "连接远端 Workspace" };
+  error.value = "";
+  notice.value = "";
+  openHarborLog();
+  try {
+    await connectRemoteWorkspaceCore();
+    notice.value = "远端 Workspace 已连接";
+    await load({ scan: true });
+  } catch (err) {
+    showFailure(failureMessage(err));
+    await pollHarborLog();
+  } finally {
+    pending.value = null;
+  }
 }
 
 function requestWorkspaceSwitch(id: string) {
@@ -939,7 +969,8 @@ async function applyWorkspaceSwitch(id: string) {
       selectedLog.value = null;
       harborLogText.value = "";
       logText.value = "";
-      if (!copyProgress.value.active) notice.value = "";
+      notice.value = "请选择连接按钮以连接远端 Workspace";
+      openHarborLog();
       return;
     }
     openHarborLog();
@@ -1196,7 +1227,7 @@ onBeforeUnmount(() => {
         <div class="flex items-center justify-between gap-3">
           <span class="flex min-w-0 items-center gap-2">
             <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />
-            <span class="min-w-0 truncate">{{ notice || "copying harbor_core to remote…" }}</span>
+            <span class="min-w-0 truncate">{{ notice || "正在复制匹配的 harbor_core 到远端…" }}</span>
             <span v-if="copyProgress.total > 0" class="shrink-0 tabular-nums">
               {{ copyProgress.percent }}%
               · {{ formatCopyBytes(copyProgress.transferred) }} / {{ formatCopyBytes(copyProgress.total) }}
@@ -1234,6 +1265,17 @@ onBeforeUnmount(() => {
           placeholder=""
           @update:model-value="requestWorkspaceSwitch"
         />
+        <button
+          v-if="isRemoteWorkspace"
+          class="btn !px-1.5 !py-0.5"
+          type="button"
+          title="连接远端 Workspace"
+          :disabled="isPending('connect-remote-workspace')"
+          @click="connectRemoteWorkspace"
+        >
+          <LoaderCircle v-if="isPending('connect-remote-workspace')" class="h-3.5 w-3.5 animate-spin" />
+          <PlugZap v-else class="h-3.5 w-3.5" />
+        </button>
         <button class="btn !px-1.5 !py-0.5" type="button" title="new workspace" @click="openCreateWorkspace">
           <Plus class="h-3.5 w-3.5" />
         </button>

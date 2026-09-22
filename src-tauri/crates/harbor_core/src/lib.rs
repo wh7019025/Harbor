@@ -196,11 +196,11 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         .await
         .map_err(|error| format!("harbor_core server failed: {error}"));
 
-    // --- 阶段 4：Core 正常退出前回收所有托管进程组 ---
-    let errors = shutdown_taskcard.lock().stop_all();
-    for error in errors {
-        crate::app_log::core(&format!("stop task during core shutdown failed: {error}"));
-    }
+    // --- 阶段 4：Core 退出但保留任务，后续 Core 将从运行记录重新接管 ---
+    let managed_count = shutdown_taskcard.lock().managed_processes().len();
+    crate::app_log::core(&format!(
+        "harbor_core stopping; leaving {managed_count} managed process groups running"
+    ));
     serve_result
 }
 

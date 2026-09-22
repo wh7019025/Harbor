@@ -44,7 +44,7 @@ onMounted(load);
   <div class="flex min-h-0 flex-1 flex-col">
     <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
       <p class="text-[11px] text-[var(--muted)]">
-        显示当前 Core 启动且仍然存活的进程。异常项表示任务主进程已退出，但进程组中仍有残留程序。
+        显示 Harbor 启动且仍然存活的进程。Core 重启后会重新接管；主进程退出但子进程仍存活时标记为残留。
       </p>
       <button class="btn ml-3 !px-2 !py-1" type="button" title="刷新" :disabled="loading" @click="load">
         <RefreshCw :class="['h-3.5 w-3.5', loading ? 'animate-spin' : '']" />

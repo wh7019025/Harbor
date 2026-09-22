@@ -45,7 +45,7 @@ SSH Tunnel 映射到本机回环端口。远端端口会从 `29386–29486` 自�
 `~/.harbor/tools/ttyd/<sha256>/`；不要要求用户在远端安装 `ttyd`，也不要把它手动绑定
 到 `0.0.0.0`。
 
-`harbor_core` 二进制按版本分开放在 **core 所在机器** 的 `~/.harbor/core/<version>/harbor_core`，但每台机器同一时间只能运行一个 `harbor_core`，不区分版本。当前管理它的 GUI 持有短时访问租约；其他版本不得自动替换使用中的 core。同版本 GUI 仍可共享任务状态。只有租约空闲时才允许自动更新；“强制部署/强制重启”会明确覆盖当前 core。
+`harbor_core` 二进制按版本分开放在 **core 所在机器** 的 `~/.harbor/core/<version>/harbor_core`，但每台机器同一时间只能运行一个 `harbor_core`，不区分版本。切换 remote workspace 不会自动连接或部署；用户需要在 GUI 中显式连接。连接顺序是 SSH 验证、运行中 Core/API 检查、版本与租约检查、匹配 release 检查、必要时复制、最后唤醒。当前管理它的 GUI 持有短时访问租约；其他版本不得替换使用中的 core。仅能发现存活 PID 但 API 不可达时也拒绝自动替换。
 
 本机 GUI 与本机 harbor_core 共用 `~/.harbor/settings.json`。直接改 search_paths 后需要重启 `harbor_core`，或改用 HTTP `POST /api/v1/workspaces/search-paths`。
 

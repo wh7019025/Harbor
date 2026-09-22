@@ -346,8 +346,8 @@ impl TaskCardService {
             );
         }
         let instance_lock = acquire_instance_lock(root.join("run").as_path())?;
-        let recovered = cleanup_orphan_tasks(root.as_path()).unwrap_or_else(|error| {
-            eprintln!("cleanup orphan tasks failed: {error}");
+        let recovered = recover_managed_tasks(root.as_path()).unwrap_or_else(|error| {
+            eprintln!("recover managed tasks failed: {error}");
             Vec::new()
         });
         let service = Self {
@@ -499,6 +499,10 @@ impl TaskCardService {
             .into_values()
             .map(|task| {
                 let running = state.running.get(task.uuid.as_str());
+                let managed = state
+                    .managed
+                    .get(task.uuid.as_str())
+                    .filter(|record| process_leader_alive(record));
                 TaskSummary {
                     uuid: task.uuid.clone(),
                     uuid_conflict: conflicted_uuids.contains(task.uuid.as_str()),
@@ -511,18 +515,24 @@ impl TaskCardService {
                     env_count: task.env.len(),
                     configs: task.configs.clone(),
                     default_config: task.default_config_id().map(str::to_string),
-                    running_config_id: running.and_then(|item| item.config_id.clone()),
+                    running_config_id: running
+                        .and_then(|item| item.config_id.clone())
+                        .or_else(|| managed.and_then(|item| item.config_id.clone())),
                     requires_sudo: task.sudo,
                     webview_interface: task.webview_interface.clone(),
                     vnc_interface: task.vnc_interface.clone(),
                     folder: task.folder.clone(),
-                    status: if running.is_some() {
+                    status: if running.is_some() || managed.is_some() {
                         "running".to_string()
                     } else {
                         "stopped".to_string()
                     },
-                    pid: running.map(|item| item.child.id()),
-                    started_at_ms: running.map(|item| item.started_at_ms),
+                    pid: running
+                        .map(|item| item.child.id())
+                        .or_else(|| managed.map(|item| item.pid)),
+                    started_at_ms: running
+                        .map(|item| item.started_at_ms)
+                        .or_else(|| managed.map(|item| item.started_at_ms)),
                     log_file: running
                         .filter(|item| item.log_dir == current_log_dir)
                         .map(|item| item.log_file.clone()),
@@ -602,6 +612,20 @@ impl TaskCardService {
                 selected_config_id.as_deref().unwrap_or("default")
             ));
         }
+        if let Some(managed) = state
+            .managed
+            .get(runtime_key.as_str())
+            .filter(|record| process_group_alive(record))
+        {
+            if process_leader_alive(managed) && managed.config_id == selected_config_id {
+                return Ok(());
+            }
+            return Err(format!(
+                "task {id} already has a managed process group with config {}; stop it before starting config {}",
+                managed.config_id.as_deref().unwrap_or("default"),
+                selected_config_id.as_deref().unwrap_or("default")
+            ));
+        }
         let workdir = expand_workdir(task.workdir.as_str(), task.taskcfg_dir.as_str())?;
         if !workdir.is_dir() {
             return Err(format!("workdir does not exist: {}", workdir.display()));
@@ -652,16 +676,9 @@ impl TaskCardService {
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
         command.envs(merged_task_env(task, config, env_override));
-        let parent_pid = unsafe { libc::getpid() };
         unsafe {
-            command.pre_exec(move || {
+            command.pre_exec(|| {
                 if libc::setpgid(0, 0) == 0 {
-                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    if libc::getppid() != parent_pid {
-                        libc::raise(libc::SIGTERM);
-                    }
                     return Ok(());
                 }
                 Err(std::io::Error::last_os_error())
@@ -781,7 +798,7 @@ impl TaskCardService {
             .iter()
             .map(|(uuid, record)| {
                 let processes = processes_in_group(record);
-                let task_running = state.running.contains_key(uuid);
+                let task_running = state.running.contains_key(uuid) || process_leader_alive(record);
                 ManagedProcessGroup {
                     uuid: uuid.clone(),
                     prefix_path: record.prefix_path.clone(),
@@ -2054,7 +2071,7 @@ fn acquire_instance_lock(run_dir: &Path) -> Result<File, String> {
     Ok(file)
 }
 
-fn cleanup_orphan_tasks(root: &Path) -> Result<Vec<RunningTaskRecord>, String> {
+fn recover_managed_tasks(root: &Path) -> Result<Vec<RunningTaskRecord>, String> {
     let path = running_registry_path(root);
     if !path.is_file() {
         return Ok(Vec::new());
@@ -2062,20 +2079,12 @@ fn cleanup_orphan_tasks(root: &Path) -> Result<Vec<RunningTaskRecord>, String> {
     let raw =
         fs::read_to_string(&path).map_err(|e| format!("read {} failed: {e}", path.display()))?;
     let records: Vec<RunningTaskRecord> = serde_json::from_str(&raw).unwrap_or_default();
-    let mut remaining = Vec::new();
-    for record in records {
-        if let Err(error) = terminate_orphan(&record) {
-            eprintln!(
-                "cleanup orphan task {} (pid {}): {error}",
-                record.id, record.pid
-            );
-            if process_group_alive(&record) {
-                remaining.push(record);
-            }
-        }
-    }
-    write_running_registry(root, &remaining)?;
-    Ok(remaining)
+    let recovered = records
+        .into_iter()
+        .filter(process_group_alive)
+        .collect::<Vec<_>>();
+    write_running_registry(root, &recovered)?;
+    Ok(recovered)
 }
 
 fn running_task_record(uuid: &str, running: &RunningTask) -> RunningTaskRecord {
@@ -2174,6 +2183,16 @@ fn processes_in_group(record: &RunningTaskRecord) -> Vec<ProcessInfo> {
 
 fn process_group_alive(record: &RunningTaskRecord) -> bool {
     !processes_in_group(record).is_empty()
+}
+
+fn process_leader_alive(record: &RunningTaskRecord) -> bool {
+    read_process_info(record.pid as i32).is_some_and(|process| {
+        process.state != 'Z'
+            && process.pgid == record.pgid
+            && (record.sid <= 0 || process.sid == record.sid)
+            && (record.leader_start_time_ticks == 0
+                || process.start_time_ticks == record.leader_start_time_ticks)
+    })
 }
 
 fn wait_for_process_group_exit(record: &RunningTaskRecord, attempts: usize) -> bool {
@@ -3748,11 +3767,82 @@ command:
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].id, "demo");
         assert_eq!(parsed[0].config_id, None);
-        cleanup_orphan_tasks(&root).unwrap();
+        recover_managed_tasks(&root).unwrap();
         assert_eq!(
             fs::read_to_string(running_registry_path(&root)).unwrap(),
             "[]"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn managed_process_survives_registry_recovery() {
+        let root = std::env::temp_dir().join(format!(
+            "harbor-run-registry-recovery-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(root.join("run")).unwrap();
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+        let mut child = command.spawn().unwrap();
+        let record = child_process_record("recovery-test", &child);
+        write_running_registry(&root, std::slice::from_ref(&record)).unwrap();
+
+        let recovered = recover_managed_tasks(&root).unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert!(process_leader_alive(&recovered[0]));
+        terminate_orphan(&record).unwrap();
+        let _ = child.wait();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn task_remains_running_after_service_restart() {
+        let root = unique_temp("harbor-task-service-recovery");
+        let project = root.join("project");
+        write_project_yaml(
+            &project,
+            "tasks",
+            "background.yaml",
+            r#"version: 1
+id: background
+workdir: /tmp
+command:
+  argv: [sleep, "30"]
+"#,
+        );
+        let prefix = absolutize(&project);
+        let service = service_with_project(&root, &project);
+        service
+            .start_task(prefix.as_str(), "background", None, &HashMap::new(), None)
+            .unwrap();
+        let original_pid = service.snapshot().tasks[0].pid.unwrap();
+        drop(service);
+
+        let recovered = service_with_project(&root, &project);
+        let task = &recovered.snapshot().tasks[0];
+        assert_eq!(task.status, "running");
+        assert_eq!(task.pid, Some(original_pid));
+        recovered
+            .start_task(prefix.as_str(), "background", None, &HashMap::new(), None)
+            .unwrap();
+        assert_eq!(recovered.managed_processes().len(), 1);
+        assert!(recovered.stop_all().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

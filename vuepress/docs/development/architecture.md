@@ -46,7 +46,7 @@ Core 负责扫描 YAML、补齐和校验 UUID、启动进程树、记录日志�
 
 一台机器只允许一个 Core 实例。GUI 退出不会终止 Core 或它已经托管的 Task。
 
-Core 自身正常退出时会回收全部托管进程组。GUI 退出与 Core 退出是两个不同的生命周期事件。
+Core 自身退出时同样保留 Task。后续 Core 会读取机器级运行记录并重新接管，因此 GUI 和 Core 都可以独立重启；只有显式停止操作才会终止 Task。
 
 ### 项目配置
 
@@ -66,10 +66,10 @@ GUI → HTTP API → local harbor_core → Task process
 
 ## 远端连接
 
-GUI 先通过 SSH 检查和准备远端 Core，随后直接通过远端 HTTP API 操作任务。
+切换远端 Workspace 不产生网络副作用。用户点击连接后，GUI 才通过 SSH 和 HTTP 分阶段检查远端 Core，随后通过远端 HTTP API 操作任务。
 
 ```text
-GUI ── SSH ──> deploy / start harbor_core
+GUI ── SSH ──> verify / inspect / optional deploy / start harbor_core
 GUI ── HTTP ─> remote harbor_core ──> Task process
 ```
 
@@ -85,13 +85,13 @@ GUI 使用 `~/.harbor/core/<version>/harbor_core` 中的 release 产物，并校
 2. Core API revision。
 3. 构建时固化的 Core SHA-256。
 
-远端缺少匹配 Core 时，GUI 会复制对应 release 产物和运行依赖后再启动。
+远端连接优先复用运行中的匹配 Core，其次唤醒已经安装的匹配 release，最后才复制对应 release 产物和运行依赖。运行中的 Core 被其他 GUI 占用，或仅能看到存活 PID 而 API 不可达时，GUI 不会强制替换。
 
 ## 运行原则
 
 Task UUID 是进程唯一键。同一台机器不允许相同 UUID 同时运行多个实例；Workspace 和项目路径仅决定如何发现定义，不决定进程身份。
 
-Core 为每次 Task 启动记录 leader PID、PGID、session 和启动时刻，并从 `/proc` 读取实际进程成员、程序名与命令。任务状态由 leader 决定，但托管记录会保留到整个进程组退出，因此 leader 先退出时仍能发现和终止残留子进程。运行记录保存在机器级 `~/.harbor/runtime/run/tasks.json`，不放在 `/tmp`，避免 Core 异常退出后丢失清理依据。
+Core 为每次 Task 启动记录 leader PID、PGID、session 和启动时刻，并从 `/proc` 读取实际进程成员、程序名与命令。任务状态由 leader 决定，但托管记录会保留到整个进程组退出，因此 leader 先退出时仍能发现和终止残留子进程。运行记录保存在机器级 `~/.harbor/runtime/run/tasks.json`，不放在 `/tmp`；Core 重启后会过滤已经退出的记录，并重新接管仍然存活的进程组。
 
 ## 数据位置
 

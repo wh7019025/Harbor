@@ -38,6 +38,7 @@ struct AppState {
     metrics: Mutex<SystemMetricsSampler>,
     panel_tunnels: Mutex<HashMap<String, panel_tunnel::PanelTunnel>>,
     workspace_terminal: Mutex<Option<workspace_terminal::WorkspaceTerminal>>,
+    remote_core_connection: Mutex<Option<String>>,
 }
 
 fn persist_settings(state: &Arc<AppState>, settings: Settings) -> Result<Settings, String> {
@@ -84,9 +85,20 @@ fn with_core<T>(
     op: impl Fn(&Settings) -> Result<T, String>,
 ) -> Result<T, String> {
     let settings = current_settings(state);
+    let workspace = settings.current()?;
+    if workspace.mode == WorkspaceMode::Remote
+        && state.remote_core_connection.lock().as_deref() != Some(workspace.id.as_str())
+    {
+        return Err("远端 Workspace 尚未连接，请点击 Workspace 旁的连接按钮".into());
+    }
     match op(&settings) {
         Ok(value) => Ok(value),
         Err(error) if is_core_connect_error(&error) || is_core_version_error(&error) => {
+            if workspace.mode == WorkspaceMode::Remote {
+                *state.remote_core_connection.lock() = None;
+                harbor_core::app_log::gui(&format!("remote harbor_core connection lost: {error}"));
+                return Err(error);
+            }
             core_process::ensure_core(&settings)?;
             op(&settings)
         }
@@ -141,16 +153,16 @@ async fn switch_workspace(
     close_workspace_terminal(&app, state.inner());
     close_panel_tunnels(&app, state.inner());
     core_process::release_core(&settings);
+    *state.remote_core_connection.lock() = None;
     settings.current_workspace = id;
     settings.normalize();
     persist_settings(state.inner(), settings.clone())?;
     let job = settings.clone();
     if settings.current()?.mode == WorkspaceMode::Remote {
-        tauri::async_runtime::spawn_blocking(move || {
-            if let Err(error) = core_process::ensure_core(&job) {
-                harbor_core::app_log::gui(&format!("ensure remote harbor_core: {error}"));
-            }
-        });
+        harbor_core::app_log::gui(&format!(
+            "remote workspace {} selected; waiting for manual connection",
+            settings.current_workspace
+        ));
     } else {
         tauri::async_runtime::spawn_blocking(move || core_process::ensure_core(&job))
             .await
@@ -202,6 +214,7 @@ fn update_workspace(
     let ssh = normalize_workspace_ssh(&mode, ssh)?;
     if state.settings.lock().current_workspace == id {
         core_process::release_core(&current_settings(state.inner()));
+        *state.remote_core_connection.lock() = None;
     }
     close_workspace_terminal(&app, state.inner());
     close_panel_tunnels(&app, state.inner());
@@ -244,6 +257,7 @@ fn delete_workspace(
     }
     if settings.current_workspace == id {
         core_process::release_core(&settings);
+        *state.remote_core_connection.lock() = None;
         close_workspace_terminal(&app, state.inner());
         close_panel_tunnels(&app, state.inner());
         settings.current_workspace = settings
@@ -267,16 +281,60 @@ async fn get_harbor_core_status(
     state: State<'_, Arc<AppState>>,
 ) -> Result<HarborCoreStatus, String> {
     let settings = current_settings(state.inner());
+    let app_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut status = core_client::core_status(&settings);
-        if status.compatible && core_process::heartbeat_core(&settings).is_ok() {
-            status.access_occupied = true;
-            status.access_owner_version = Some(harbor_core::version::APP_VERSION.to_string());
+        let workspace = settings.current()?;
+        let should_heartbeat = workspace.mode == WorkspaceMode::Local
+            || app_state.remote_core_connection.lock().as_deref() == Some(workspace.id.as_str());
+        if status.compatible && should_heartbeat {
+            if core_process::heartbeat_core(&settings).is_ok() {
+                status.connected = true;
+                status.access_occupied = true;
+                status.access_owner_version = Some(harbor_core::version::APP_VERSION.to_string());
+            } else if workspace.mode == WorkspaceMode::Remote {
+                *app_state.remote_core_connection.lock() = None;
+            }
         }
-        status
+        Ok(status)
     })
     .await
-    .map_err(|error| format!("core status worker failed: {error}"))
+    .map_err(|error| format!("core status worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn connect_remote_workspace_core(
+    state: State<'_, Arc<AppState>>,
+) -> Result<HarborCoreStatus, String> {
+    let settings = current_settings(state.inner());
+    let workspace = settings.current()?.clone();
+    if workspace.mode != WorkspaceMode::Remote {
+        return Err("当前 Workspace 不是远端 Workspace".into());
+    }
+    let workspace_id = workspace.id.clone();
+    harbor_core::app_log::gui(&format!("remote connection requested: {workspace_id}"));
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        core_process::connect_remote_core(&settings)?;
+        Ok(core_client::core_status(&settings))
+    })
+    .await
+    .map_err(|error| format!("remote connection worker failed: {error}"))?;
+    match result {
+        Ok(mut status) => {
+            if state.settings.lock().current_workspace != workspace_id {
+                return Err("连接完成前 Workspace 已切换".into());
+            }
+            *state.remote_core_connection.lock() = Some(workspace_id.clone());
+            status.connected = true;
+            harbor_core::app_log::gui(&format!("remote workspace connected: {workspace_id}"));
+            Ok(status)
+        }
+        Err(error) => {
+            *state.remote_core_connection.lock() = None;
+            harbor_core::app_log::gui(&format!("remote workspace connection failed: {error}"));
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -418,15 +476,37 @@ async fn open_workspace_terminal(
 ) -> Result<(), String> {
     let settings = current_settings(state.inner());
     let workspace = settings.current()?.clone();
+    harbor_core::app_log::gui(&format!("workspace terminal requested: {}", workspace.id));
     let title = format!("{} · Terminal", workspace.name);
     let app_state = state.inner().clone();
-    let url = tauri::async_runtime::spawn_blocking(move || {
+    let workspace_id = workspace.id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let mut terminal = app_state.workspace_terminal.lock();
         workspace_terminal::open(&workspace, &mut terminal)
     })
     .await
-    .map_err(|error| format!("workspace terminal worker failed: {error}"))??;
-    open_panel_window_with_label(&app, title.as_str(), url.as_str(), "workspace-terminal")
+    .map_err(|error| format!("workspace terminal worker failed: {error}"))?;
+    let url = match result {
+        Ok(url) => {
+            harbor_core::app_log::gui(&format!("workspace terminal ready: {workspace_id}"));
+            url
+        }
+        Err(error) => {
+            harbor_core::app_log::gui(&format!(
+                "workspace terminal failed for {workspace_id}: {error}"
+            ));
+            return Err(error);
+        }
+    };
+    match open_panel_window_with_label(&app, title.as_str(), url.as_str(), "workspace-terminal") {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            harbor_core::app_log::gui(&format!(
+                "workspace terminal window failed for {workspace_id}: {error}"
+            ));
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -812,14 +892,22 @@ pub fn run() {
         harbor_core::app_log::gui(&format!("sync Harbor Skill failed: {error}"));
     }
     let settings = load_settings();
-    if let Err(error) = core_process::ensure_core(&settings) {
-        harbor_core::app_log::gui(&format!("ensure harbor_core failed: {error}"));
+    if settings
+        .current()
+        .is_ok_and(|workspace| workspace.mode == WorkspaceMode::Local)
+    {
+        if let Err(error) = core_process::ensure_core(&settings) {
+            harbor_core::app_log::gui(&format!("ensure harbor_core failed: {error}"));
+        }
+    } else {
+        harbor_core::app_log::gui("remote workspace restored; waiting for manual connection");
     }
     let state = Arc::new(AppState {
         settings: Mutex::new(settings),
         metrics: Mutex::new(SystemMetricsSampler::default()),
         panel_tunnels: Mutex::new(HashMap::new()),
         workspace_terminal: Mutex::new(None),
+        remote_core_connection: Mutex::new(None),
     });
 
     tauri::Builder::default()
@@ -835,6 +923,7 @@ pub fn run() {
             verify_workspace_ssh_command,
             delete_workspace,
             get_harbor_core_status,
+            connect_remote_workspace_core,
             harbor_copy_progress,
             probe_harbor_core,
             restart_harbor_core,

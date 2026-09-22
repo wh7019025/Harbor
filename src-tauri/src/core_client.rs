@@ -41,6 +41,7 @@ pub struct CoreAccessStatus {
 pub struct HarborCoreStatus {
     pub reachable: bool,
     pub compatible: bool,
+    pub connected: bool,
     pub version: Option<String>,
     pub workspace_id: Option<String>,
     pub localhost_only: bool,
@@ -59,6 +60,7 @@ impl HarborCoreStatus {
         Self {
             reachable: false,
             compatible: false,
+            connected: false,
             version: None,
             workspace_id: workspace.map(|item| item.id.clone()),
             localhost_only: workspace.map(Workspace::localhost_only).unwrap_or(true),
@@ -300,6 +302,7 @@ pub fn core_status(settings: &Settings) -> HarborCoreStatus {
             HarborCoreStatus {
                 reachable: true,
                 compatible: true,
+                connected: false,
                 version: Some(health.version),
                 workspace_id: Some(health.workspace_id),
                 localhost_only: health.localhost_only,

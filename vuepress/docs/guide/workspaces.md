@@ -72,7 +72,7 @@ Workspace 决定两件事：**连接哪台机器，以及在这台机器上查�
 
 ### 远端 Workspace
 
-适合操作机器人或服务器。Harbor 通过 SSH 准备远端 Core，连接完成后直接通过 Harbor API 管理任务。
+适合操作机器人或服务器。切换到远端 Workspace 后，需要点击 Workspace 旁的连接按钮；Harbor 会先检查 SSH、Core 和版本，必要时才准备远端 Core，连接完成后通过 Harbor API 管理任务。
 
 远端 Workspace 中的 `~`、项目路径和日志都属于远端用户，而不是当前电脑。配置方法见 [远端运行](./remote.md)。
 

@@ -78,7 +78,7 @@ Harbor 会为新 Task 生成 UUID。不要从其他 Task 复制 UUID，它是 Ha
 
 正常运行的 Task 显示为“运行中”。如果 Task 主进程已经退出，但它启动的相机、驱动或其他子进程仍留在原进程组中，Harbor 会将其标记为“残留进程”；可以在任务管理器中手动终止整个运行单元。
 
-Core 正常退出时会停止全部托管进程组。若 Core 被强制结束，新 Core 会根据 `~/.harbor/runtime/run/tasks.json` 清理上次留下的运行单元。
+关闭 Harbor GUI 不会停止 Core 或 Task。Core 自身退出时也会保留正在运行的 Task；再次启动 Core 后，会根据 `~/.harbor/runtime/run/tasks.json` 重新接管这些运行单元。只有显式执行 Stop、Restart、Stop All 或在任务管理器中终止，才会关闭对应进程组。
 
 ## 使用运行配置
 

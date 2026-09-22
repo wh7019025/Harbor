@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use harbor_core::settings::{
     core_bin_dir, core_bin_path, core_pid_path, ssh_run, ssh_send_file, Settings, Workspace,
@@ -47,9 +47,6 @@ impl Default for DeployProgress {
 }
 
 struct RemoteDeployGate {
-    inflight: bool,
-    retry_after: Option<Instant>,
-    last_error: Option<String>,
     progress: DeployProgress,
 }
 
@@ -57,9 +54,6 @@ fn remote_deploy_gate() -> &'static Mutex<RemoteDeployGate> {
     static GATE: OnceLock<Mutex<RemoteDeployGate>> = OnceLock::new();
     GATE.get_or_init(|| {
         Mutex::new(RemoteDeployGate {
-            inflight: false,
-            retry_after: None,
-            last_error: None,
             progress: DeployProgress::default(),
         })
     })
@@ -77,12 +71,12 @@ fn set_deploy_progress(percent: u8, transferred: u64, total: u64) {
     };
 }
 
-fn bump_deploy_percent(percent: u8) {
-    let mut gate = remote_deploy_gate()
+fn finish_deploy_progress() {
+    remote_deploy_gate()
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    gate.progress.active = true;
-    gate.progress.percent = percent.min(100);
+        .unwrap_or_else(|error| error.into_inner())
+        .progress
+        .active = false;
 }
 
 pub fn deploy_progress() -> DeployProgress {
@@ -319,7 +313,12 @@ fn create_remote_runtime_bundle(
     Ok(archive)
 }
 
-fn send_remote_runtime(ssh: &WorkspaceSsh, bin: &Path, runtime: &[PathBuf]) -> Result<(), String> {
+fn send_remote_runtime(
+    ssh: &WorkspaceSsh,
+    bin: &Path,
+    runtime: &[PathBuf],
+    runtime_hash: &str,
+) -> Result<(), String> {
     let dir = remote_core_dir();
     let archive = create_remote_runtime_bundle(bin, "harbor_core", runtime)?;
     let total = fs::metadata(&archive)
@@ -343,13 +342,20 @@ fn send_remote_runtime(ssh: &WorkspaceSsh, bin: &Path, runtime: &[PathBuf]) -> R
     // --- 阶段 2：在远端展开运行环境 ---
     ssh_run(
         ssh,
-        &format!("tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive}"),
+        &format!(
+            "tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive} && printf '%s\\n' {} > \"$HOME/{dir}/.runtime-sha256\"",
+            shell_single_quote(runtime_hash)
+        ),
     )?;
     set_deploy_progress(90, total, total);
     Ok(())
 }
 
 pub fn remote_ttyd_command(ssh: &WorkspaceSsh) -> Result<String, String> {
+    harbor_core::app_log::gui(&format!(
+        "workspace terminal 1/3: checking managed ttyd on {}",
+        ssh.host.trim()
+    ));
     let local_bin = packaged_ttyd_bin()?;
     let runtime = shared_objects(local_bin.as_path())?;
     let runtime_hash = runtime_fingerprint(EXPECTED_TTYD_SHA256, &runtime)?;
@@ -365,6 +371,7 @@ pub fn remote_ttyd_command(ssh: &WorkspaceSsh) -> Result<String, String> {
     let binary_matches = remote_state.next() == Some(EXPECTED_TTYD_SHA256);
     let runtime_matches = remote_state.next() == Some(runtime_hash.as_str());
     if !binary_matches || !runtime_matches {
+        harbor_core::app_log::gui("workspace terminal 2/3: deploying managed ttyd");
         deploy_remote_ttyd(
             ssh,
             local_bin.as_path(),
@@ -372,7 +379,10 @@ pub fn remote_ttyd_command(ssh: &WorkspaceSsh) -> Result<String, String> {
             dir.as_str(),
             runtime_hash.as_str(),
         )?;
+    } else {
+        harbor_core::app_log::gui("workspace terminal 2/3: reusing managed ttyd");
     }
+    harbor_core::app_log::gui("workspace terminal 3/3: ttyd command ready");
     Ok(remote_runtime_exec(
         dir.as_str(),
         "ttyd",
@@ -591,7 +601,7 @@ fn require_replaceable_core(base: &str, health: &CoreHealth) -> Result<(), Strin
         )),
             Ok(_) => Err(claim_error),
             Err(_) => Err(format!(
-                "harbor_core {} does not support access leases; automatic replacement is disabled, use force deploy after closing other Harbor windows",
+                "harbor_core {} does not support access leases; close other Harbor windows and connect again",
                 health.version
             )),
         },
@@ -635,109 +645,59 @@ fn remote_base(workspace: &Workspace) -> Result<String, String> {
     Ok(format!("http://{}:{WEB_API_PORT}", ssh.host.trim()))
 }
 
-fn remote_core_ready(settings: &Settings, workspace: &Workspace) -> Result<bool, String> {
-    let Ok(base) = remote_base(workspace) else {
-        return Ok(false);
-    };
-    match fetch_health_url(&base) {
-        Ok(health)
-            if health.ok
-                && health.version == APP_VERSION
-                && health.api_revision == CORE_API_REVISION
-                && health.workspace_id == workspace.id =>
-        {
-            claim_compatible_access(base.as_str())?;
-            Ok(true)
-        }
+pub fn connect_remote_core(settings: &Settings) -> Result<(), String> {
+    let workspace = settings.current()?.clone();
+    if workspace.mode != WorkspaceMode::Remote {
+        return Err("current workspace is not remote".into());
+    }
+    let ssh = workspace
+        .ssh
+        .as_ref()
+        .ok_or_else(|| "remote workspace requires SSH settings".to_string())?;
+
+    // --- 阶段 1：验证 SSH，不触碰远端 Core ---
+    harbor_core::app_log::gui(&format!(
+        "remote connect 1/4: testing SSH to {}",
+        ssh.host.trim()
+    ));
+    harbor_core::settings::verify_workspace_ssh(ssh.clone())?;
+
+    // --- 阶段 2：优先复用已经运行且版本匹配的 Core ---
+    let base = remote_base(&workspace)?;
+    harbor_core::app_log::gui(&format!(
+        "remote connect 2/4: checking harbor_core at {base}"
+    ));
+    match fetch_health_url(base.as_str()) {
         Ok(health)
             if health.ok
                 && health.version == APP_VERSION
                 && health.api_revision == CORE_API_REVISION =>
         {
             claim_compatible_access(base.as_str())?;
-            switch_workspace(settings, workspace.id.as_str())?;
-            Ok(true)
+            if health.workspace_id != workspace.id {
+                switch_workspace(settings, workspace.id.as_str())?;
+            }
+            harbor_core::app_log::gui("remote connect 4/4: reused running harbor_core");
+            return Ok(());
         }
         Ok(health) if health.ok => {
+            harbor_core::app_log::gui(&format!(
+                "remote connect 3/4: running harbor_core {} is incompatible",
+                health.version
+            ));
             require_replaceable_core(base.as_str(), &health)?;
-            Ok(false)
         }
-        _ => Ok(false),
-    }
-}
-
-fn kick_remote_deploy(workspace: Workspace) {
-    let mut gate = remote_deploy_gate()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if gate.inflight {
-        return;
-    }
-    if gate
-        .retry_after
-        .map(|deadline| Instant::now() < deadline)
-        .unwrap_or(false)
-    {
-        return;
-    }
-    gate.inflight = true;
-    gate.progress = DeployProgress {
-        active: true,
-        percent: 0,
-        transferred: 0,
-        total: 0,
-    };
-    drop(gate);
-    if let Some(ssh) = workspace.ssh.as_ref() {
-        harbor_core::app_log::gui(&format!(
-            "deploying harbor_core {APP_VERSION} to {}:{}",
-            ssh.host.trim(),
-            WEB_API_PORT
-        ));
-    }
-    thread::spawn(move || {
-        let result = deploy_remote_core(&workspace);
-        let mut gate = remote_deploy_gate()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        gate.inflight = false;
-        match result {
-            Ok(()) => {
-                harbor_core::app_log::gui("remote harbor_core ready");
-                gate.last_error = None;
-                gate.retry_after = None;
-                gate.progress.active = false;
-                gate.progress.percent = 100;
-            }
-            Err(error) => {
-                harbor_core::app_log::gui(&format!("deploy harbor_core failed: {error}"));
-                gate.last_error = Some(error);
-                gate.retry_after = Some(Instant::now() + Duration::from_secs(15));
-                gate.progress.active = false;
-            }
+        Ok(_) | Err(_) => {
+            harbor_core::app_log::gui(
+                "remote connect 3/4: harbor_core is not reachable; checking managed release",
+            );
         }
-    });
-}
+    }
 
-fn ensure_remote_core(settings: &Settings, workspace: &Workspace) -> Result<(), String> {
-    if workspace.ssh.is_none() {
-        return Err("remote workspace requires SSH settings".into());
-    }
-    if remote_core_ready(settings, workspace)? {
-        return Ok(());
-    }
-    kick_remote_deploy(workspace.clone());
-    let gate = remote_deploy_gate()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if gate.inflight {
-        Err("copying harbor_core to remote…".into())
-    } else {
-        Err(gate
-            .last_error
-            .clone()
-            .unwrap_or_else(|| "remote harbor_core unreachable".into()))
-    }
+    // --- 阶段 3：仅在远端缺少匹配 release 时复制，再唤醒 Core ---
+    let result = deploy_remote_core(&workspace);
+    finish_deploy_progress();
+    result
 }
 
 pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
@@ -747,6 +707,7 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
         .ok_or_else(|| "remote workspace requires SSH settings".to_string())?;
     let local_bin = install_local_core_bin()?;
     let runtime = shared_objects(local_bin.as_path())?;
+    let runtime_hash = runtime_fingerprint(EXPECTED_CORE_SHA256, &runtime)?;
     let loader = loader_basename(&runtime);
     let dir = remote_core_dir();
     let running_pid = remote_base(workspace)
@@ -758,21 +719,47 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
         ssh,
         &format!("mkdir -p \"$HOME/{dir}\" \"$HOME/.harbor/run\" \"$HOME/.harbor/log\""),
     )?;
-    harbor_core::app_log::gui(&format!(
-        "copying harbor_core {APP_VERSION} and runtime libs to {}",
-        ssh.host.trim()
-    ));
-    send_remote_runtime(ssh, local_bin.as_path(), &runtime)?;
-    let remote_hash = ssh_run(
-        ssh,
-        &format!("sha256sum \"$HOME/{dir}/harbor_core\" | cut -d ' ' -f 1"),
-    )?;
-    let remote_hash = remote_hash.trim();
-    if remote_hash != EXPECTED_CORE_SHA256 {
-        return Err(format!(
-            "remote managed harbor_core hash mismatch: expected {EXPECTED_CORE_SHA256}, got {remote_hash}"
-        ));
+
+    // --- 阶段 1：拒绝终止无法通过 API 确认归属的存活 Core ---
+    if running_pid.is_none() {
+        let unmanaged_pid = ssh_run(
+            ssh,
+            r#"if [ -f "$HOME/.harbor/run/harbor_core.pid" ]; then
+  pid=$(cat "$HOME/.harbor/run/harbor_core.pid")
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then printf '%s\n' "$pid"; fi
+fi"#,
+        )?;
+        if !unmanaged_pid.trim().is_empty() {
+            return Err(format!(
+                "remote harbor_core pid {} is alive but its API is unreachable; refusing to replace it automatically",
+                unmanaged_pid.trim()
+            ));
+        }
     }
+
+    // --- 阶段 2：确认远端是否已有完全匹配的 release ---
+    let remote_state = ssh_run(
+        ssh,
+        &format!(
+            "if [ -x \"$HOME/{dir}/harbor_core\" ]; then sha256sum \"$HOME/{dir}/harbor_core\" | cut -d ' ' -f 1; cat \"$HOME/{dir}/.runtime-sha256\" 2>/dev/null || true; fi"
+        ),
+    )?;
+    let mut remote_state = remote_state.lines();
+    let binary_matches = remote_state.next() == Some(EXPECTED_CORE_SHA256);
+    let runtime_matches = remote_state.next() == Some(runtime_hash.as_str());
+    if binary_matches && runtime_matches {
+        harbor_core::app_log::gui(&format!(
+            "remote connect 3/4: matching harbor_core {APP_VERSION} already installed"
+        ));
+    } else {
+        harbor_core::app_log::gui(&format!(
+            "remote connect 3/4: copying harbor_core {APP_VERSION} to {}",
+            ssh.host.trim()
+        ));
+        send_remote_runtime(ssh, local_bin.as_path(), &runtime, runtime_hash.as_str())?;
+    }
+
+    // --- 阶段 3：停止已确认可替换的旧 Core ---
     let stop = if let Some(pid) = running_pid {
         remote_terminate_script(pid.to_string().as_str())
     } else {
@@ -787,6 +774,7 @@ fi"#,
         )
     };
     ssh_run(ssh, stop.as_str())?;
+    // --- 阶段 4：校验并唤醒匹配版本 Core ---
     let dest = format!("\"$HOME/{dir}/harbor_core\"");
     let mut chmod = format!("chmod +x {dest}");
     if let Some(loader) = loader.as_deref() {
@@ -794,7 +782,6 @@ fi"#,
     }
     let exec_version = remote_core_exec(loader.as_deref(), "--version");
     ssh_run(ssh, &format!("{chmod} && {exec_version}"))?;
-    bump_deploy_percent(92);
     let localhost_only = if workspace.localhost_only() {
         "true"
     } else {
@@ -818,7 +805,6 @@ fi
 "#,
     );
     ssh_run(ssh, start.as_str())?;
-    bump_deploy_percent(96);
     if let Err(error) = wait_health(
         remote_base(workspace)?.as_str(),
         Some(workspace.id.as_str()),
@@ -835,7 +821,7 @@ fi
         return Err(format!("{error}; remote log:\n{remote_log}"));
     }
     claim_compatible_access(remote_base(workspace)?.as_str())?;
-    bump_deploy_percent(100);
+    harbor_core::app_log::gui("remote connect 4/4: harbor_core started and connected");
     Ok(())
 }
 
@@ -846,7 +832,7 @@ fn shell_single_quote(value: &str) -> String {
 pub fn ensure_core(settings: &Settings) -> Result<(), String> {
     let current = settings.current()?.clone();
     if current.mode == WorkspaceMode::Remote {
-        ensure_remote_core(settings, &current)
+        Err("remote workspace requires an explicit connection".into())
     } else {
         ensure_local_core(settings, &current)
     }
@@ -855,7 +841,7 @@ pub fn ensure_core(settings: &Settings) -> Result<(), String> {
 pub fn restart_core(settings: &Settings) -> Result<(), String> {
     let workspace = settings.current()?.clone();
     if workspace.mode == WorkspaceMode::Remote {
-        deploy_remote_core(&workspace)
+        connect_remote_core(settings)
     } else {
         spawn_local_core(&workspace)
     }

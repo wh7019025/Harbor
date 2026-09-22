@@ -7,7 +7,7 @@ createTime: 2026/09/20 00:44:43
 
 远端 Workspace 让你在当前电脑的 Harbor 中，直接管理机器人或服务器上的 Task。
 
-项目文件和程序仍然留在远端机器上。Harbor 通过 SSH 准备远端 `harbor_core`，连接完成后，任务发现、启动、停止和日志读取都由远端 Core 执行。
+项目文件和程序仍然留在远端机器上。切换远端 Workspace 只会切换界面上下文，不会自动部署或启动 `harbor_core`。点击 Workspace 旁的连接按钮后，Harbor 才会建立连接；任务发现、启动、停止和日志读取都由远端 Core 执行。
 
 ::: important 核心规则
 远端 Workspace 不是把本地任务“发送过去运行”。它连接的是远端机器上已经存在的项目和 `harbor_taskcfg`。
@@ -38,23 +38,25 @@ ssh <user>@<host>
 4. 选择 SSH key 或 sshpass 认证方式。
 5. 点击 **verify**，确认显示“SSH 验证成功”。
 6. 保存并切换到这个 Workspace。
+7. 点击 Workspace 旁的连接按钮。
 
 ![创建远端 Workspace，并填写 SSH 主机、用户、端口和密钥](/images/remote-workspace-dialog.png)
 
 推荐优先使用 SSH key。它更适合长期连接机器人或开发服务器，也便于在密码变化后继续使用。
 
-## 第一次连接会发生什么
+## 连接会发生什么
 
-Harbor 会自动完成以下工作：
+Harbor 只在点击连接按钮后执行以下阶段：
 
-1. 通过 SSH 检查远端机器和已有 Core。
-2. 比较 Harbor GUI 所需的版本、API revision 和 SHA-256。
-3. 远端缺少匹配 Core 时，把配套的 release `harbor_core` 和运行依赖复制到远端 `~/.harbor`。
-4. 启动远端 Core，并通过 `http://<host>:29385` 连接。
+1. 测试 SSH 是否可用。
+2. 检查 `http://<host>:29385` 上是否已有 Core。
+3. 检查运行中 Core 的版本与访问租约；其他 Harbor 正在使用时立即停止，不替换它。
+4. 运行中 Core 不可复用时，检查远端是否已经安装匹配 release。
+5. 已有匹配 release 就直接唤醒；只有缺失或 SHA-256 不匹配时才复制到 `~/.harbor`。
 
 ![Harbor 远端连接流程](/images/remote-flow.svg)
 
-正常切换到已经准备好的远端 Workspace 时，不会重复复制 Core。只有远端 Core 缺失、校验不匹配，或用户主动执行“部署并重启”时才会上传。
+切换 Workspace 本身不会连接、复制或唤醒 Core。若 PID 文件指向仍存活但 API 不可达的 Core，Harbor 会拒绝自动替换，避免两个版本互相抢占。
 
 ## 添加远端项目
 
@@ -79,7 +81,8 @@ Harbor 会在这些路径下发现 `harbor_taskcfg`。任务出现后，启动�
 
 终端默认进入 Workspace 的第一条搜索路径，没有搜索路径时进入远端用户 HOME。每个
 Workspace 同时只允许一个终端客户端；关闭窗口、切换 Workspace 或修改连接配置时，
-Harbor 会终止 ttyd 和 SSH Tunnel。
+Harbor 会终止 ttyd 和 SSH Tunnel。点击终端按钮后，检查、部署、启动和失败原因都会
+写入 Harbor Log；底层 SSH/ttyd 输出仍保存在 `~/.harbor/log/workspace-terminal.log`。
 
 ttyd 只绑定远端 `127.0.0.1`，Harbor 会从 `29386–29486` 自动选择空闲端口，不会额外
 向局域网开放 Shell 端口。浏览器访问的是 Harbor 动态分配的本机回环端口，认证仍由
@@ -93,10 +96,10 @@ Workspace 已保存的 SSH 配置完成。
 - Core 可达并且版本匹配。
 - 当前 Workspace 对应的远端任务与日志。
 
-如果显示“版本不符”“正在使用”“不可达”或持续“正在复制”，先打开设置中的 Harbor Core 区域：
+如果显示“版本不符”“正在使用”或“不可达”，可以查看 Harbor Log 中逐阶段记录的连接过程：
 
 - **检查连接**：只读取远端 Core 状态，不修改远端内容。
-- **强制部署**：上传匹配版本并替换远端 Core；执行前应先关闭正在使用它的其他 Harbor。
+- **连接**：测试 SSH、检查 Core 和版本、取得租约，必要时才部署匹配 release。
 
 ## 远端文件
 
@@ -152,9 +155,9 @@ sudo apt-get install -y tigervnc-standalone-server novnc websockify openbox
 
 先在终端中使用相同 host、user、port 和 identity file 测试 SSH。处理主机指纹、密钥权限和登录错误后，再回到 Harbor 验证。
 
-### 一直显示正在复制 Core
+### 连接时复制 Core
 
-正常情况下只有首次连接或版本变化时复制。重复发生时，检查远端 `~/.harbor` 是否可写、磁盘空间是否充足，以及 Harbor Log 中的上传和 SHA-256 校验错误。
+只有匹配 release 缺失或校验不一致时才复制。重复发生时，检查远端 `~/.harbor` 是否可写、磁盘空间是否充足，以及 Harbor Log 中的 SHA-256 和 runtime fingerprint。
 
 ### SSH 成功，但 Core 不可达
 
