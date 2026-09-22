@@ -62,7 +62,6 @@ pub struct WebviewInterface {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VncInterface {
     pub panel_name: String,
-    pub interface_port: u16,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -179,6 +178,8 @@ pub struct TaskCardSnapshot {
     pub root: String,
     #[serde(default = "loopback_address")]
     pub default_route_ip: String,
+    #[serde(default = "crate::vnc_interface::vnc_port")]
+    pub vnc_port: u16,
     pub search_paths: Vec<String>,
     pub discovered_task_dirs: Vec<String>,
     pub discovered_group_dirs: Vec<String>,
@@ -557,6 +558,7 @@ impl TaskCardService {
         TaskCardSnapshot {
             root: absolutize(&self.root),
             default_route_ip: default_route_ip(),
+            vnc_port: crate::vnc_interface::VNC_PORT,
             search_paths: self.search_paths(),
             discovered_task_dirs: self
                 .discovered_task_dirs
@@ -649,10 +651,10 @@ impl TaskCardService {
             create_log_file(log_dir.as_path(), id, selected_config_id.as_deref())?;
         let log_path = log_dir.join(log_file.as_str());
         let remote_runtime = *self.remote_runtime.lock();
-        let vnc_interface = remote_runtime.then(|| task.vnc_interface.first()).flatten();
-        let command = if let Some(panel) = vnc_interface {
+        let uses_vnc = remote_runtime && !task.vnc_interface.is_empty();
+        let command = if uses_vnc {
             crate::vnc_interface::validate_dependencies()
-                .and_then(|_| crate::vnc_interface::build_command(&task.command, panel, task.sudo))
+                .and_then(|_| crate::vnc_interface::build_command(&task.command, task.sudo))
         } else if task.sudo {
             build_sudo_command(&task.command)
         } else {
@@ -1976,20 +1978,8 @@ fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
     for panel in &task.vnc_interface {
         validate_id(panel.panel_name.as_str())
             .map_err(|_| format!("invalid panel_name: {}", panel.panel_name))?;
-        if panel.interface_port == 0 {
-            return Err(format!(
-                "interface_port cannot be 0 for VNC panel {}",
-                panel.panel_name
-            ));
-        }
         if !panel_names.insert(panel.panel_name.as_str()) {
             return Err(format!("duplicate panel_name: {}", panel.panel_name));
-        }
-        if !interface_ports.insert(panel.interface_port) {
-            return Err(format!(
-                "duplicate interface_port: {}",
-                panel.interface_port
-            ));
         }
     }
     build_command(&task.command)?;
@@ -2964,7 +2954,6 @@ id: desktop-app
 workdir: /tmp
 vnc_interface:
   - panel_name: desktop
-    interface_port: 23843
 command:
   argv: [demo]
 "#,
@@ -2981,9 +2970,7 @@ id: desktop-app
 workdir: /tmp
 vnc_interface:
   - panel_name: first
-    interface_port: 23843
   - panel_name: second
-    interface_port: 23844
 command:
   argv: [demo]
 "#;

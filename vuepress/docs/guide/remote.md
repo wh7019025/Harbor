@@ -26,7 +26,8 @@ ssh <user>@<host>
 - 远端用户可以运行项目所需的命令和依赖。
 - 当前电脑可以访问远端 SSH 端口。
 - 当前电脑可以访问远端 TCP `29385`。
-- 使用 `webview_interface` 或 `vnc_interface` 时，对应 `interface_port` 也需要可达。
+- 使用 `webview_interface` 时，对应 `interface_port` 需要可达；使用 `vnc_interface`
+  时，Harbor 固定端口 `23682` 需要可达。
 
 如果这些网络路径被防火墙、容器或路由隔离，Harbor 无法替代底层网络配置。
 
@@ -127,8 +128,9 @@ Harbor 的搜索路径用于发现和运行项目，不会把远端目录挂载�
 qt.qpa.xcb: could not connect to display
 ```
 
-如果 Task 声明了 `vnc_interface`，远端 Core 会自动创建隔离的 X11、TigerVNC、
-noVNC 和 WebSocket 通路，再把原始命令运行到其中。程序无需读取 VNC 配置。
+如果 Task 声明了 `vnc_interface`，远端 Core 会按需启动当前机器唯一的共享 X11、
+TigerVNC、noVNC 和 WebSocket 通路，再把原始命令运行到同一个 `DISPLAY`。程序无需
+读取 VNC 配置，多个 VNC Task 会作为不同窗口出现在同一个桌面中。
 local workspace 会忽略 VNC 包装，仍然直接打开原生窗口。
 
 如果程序可以提供 Web 页面，优先使用 `webview_interface`；它通常比传输整个桌面
@@ -137,7 +139,7 @@ local workspace 会忽略 VNC 包装，仍然直接打开原生窗口。
 远端 VNC 依赖：
 
 ```bash
-sudo apt-get install -y tigervnc-standalone-server novnc websockify openbox
+sudo apt-get install -y tigervnc-standalone-server novnc websockify openbox util-linux
 ```
 
 ## 安全边界

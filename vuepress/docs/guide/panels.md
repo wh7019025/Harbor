@@ -10,7 +10,7 @@ createTime: 2026/09/20 00:44:43
 当程序还需要提供可视化、控制界面、实时视频或交互操作时，可以选择两种入口：
 
 - `webview_interface`：程序主动提供 Web 页面，使用网页图标。
-- `vnc_interface`：Harbor 在远端临时接管原生窗口，使用显示器图标。
+- `vnc_interface`：Harbor 把远端原生窗口放入共享桌面，使用显示器图标。
 
 ![Harbor 中运行的 Robot Panel](/images/harbor-app.png)
 
@@ -27,17 +27,17 @@ createTime: 2026/09/20 00:44:43
 ```yaml
 vnc_interface:
   - panel_name: desktop
-    interface_port: 23682
 command:
   argv: [your-gui-program]
 ```
 
 程序不需要读取 Harbor 环境变量，也不需要知道 VNC 如何配置。local workspace
-仍直接打开程序的原生窗口，不启动 VNC；只有 remote workspace 会自动创建虚拟
-显示屏，并从远端机器发布 noVNC 页面。WebView 不受影响。完整配置见
+仍直接打开程序的原生窗口，不启动 VNC；只有 remote workspace 会按需启动机器级
+共享虚拟显示屏，并从固定端口 `23682` 发布 noVNC 页面。所有 VNC Task 的窗口都在
+同一个桌面中；停止其中一个 Task 不会关闭桌面或其他窗口。WebView 不受影响。完整配置见
 [VNC Interface 示例](https://github.com/wh7019025/Harbor/tree/main/examples/vnc_interface)。
 
-运行 Task 的机器需要安装 TigerVNC、noVNC、websockify 和 Openbox。
+运行 Task 的机器需要安装 TigerVNC、noVNC、websockify、Openbox 和 util-linux。
 
 ## WebView：程序提供 Web 页面
 

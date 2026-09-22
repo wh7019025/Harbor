@@ -54,7 +54,7 @@ Core 自身退出时同样保留 Task。后续 Core 会读取机器级运行记�
 
 ### 用户程序
 
-用户程序是 Core 托管的普通系统进程，通过 stdout/stderr 输出日志。界面能力分为三类：无 UI 不做额外处理；`webview_interface` 由程序提供 HTTP 页面；`vnc_interface` 由远端 Core 为原生窗口建立临时 X11/noVNC 环境。
+用户程序是 Core 托管的普通系统进程，通过 stdout/stderr 输出日志。界面能力分为三类：无 UI 不做额外处理；`webview_interface` 由程序提供 HTTP 页面；`vnc_interface` 由远端 Core 把原生窗口接入当前机器唯一的共享 X11/noVNC 桌面。
 
 ## 本地连接
 

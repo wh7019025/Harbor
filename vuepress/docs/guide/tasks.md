@@ -43,7 +43,7 @@ Task 是 Harbor 中最基本的运行单元，表示一个可以反复启动的�
 - **程序只有原生窗口**：需要远端操作时配置 `vnc_interface`，Harbor 显示显示器图标。
 
 本地运行带 `vnc_interface` 的 Task 时仍直接打开原生窗口；只有 remote workspace
-会创建 VNC 环境。远端无 UI 任务不需要 VNC。
+会使用机器级共享 VNC 桌面。远端无 UI 任务不需要 VNC。
 
 ## 创建 Task
 

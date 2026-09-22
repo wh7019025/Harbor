@@ -9,7 +9,6 @@ export interface TaskWebviewInterface {
 
 export interface TaskVncInterface {
   panel_name: string;
-  interface_port: number;
 }
 
 export interface TaskCardConfig {
@@ -63,6 +62,7 @@ export interface TaskCardGroup {
 export interface TaskCardSnapshot {
   root: string;
   default_route_ip: string;
+  vnc_port: number;
   search_paths: string[];
   discovered_task_dirs: string[];
   discovered_group_dirs: string[];
@@ -275,6 +275,7 @@ export function interfaceUrls(
   task: TaskCardTask,
   settings: Settings | null,
   defaultRouteIp?: string,
+  vncPort?: number,
 ) {
   const workspace = settings?.workspaces.find((item) => item.id === settings.current_workspace);
   const remote = workspace?.mode === "remote";
@@ -293,7 +294,7 @@ export function interfaceUrls(
     ? (task.vnc_interface ?? []).map((panel) => ({
         kind: "vnc" as const,
         name: panel.panel_name,
-        url: `http://${workspaceHost}:${panel.interface_port}/`,
+        url: `http://${workspaceHost}:${vncPort ?? 23682}/`,
       }))
     : [];
   return [...webviews, ...vnc];

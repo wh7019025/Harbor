@@ -703,7 +703,12 @@ function taskRunning(task: TaskCardTask | undefined) {
 }
 
 function taskInterfaceUrls(task: TaskCardTask) {
-  return interfaceUrls(task, settings.value, snapshot.value?.default_route_ip);
+  return interfaceUrls(
+    task,
+    settings.value,
+    snapshot.value?.default_route_ip,
+    snapshot.value?.vnc_port,
+  );
 }
 
 async function openTaskPanel(task: TaskCardTask, panelName: string) {

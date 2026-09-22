@@ -2,13 +2,12 @@ version: "0.2.0-preview.4"
 uuid: "cc965e33-8ec1-414a-b6cd-32db5f39e201"
 id: vnc-demo
 name: VNC Interface Demo
-description: 本地直接打开 Obsidian，远端通过 Harbor Panel 临时操作
+description: 本地直接打开 Obsidian，远端通过 Harbor 共享 VNC 桌面操作
 workdir: $(harbor_taskcfg_dir)/..
 env: {}
 sudo: false
 vnc_interface:
   - panel_name: desktop
-    interface_port: 23682
 command:
   argv:
     - obsidian

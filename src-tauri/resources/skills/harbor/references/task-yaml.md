@@ -136,21 +136,21 @@ Harbor 启动 Task 时会把单个面板声明注入以下保留环境变量，�
 ```yaml
 vnc_interface:
   - panel_name: desktop
-    interface_port: 23682
 ```
 
-local workspace 会忽略该入口并直接打开原生窗口。remote workspace 会建立隔离的
-X11、TigerVNC 和 noVNC 环境，并在 `interface_port` 发布桌面页面。程序不会收到
-VNC 相关环境变量，也不需要知道 Harbor 的显示配置。
+`vnc_interface` 只有 `panel_name`，不配置端口。local workspace 会忽略该入口并直接
+打开原生窗口。remote workspace 会按需启动当前机器唯一的共享 X11、TigerVNC 和
+noVNC 桌面，并统一在 Harbor 固定端口 `23682` 发布页面。所有 VNC Task 共用同一个
+`DISPLAY`；停止一个 Task 不会关闭共享桌面，也不会影响其中的其他 Task。
 
 使用 `vnc_interface` 时不要在 `env` 或启动脚本中设置 `DISPLAY`、`XAUTHORITY`、
-`WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端由 Harbor 设置隔离显示
+`WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端由 Harbor 设置共享显示
 环境，本地则继承当前图形会话；手写 `DISPLAY=:0` 会绕过远端 VNC。
 
-`interface_port` 是浏览器访问 noVNC 的 HTTP/WebSocket 端口，不是 VNC TCP 端口。
-TigerVNC 的 TCP 监听会被关闭，只通过 Core 创建的临时 Unix Socket 通信。
+TigerVNC 的 TCP 监听会被关闭，只通过 Harbor 运行时目录中的 Unix Socket 通信。
 
-远端机器需要安装 `tigervnc-standalone-server`、`novnc`、`websockify` 和 `openbox`。
+远端机器需要安装 `tigervnc-standalone-server`、`novnc`、`websockify`、`openbox` 和
+`util-linux`。
 Harbor 会在启动 Task 前检查这些依赖；缺失时启动失败并直接返回缺失项以及适用于
 Debian/Ubuntu 的安装命令，同时把同一错误写入该次 Task Log。
 
