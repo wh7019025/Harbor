@@ -2251,12 +2251,16 @@ fn process_leader_alive(record: &RunningTaskRecord) -> bool {
     })
 }
 
+const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const GRACEFUL_STOP_ATTEMPTS: usize = 10;
+const FORCED_STOP_ATTEMPTS: usize = 20;
+
 fn wait_for_process_group_exit(record: &RunningTaskRecord, attempts: usize) -> bool {
     for _ in 0..attempts {
         if !process_group_alive(record) {
             return true;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(PROCESS_EXIT_POLL_INTERVAL);
     }
     !process_group_alive(record)
 }
@@ -2266,11 +2270,11 @@ fn terminate_orphan(record: &RunningTaskRecord) -> Result<(), String> {
         return Ok(());
     }
     signal_process_group(record, libc::SIGTERM)?;
-    if wait_for_process_group_exit(record, 20) {
+    if wait_for_process_group_exit(record, GRACEFUL_STOP_ATTEMPTS) {
         return Ok(());
     }
     signal_process_group(record, libc::SIGKILL)?;
-    if !wait_for_process_group_exit(record, 20) {
+    if !wait_for_process_group_exit(record, FORCED_STOP_ATTEMPTS) {
         return Err(format!(
             "task {} process group {} is still alive after SIGKILL",
             record.id, record.pgid
@@ -2294,16 +2298,16 @@ fn signal_process_group(record: &RunningTaskRecord, signal: i32) -> Result<(), S
 
 fn terminate_task(record: &RunningTaskRecord, child: &mut Child) -> Result<(), String> {
     signal_process_group(record, libc::SIGTERM)?;
-    for _ in 0..20 {
+    for _ in 0..GRACEFUL_STOP_ATTEMPTS {
         let exited = child.try_wait().map_err(|e| e.to_string())?.is_some();
         if exited && !process_group_alive(record) {
             return Ok(());
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(PROCESS_EXIT_POLL_INTERVAL);
     }
     signal_process_group(record, libc::SIGKILL)?;
     let _ = child.wait();
-    if wait_for_process_group_exit(record, 20) {
+    if wait_for_process_group_exit(record, FORCED_STOP_ATTEMPTS) {
         Ok(())
     } else {
         Err(format!(

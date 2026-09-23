@@ -113,6 +113,10 @@ fn api_timeout() -> Duration {
     Duration::from_secs(3)
 }
 
+fn batch_operation_timeout() -> Duration {
+    Duration::from_secs(60)
+}
+
 fn http_agent(timeout: Duration) -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(timeout)
@@ -187,6 +191,19 @@ pub fn core_post<T: DeserializeOwned>(
     body: Value,
 ) -> Result<T, String> {
     core_write(settings, "POST", path, body)
+}
+
+fn core_post_batch<T: DeserializeOwned>(
+    settings: &Settings,
+    path: &str,
+    body: Value,
+) -> Result<T, String> {
+    let url = format!("{}{path}", core_base_url(settings)?);
+    let resp = http_agent(batch_operation_timeout())
+        .post(url.as_str())
+        .send_json(body)
+        .map_err(map_ureq)?;
+    decode_json(path, resp)
 }
 
 fn core_put<T: DeserializeOwned>(
@@ -482,7 +499,7 @@ pub fn restart_task(
 }
 
 pub fn stop_all(settings: &Settings) -> Result<Vec<String>, String> {
-    let body: Value = core_post(settings, "/api/v1/tasks/stop-all", json!({}))?;
+    let body: Value = core_post_batch(settings, "/api/v1/tasks/stop-all", json!({}))?;
     Ok(body
         .get("errors")
         .and_then(Value::as_array)
@@ -509,7 +526,7 @@ pub fn start_group(
     id: &str,
     sudo_password: Option<&str>,
 ) -> Result<(), String> {
-    core_post_ok(
+    let _: Value = core_post_batch(
         settings,
         "/api/v1/groups/start",
         json!({
@@ -517,15 +534,17 @@ pub fn start_group(
             "prefix_path": prefix_path,
             "sudo_password": sudo_password,
         }),
-    )
+    )?;
+    Ok(())
 }
 
 pub fn stop_group(settings: &Settings, prefix_path: &str, id: &str) -> Result<(), String> {
-    core_post_ok(
+    let _: Value = core_post_batch(
         settings,
         "/api/v1/groups/stop",
         json!({ "id": id, "prefix_path": prefix_path }),
-    )
+    )?;
+    Ok(())
 }
 
 pub fn task_yaml(
