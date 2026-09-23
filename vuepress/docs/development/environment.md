@@ -7,6 +7,27 @@ createTime: 2026/09/20 01:52:37
 
 Harbor 当前面向 Linux 开发，桌面端使用 Vue 3、Vite、Tauri 2 和 Rust。
 
+## Docker 远端测试机
+
+开发时可以把本机 Docker 容器作为独立远端机器，验证 SSH、远端 Core，以及通过
+共享 VNC 打开 Ubuntu Desktop Session 并运行 `xclock`，不需要另一台物理设备。
+
+```bash
+npm run remote:test:up
+npm run remote:test:dev
+```
+
+若 Docker Socket 提示权限不足，执行 `sudo usermod -aG docker "$USER"`，注销并重新登录后再试。
+
+在 Harbor 中创建 remote Workspace，使用 `127.0.0.2:2222`、用户和密码
+`harbor`，Search Path 填写 `/home/harbor/workspace`。测试结束后运行：
+
+```bash
+npm run remote:test:down
+```
+
+完整配置与测试 Task 见仓库中的 `docker/remote-test/README.md`。
+
 ## 基础工具
 
 安装以下工具：

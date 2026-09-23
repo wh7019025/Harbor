@@ -142,6 +142,17 @@ local workspace 会忽略 VNC 包装，仍然直接打开原生窗口。
 sudo apt-get install -y tigervnc-standalone-server novnc websockify openbox util-linux
 ```
 
+Harbor 优先使用 Ubuntu Desktop Session；不可用时依次回退到 GNOME、GNOME
+Flashback 和 Openbox。若希望获得接近正常 Ubuntu Desktop 的显示效果，安装：
+
+```bash
+sudo apt-get install -y ubuntu-session gnome-shell-extension-ubuntu-dock \
+  yaru-theme-gnome-shell gnome-session gnome-session-flashback dbus-x11
+```
+
+如需明确选择其他 GNOME Session，可设置 `HARBOR_VNC_DESKTOP_SESSION`；设置为
+`openbox` 可强制使用轻量桌面。
+
 ## 安全边界
 
 远端 `harbor_core` 当前没有访问认证。任何能连接远端 `29385` 端口的设备，都可能查看状态并起停任务。

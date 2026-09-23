@@ -1,0 +1,15 @@
+version: "0.2.0-preview.4"
+uuid: "2f00e0ad-d583-4c13-b15b-659ec52aaec8"
+id: docker-vnc-demo
+name: Ubuntu Desktop + xclock
+description: 打开 Docker 远端机的共享 Ubuntu Desktop 并运行 xclock
+workdir: /home/harbor/workspace
+env: {}
+sudo: false
+vnc_interface:
+  - panel_name: ubuntu_desktop
+command:
+  argv:
+    - xclock
+    - -update
+    - "1"

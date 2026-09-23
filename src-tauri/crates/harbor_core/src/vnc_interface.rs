@@ -26,7 +26,9 @@ child_pids=()
 cleanup() {
   trap - EXIT INT TERM
   if ((${#child_pids[@]})); then
-    kill "${child_pids[@]}" 2>/dev/null || true
+    for child_pid in "${child_pids[@]}"; do
+      kill -TERM -- "-${child_pid}" 2>/dev/null || kill -TERM "${child_pid}" 2>/dev/null || true
+    done
     wait "${child_pids[@]}" 2>/dev/null || true
   fi
   rm -f "${vnc_socket}" "${supervisor_file}" "${ready_file}"
@@ -74,6 +76,7 @@ export DISPLAY=":${display_number}"
 export GDK_BACKEND=x11
 export QT_QPA_PLATFORM=xcb
 export SDL_VIDEODRIVER=x11
+export XDG_SESSION_TYPE=x11
 unset WAYLAND_DISPLAY
 
 Xtigervnc "${DISPLAY}" \
@@ -97,8 +100,75 @@ if [[ ! -S "${vnc_socket}" ]]; then
   exit 1
 fi
 
-openbox --sm-disable >>"${infrastructure_log}" 2>&1 &
+desktop_session="${HARBOR_VNC_DESKTOP_SESSION:-auto}"
+if [[ "${desktop_session}" == auto ]]; then
+  if command -v gnome-session >/dev/null 2>&1 \
+    && command -v dbus-run-session >/dev/null 2>&1 \
+    && command -v gnome-shell >/dev/null 2>&1 \
+    && [[ -f /usr/share/gnome-session/sessions/ubuntu.session ]]; then
+    desktop_session=ubuntu
+  elif command -v gnome-session >/dev/null 2>&1 \
+    && command -v dbus-run-session >/dev/null 2>&1 \
+    && command -v gnome-shell >/dev/null 2>&1 \
+    && [[ -f /usr/share/gnome-session/sessions/gnome.session ]]; then
+    desktop_session=gnome
+  elif command -v gnome-session >/dev/null 2>&1 \
+    && command -v dbus-run-session >/dev/null 2>&1 \
+    && [[ -f /usr/share/gnome-session/sessions/gnome-flashback-metacity.session ]]; then
+    desktop_session=gnome-flashback-metacity
+  else
+    desktop_session=openbox
+  fi
+fi
+if [[ "${desktop_session}" != openbox ]]; then
+  export XDG_RUNTIME_DIR="${runtime_dir}/xdg-runtime"
+  if [[ "${desktop_session}" == ubuntu ]]; then
+    export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+    export XDG_SESSION_DESKTOP=ubuntu
+    export GNOME_SHELL_SESSION_MODE=ubuntu
+  else
+    export XDG_CURRENT_DESKTOP=GNOME
+    export XDG_SESSION_DESKTOP=gnome
+  fi
+  export LIBGL_ALWAYS_SOFTWARE=1
+  mkdir -p "${XDG_RUNTIME_DIR}"
+  chmod 700 "${XDG_RUNTIME_DIR}"
+  if [[ "${desktop_session}" == ubuntu ]]; then
+    setsid dbus-run-session -- bash -c '
+      export GNOME_SHELL_SESSION_MODE=ubuntu
+      gsettings set org.gnome.shell disable-user-extensions false
+      gsettings set org.gnome.shell enabled-extensions "['\''ubuntu-dock@ubuntu.com'\'']"
+      exec gnome-session --session=ubuntu
+    ' harbor-ubuntu-desktop >>"${infrastructure_log}" 2>&1 &
+  elif [[ "${desktop_session}" == gnome ]]; then
+    setsid dbus-run-session -- gnome-shell --x11 >>"${infrastructure_log}" 2>&1 &
+  elif [[ "${desktop_session}" == gnome-flashback-metacity ]]; then
+    setsid dbus-run-session -- bash -c '
+      desktop_pids=()
+      cleanup_desktop() {
+        trap - EXIT INT TERM
+        kill "${desktop_pids[@]}" 2>/dev/null || true
+        wait "${desktop_pids[@]}" 2>/dev/null || true
+      }
+      trap cleanup_desktop EXIT INT TERM
+      gnome-flashback & desktop_pids+=("$!")
+      metacity --replace & desktop_pids+=("$!")
+      gnome-panel & desktop_pids+=("$!")
+      nautilus --no-default-window & desktop_pids+=("$!")
+      wait -n "${desktop_pids[@]}"
+    ' harbor-gnome-desktop >>"${infrastructure_log}" 2>&1 &
+  else
+    setsid dbus-run-session -- gnome-session --session="${desktop_session}" >>"${infrastructure_log}" 2>&1 &
+  fi
+else
+  openbox --sm-disable >>"${infrastructure_log}" 2>&1 &
+fi
 child_pids+=("$!")
+
+# GNOME Session 会在初始化时接管窗口管理器；等待其稳定后再放行 Task。
+if [[ "${desktop_session}" != openbox ]]; then
+  sleep 3
+fi
 
 websockify \
   --web "${web_root}" \
@@ -201,10 +271,12 @@ unset WAYLAND_DISPLAY XAUTHORITY
 exec "$@"
 "##;
 
-const REQUIRED_COMMANDS: [&str; 5] = ["Xtigervnc", "openbox", "websockify", "flock", "setsid"];
+const REQUIRED_COMMANDS: [&str; 4] = ["Xtigervnc", "websockify", "flock", "setsid"];
 const NOVNC_ASSETS: &str = "/usr/share/novnc";
 const INSTALL_HINT: &str =
     "sudo apt install tigervnc-standalone-server novnc websockify openbox util-linux";
+const GNOME_INSTALL_HINT: &str =
+    "sudo apt install ubuntu-session gnome-session gnome-shell gnome-session-flashback dbus-x11";
 
 pub fn vnc_port() -> u16 {
     VNC_PORT
@@ -220,12 +292,59 @@ pub fn validate_dependencies() -> Result<(), String> {
     if !Path::new(NOVNC_ASSETS).is_dir() {
         missing.push(format!("noVNC assets ({NOVNC_ASSETS})"));
     }
+    let desktop_session = std::env::var("HARBOR_VNC_DESKTOP_SESSION")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let use_gnome = if desktop_session.is_empty() || desktop_session == "auto" {
+        command_available("gnome-session") && command_available("dbus-run-session")
+            && (Path::new("/usr/share/gnome-session/sessions/ubuntu.session").is_file()
+                || Path::new("/usr/share/gnome-session/sessions/gnome.session").is_file()
+                || Path::new(
+                    "/usr/share/gnome-session/sessions/gnome-flashback-metacity.session",
+                )
+                .is_file())
+    } else {
+        desktop_session != "openbox"
+    };
+    let use_flashback = use_gnome
+        && (desktop_session.is_empty()
+            || desktop_session == "auto"
+            || desktop_session == "gnome-flashback-metacity");
+    if !use_gnome {
+        if !command_available("openbox") {
+            missing.push("openbox".into());
+        }
+    } else if use_flashback {
+        for command_name in [
+            "dbus-run-session",
+            "gnome-flashback",
+            "metacity",
+            "gnome-panel",
+            "nautilus",
+        ] {
+            if !command_available(command_name) {
+                missing.push(command_name.into());
+            }
+        }
+    } else {
+        for command_name in ["gnome-session", "gnome-shell", "dbus-run-session"] {
+            if !command_available(command_name) {
+                missing.push(command_name.into());
+            }
+        }
+    }
     if missing.is_empty() {
         return Ok(());
     }
+    let install_hint = if use_gnome {
+        GNOME_INSTALL_HINT
+    } else {
+        INSTALL_HINT
+    };
     Err(format!(
-        "vnc_interface unavailable; missing remote dependencies: {}; install with: {INSTALL_HINT}",
-        missing.join(", ")
+        "vnc_interface unavailable; missing remote dependencies: {}; install with: {install_hint}",
+        missing.join(", "),
     ))
 }
 
@@ -296,6 +415,14 @@ mod tests {
         assert_eq!(remote_args.last().map(|arg| arg.as_ref()), Some("--flag"));
         assert!(ENSURE_DISPLAY_SCRIPT.contains("harbor-vnc-server"));
         assert!(SHARED_DISPLAY_SCRIPT.contains("new RFB"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("HARBOR_VNC_DESKTOP_SESSION"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("ubuntu.session"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("XDG_CURRENT_DESKTOP=ubuntu:GNOME"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("GNOME_SHELL_SESSION_MODE=ubuntu"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("ubuntu-dock@ubuntu.com"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("gnome-session"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("gnome-shell --x11"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("openbox --sm-disable"));
         assert!(ENSURE_DISPLAY_SCRIPT.contains("flock 9"));
         assert!(ENSURE_DISPLAY_SCRIPT.contains("exec \"$@\""));
     }

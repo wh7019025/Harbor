@@ -1,0 +1,13 @@
+services:
+  harbor-remote:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: harbor-remote-test
+    hostname: harbor-remote-test
+    init: true
+    ports:
+      - "127.0.0.2:2222:22"
+      - "127.0.0.2:23682:23682"
+      - "127.0.0.2:29385:29385"
+    stop_grace_period: 5s
