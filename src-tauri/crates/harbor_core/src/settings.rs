@@ -82,8 +82,10 @@ pub struct Settings {
     pub current_workspace: String,
     #[serde(default = "default_workspaces")]
     pub workspaces: Vec<Workspace>,
-    pub metrics_fast_ms: u64,
-    pub metrics_slow_ms: u64,
+    #[serde(alias = "metrics_fast_ms")]
+    pub performance_metrics_interval_ms: u64,
+    #[serde(alias = "metrics_slow_ms")]
+    pub resource_metrics_interval_ms: u64,
 }
 
 fn default_workspace_id() -> String {
@@ -471,8 +473,8 @@ impl Default for Settings {
         Self {
             current_workspace: default_workspace_id(),
             workspaces: default_workspaces(),
-            metrics_fast_ms: 1000,
-            metrics_slow_ms: 10000,
+            performance_metrics_interval_ms: 1000,
+            resource_metrics_interval_ms: 10000,
         }
     }
 }
@@ -814,8 +816,8 @@ mod tests {
     fn local_workspace_localhost_only_defaults_true() {
         let settings: Settings = serde_json::from_str(
             r#"{
-                "metrics_fast_ms": 1000,
-                "metrics_slow_ms": 10000
+                "performance_metrics_interval_ms": 1000,
+                "resource_metrics_interval_ms": 10000
             }"#,
         )
         .unwrap();
@@ -1012,7 +1014,8 @@ mod tests {
         assert_eq!(settings.current_workspace, "default");
         assert_eq!(settings.workspaces, default_workspaces());
         assert!(settings.current().unwrap().search_paths.is_empty());
-        assert_eq!(settings.metrics_fast_ms, 500);
+        assert_eq!(settings.performance_metrics_interval_ms, 500);
+        assert_eq!(settings.resource_metrics_interval_ms, 2000);
         assert!(settings.current().unwrap().localhost_only());
     }
 

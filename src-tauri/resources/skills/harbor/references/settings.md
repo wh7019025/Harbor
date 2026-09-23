@@ -4,7 +4,7 @@
 
 Search Paths 属于**当前 workspace**。Agent 可以直接维护当前 workspace 的 `search_paths`，无需指导用户操作界面。
 
-Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其他 Harbor 设置必须保留原值，包括 `workspaces` 里的 `mode` / `ssh` / `localhost_only`、其余项、`current_workspace` 和 `metrics_*`。
+Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其他 Harbor 设置必须保留原值，包括 `workspaces` 里的 `mode` / `ssh` / `localhost_only`、其余项、`current_workspace`、`performance_metrics_interval_ms` 和 `resource_metrics_interval_ms`。
 
 ```json
 {
@@ -20,8 +20,8 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
       ]
     }
   ],
-  "metrics_fast_ms": 1000,
-  "metrics_slow_ms": 10000
+  "performance_metrics_interval_ms": 1000,
+  "resource_metrics_interval_ms": 10000
 }
 ```
 

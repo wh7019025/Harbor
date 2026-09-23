@@ -855,6 +855,52 @@ pub fn release_core(settings: &Settings) {
     let _ = release_access(settings);
 }
 
+pub fn shutdown_core(settings: &Settings) -> Result<(), String> {
+    // --- 阶段 1：通过健康接口确认当前 Workspace 的 Core ---
+    let workspace = settings.current()?.clone();
+    let health = fetch_health(settings)?;
+    let pid = i32::try_from(health.pid)
+        .ok()
+        .filter(|pid| *pid > 0)
+        .ok_or_else(|| "harbor_core did not report a valid pid".to_string())?;
+
+    // --- 阶段 2：停止 Core 管理的全部 Task ---
+    let stop_errors = crate::core_client::stop_all(settings)?;
+    if !stop_errors.is_empty() {
+        return Err(format!(
+            "部分 Task 停止失败，已取消退出：\n{}",
+            stop_errors.join("\n")
+        ));
+    }
+    release_core(settings);
+
+    // --- 阶段 3：在 Core 所在机器终止已确认的进程 ---
+    if workspace.mode == WorkspaceMode::Remote {
+        let ssh = workspace
+            .ssh
+            .as_ref()
+            .ok_or_else(|| "remote workspace requires SSH settings".to_string())?;
+        let script = format!(
+            r#"{}
+if [ -f "$HOME/.harbor/run/harbor_core.pid" ] && [ "$(cat "$HOME/.harbor/run/harbor_core.pid")" = "{pid}" ]; then
+  rm -f "$HOME/.harbor/run/harbor_core.pid"
+fi"#,
+            remote_terminate_script(pid.to_string().as_str())
+        );
+        ssh_run(ssh, script.as_str())?;
+    } else {
+        terminate_pid(pid);
+        if pid_is_running(pid) {
+            return Err(format!("harbor_core pid {pid} did not exit"));
+        }
+        let pid_path = core_pid_path();
+        if fs::read_to_string(&pid_path).is_ok_and(|raw| raw.trim() == pid.to_string()) {
+            let _ = fs::remove_file(pid_path);
+        }
+    }
+    Ok(())
+}
+
 pub fn probe_core(settings: &Settings) -> Result<(), String> {
     let health = fetch_health(settings)?;
     if health.version != APP_VERSION {

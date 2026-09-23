@@ -24,8 +24,8 @@ export interface Workspace {
 export interface Settings {
   current_workspace: string;
   workspaces: Workspace[];
-  metrics_fast_ms: number;
-  metrics_slow_ms: number;
+  performance_metrics_interval_ms: number;
+  resource_metrics_interval_ms: number;
 }
 
 export interface HarborCoreStatus {
@@ -101,6 +101,10 @@ export function probeHarborCore() {
 
 export function restartHarborCore() {
   return invoke<HarborCoreStatus>("restart_harbor_core");
+}
+
+export function shutdownHarborCoreAndExit() {
+  return invoke<void>("shutdown_harbor_core_and_exit");
 }
 
 export interface AppUpdateInfo {

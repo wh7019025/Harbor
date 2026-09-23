@@ -118,11 +118,11 @@ fn get_settings(state: State<'_, Arc<AppState>>) -> Settings {
 
 #[tauri::command]
 fn update_settings(state: State<'_, Arc<AppState>>, next: Settings) -> Result<Settings, String> {
-    if next.metrics_fast_ms < 200 {
-        return Err("metrics_fast_ms must be >= 200".into());
+    if next.performance_metrics_interval_ms < 200 {
+        return Err("performance_metrics_interval_ms must be >= 200".into());
     }
-    if next.metrics_slow_ms < 1000 {
-        return Err("metrics_slow_ms must be >= 1000".into());
+    if next.resource_metrics_interval_ms < 1000 {
+        return Err("resource_metrics_interval_ms must be >= 1000".into());
     }
 
     let current = state.settings.lock().clone();
@@ -360,6 +360,34 @@ async fn restart_harbor_core(state: State<'_, Arc<AppState>>) -> Result<HarborCo
         .await
         .map_err(|error| error.to_string())??;
     Ok(core_client::core_status(&settings))
+}
+
+#[tauri::command]
+async fn shutdown_harbor_core_and_exit(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let settings = current_settings(state.inner());
+    let workspace = settings.current()?.clone();
+    if workspace.mode == WorkspaceMode::Remote
+        && state.remote_core_connection.lock().as_deref() != Some(workspace.id.as_str())
+    {
+        return Err("当前 GUI 尚未连接此远端 harbor_core，不能关闭它".into());
+    }
+    let job = settings.clone();
+
+    // --- 阶段 1：停止全部 Task 与当前 Workspace 对应的 Core ---
+    tauri::async_runtime::spawn_blocking(move || core_process::shutdown_core(&job))
+        .await
+        .map_err(|error| format!("shutdown harbor_core worker failed: {error}"))??;
+    harbor_core::app_log::gui("all tasks and harbor_core stopped by user; exiting GUI");
+
+    // --- 阶段 2：关闭 GUI 附属进程与窗口 ---
+    *state.remote_core_connection.lock() = None;
+    close_workspace_terminal(&app, state.inner());
+    close_panel_tunnels(&app, state.inner());
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -928,6 +956,7 @@ pub fn run() {
             harbor_copy_progress,
             probe_harbor_core,
             restart_harbor_core,
+            shutdown_harbor_core_and_exit,
             get_system_metrics,
             get_fast_system_metrics,
             get_slow_system_metrics,

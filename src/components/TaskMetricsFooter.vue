@@ -157,14 +157,14 @@ onMounted(async () => {
     } catch {
       // Keep last values when sample fails.
     }
-  }, settings?.metrics_fast_ms ?? 1000);
+  }, settings?.performance_metrics_interval_ms ?? 1000);
   slowTimer = window.setInterval(async () => {
     try {
       mergeSlowMetrics(await getSlowSystemMetrics());
     } catch {
       // Keep last values when sample fails.
     }
-  }, settings?.metrics_slow_ms ?? 10000);
+  }, settings?.resource_metrics_interval_ms ?? 10000);
   coreTimer = window.setInterval(() => {
     void pollCoreStatus();
   }, 2500);

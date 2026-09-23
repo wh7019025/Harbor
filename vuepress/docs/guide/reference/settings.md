@@ -30,6 +30,11 @@ Harbor 的用户数据统一位于：
 - 一个或多个 `search_paths`。
 - 远端模式下的 SSH host、port 与 user。
 
+## 指标刷新
+
+- `performance_metrics_interval_ms`：CPU、网络和 GPU 性能指标的刷新间隔，默认 `1000` 毫秒。
+- `resource_metrics_interval_ms`：内存、Swap 和磁盘指标的刷新间隔，默认 `10000` 毫秒。
+
 ## 路径规则
 
 - 本地路径在本机解析。

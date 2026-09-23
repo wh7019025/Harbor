@@ -80,6 +80,9 @@ Harbor 会为新 Task 生成 UUID。不要从其他 Task 复制 UUID，它是 Ha
 
 关闭 Harbor GUI 不会停止 Core 或 Task。Core 自身退出时也会保留正在运行的 Task；再次启动 Core 后，会根据 `~/.harbor/runtime/run/tasks.json` 重新接管这些运行单元。只有显式执行 Stop、Restart、Stop All 或在任务管理器中终止，才会关闭对应进程组。
 
+如果需要完全退出，可在 Settings 中选择 **停止全部并退出**。Harbor 会先停止当前
+Core 管理的全部 Task，全部成功后再关闭 Core 和 GUI；任一 Task 停止失败时会取消退出。
+
 ## 使用运行配置
 
 同一个程序需要几种稳定运行方式时，可以为 Task 添加 config。例如：
