@@ -86,6 +86,7 @@ Harbor Skill 可以通过 API 直接读取状态和日志，不需要先手动�
 
 ```text
 ~/.harbor/workspace/<workspace-id>/log
+~/.harbor/remote/log
 ```
 
 一般不需要直接操作这些文件；通过 Harbor 界面或 API 查看，可以保持本地与远端使用方式一致。

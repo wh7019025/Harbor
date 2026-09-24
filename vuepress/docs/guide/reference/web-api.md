@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # Web API
 
-Core 默认监听端口 `29385`，当前 API revision 为 **6**，基础路径为：
+Core 默认监听端口 `29385`，当前 API revision 为 **18**，基础路径为：
 
 ```text
 http://<host>:29385/api/v1
@@ -26,7 +26,15 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | `POST` | `/access/claim` | 获取或刷新 GUI 访问租约。 |
 | `POST` | `/access/release` | 释放 GUI 访问租约。 |
 | `GET` | `/snapshot` | 一次获取 Workspace、Task、Group 与状态快照。 |
+| `GET` | `/services` | 列出 Core 管理的 VNC 与 ttyd 基础服务状态。 |
 | `POST` | `/discovery/refresh` | 重新扫描搜索路径。 |
+| `POST` | `/terminal/ensure` | 确保 Core 托管的机器级 ttyd 已按指定 Workspace 启动。 |
+
+`POST /terminal/ensure` 接收 `{ "workdir", "title" }`，返回
+`{ "ready": true, "port": 29386 }`。该接口只在 remote runtime 模式可用；Core 只会
+启动 GUI 已按哈希部署到 `~/.harbor/tools/ttyd/current/run` 的固定入口，不接受任意命令。
+
+`/snapshot` 直接返回 Core 维护的缓存，不会在请求中同步扫描 YAML 或进程。缓存超过 5 秒时仍会立即返回最后一份数据，将 `stale` 标记为 `true`，并触发一次后台刷新；刷新进行中不会重复扫描。`generated_at_ms` 表示该快照的生成时间。
 
 ## Task
 
@@ -58,6 +66,10 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | --- | --- | --- |
 | `GET` | `/processes` | 列出 Harbor 启动且仍存活的进程组与成员进程。 |
 | `POST` | `/processes/stop` | 使用 Task UUID 终止一个托管进程组。 |
+
+`GET /services` 返回 Virtual VNC、Physical VNC 与 Terminal 的聚合状态，包括状态、
+supervisor/服务 PID、固定端口、监听地址和错误。它们随 `harbor_core` 启停，返回值中的
+`stoppable` 固定为 `false`，不能通过任务管理器单独终止。
 
 任务主进程退出后，只要原进程组仍有成员，记录就不会消失。GUI 的任务管理器会将这种运行单元标记为“残留进程”。
 

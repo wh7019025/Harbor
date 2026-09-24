@@ -100,7 +100,8 @@ project/harbor_taskcfg/                 Task 与 Group 定义
 ~/.harbor/settings.json                 GUI 与 Workspace 设置
 ~/.harbor/core/<version>/harbor_core    受管理的 release Core
 ~/.harbor/runtime/                      机器级运行状态
-~/.harbor/workspace/<id>/log/           Workspace 任务日志
+~/.harbor/workspace/<id>/log/           本地 Workspace 任务日志
+~/.harbor/remote/log/                   远端机器任务日志
 ~/.harbor/log/harbor.log                Core 日志
 ~/.agents/skills/harbor/                Harbor Skill
 ```

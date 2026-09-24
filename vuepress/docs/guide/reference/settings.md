@@ -17,7 +17,8 @@ Harbor 的用户数据统一位于：
 ~/.harbor/
 ├── core/                       # GUI 管理的 release harbor_core
 ├── runtime/run/                # 机器级实时运行状态
-└── workspace/<workspace-id>/
+├── workspace/<workspace-id>/
+└── remote/
     └── log/                    # Workspace 独立日志
 ```
 

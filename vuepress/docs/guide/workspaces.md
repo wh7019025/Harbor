@@ -62,6 +62,16 @@ Workspace 决定两件事：**连接哪台机器，以及在这台机器上查�
 
 **正在运行的任务不会因为切换 Workspace 而停止。**
 
+已经连接的远端 Workspace 也不会因为切换而断开。Harbor 会在后台维持它的访问租约；再次切换回来时，会直接恢复任务、日志和界面状态，不需要重新连接。
+
+只有以下操作会释放远端连接：
+
+- 再次点击 Workspace 旁的连接按钮，主动断开当前远端 Workspace。
+- 关闭 Harbor GUI，统一释放本次 GUI 建立的全部远端连接。
+- 修改或删除对应 Workspace。
+
+释放连接不会停止远端 `harbor_core`，也不会停止已经运行的 Task。
+
 如果另一个 Workspace 也发现了同一个 Task，Harbor 会根据 UUID 识别它，并显示同一份实时运行状态，而不是启动第二个实例。
 
 ## 本地与远端
@@ -72,7 +82,7 @@ Workspace 决定两件事：**连接哪台机器，以及在这台机器上查�
 
 ### 远端 Workspace
 
-适合操作机器人或服务器。切换到远端 Workspace 后，需要点击 Workspace 旁的连接按钮；Harbor 会先检查 SSH、Core 和版本，必要时才准备远端 Core，连接完成后通过 Harbor API 管理任务。
+适合操作机器人或服务器。首次使用远端 Workspace 时，需要点击 Workspace 旁的连接按钮；Harbor 会先检查 SSH、Core 和版本，必要时才准备远端 Core。连接会一直保留到你主动断开或关闭 Harbor GUI。
 
 远端 Workspace 中的 `~`、项目路径和日志都属于远端用户，而不是当前电脑。配置方法见 [远端运行](./remote.md)。
 

@@ -40,10 +40,15 @@ Task 是 Harbor 中最基本的运行单元，表示一个可以反复启动的�
 
 - **没有 UI**：不配置任何 interface。服务、ROS 2 节点、脚本和 headless 程序都属于这一类。
 - **程序自带 Web 页面**：配置 `webview_interface`，Harbor 显示网页图标。
-- **程序只有原生窗口**：需要远端操作时配置 `vnc_interface`，Harbor 显示显示器图标。
+- **程序只有原生窗口**：需要远端操作时配置 `vnc_interface`，窗口会进入 Harbor 顶部显示器图标对应的共享桌面。
 
 本地运行带 `vnc_interface` 的 Task 时仍直接打开原生窗口；只有 remote workspace
 会使用机器级共享 VNC 桌面。远端无 UI 任务不需要 VNC。
+
+远端虚拟桌面固定使用 `23682` 提供 noVNC HTTP/WebSocket 页面。这个端口由 Harbor
+统一管理，不写入 Task YAML；GUI 会通过 SSH Tunnel 访问它，通常不需要对局域网开放。
+顶部另有真实桌面入口，通过 `23683` 镜像远端 `DISPLAY=:0`，但 `vnc_interface` Task
+仍只在隔离的虚拟桌面中启动。
 
 ## 创建 Task
 
@@ -76,7 +81,15 @@ Harbor 会为新 Task 生成 UUID。不要从其他 Task 复制 UUID，它是 Ha
 
 顶部的任务管理器按钮会列出 Harbor 启动且仍然存活的进程，包括 PID、程序名和命令。
 
+任务管理器顶部还会单独显示 `harbor_core` 管理的 Virtual VNC、Physical VNC 和 ttyd。
+这些基础服务按功能聚合展示状态、PID 与固定端口，随 Core 启停，因此只能查看，不能在
+任务管理器中单独关闭。
+
 正常运行的 Task 显示为“运行中”。如果 Task 主进程已经退出，但它启动的相机、驱动或其他子进程仍留在原进程组中，Harbor 会将其标记为“残留进程”；可以在任务管理器中手动终止整个运行单元。
+
+![Harbor 任务管理器同时显示正常运行的任务与主进程退出后仍存活的残留进程](/images/harbor-process-manager.png)
+
+图中蓝色状态表示 Task 主进程仍在运行；红色边框表示主进程已经退出，但同一运行单元内仍有子进程存活。Harbor 保留这些进程的 PID、程序名和命令，让残留进程不再隐形，并可从同一入口终止整个进程组。
 
 关闭 Harbor GUI 不会停止 Core 或 Task。Core 自身退出时也会保留正在运行的 Task；再次启动 Core 后，会根据 `~/.harbor/runtime/run/tasks.json` 重新接管这些运行单元。只有显式执行 Stop、Restart、Stop All 或在任务管理器中终止，才会关闭对应进程组。
 
