@@ -1,53 +1,168 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
-  <title id="title">Harbor 系统总览</title>
-  <desc id="desc">Harbor GUI 连接本机或远端 harbor_core，由 Core 发现 YAML、管理任务和保存日志。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">Harbor 工作方式总览</title>
+  <desc id="desc">项目中的 YAML 由一台机器唯一的 harbor_core 发现并编排为任务。Harbor GUI 通过 API 操作 Core，并通过 WebView、VNC 和终端入口观察程序。</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0d1728"/><stop offset="1" stop-color="#14243a"/></linearGradient>
-    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1677ff"/><stop offset="1" stop-color="#21c7a8"/></linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-opacity=".22"/></filter>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0l10 5-10 5z" fill="#55a7ff"/></marker>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0b1018"/>
+      <stop offset="1" stop-color="#111a28"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#2788ff"/>
+      <stop offset="1" stop-color="#58b4ff"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#16263a"/>
+      <stop offset="1" stop-color="#142031"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity=".3"/>
+    </filter>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0l10 5-10 5z" fill="#4ca7ff"/>
+    </marker>
+    <marker id="arrow-muted" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0l10 5-10 5z" fill="#71839a"/>
+    </marker>
   </defs>
-  <rect width="1200" height="680" rx="28" fill="url(#bg)"/>
-  <circle cx="1060" cy="80" r="190" fill="#1677ff" opacity=".08"/><circle cx="120" cy="620" r="220" fill="#21c7a8" opacity=".06"/>
-  <text x="64" y="72" fill="#fff" font-size="30" font-family="system-ui,sans-serif" font-weight="700">Harbor · 统一的机器人任务运行入口</text>
-  <text x="64" y="108" fill="#94a9c3" font-size="17" font-family="system-ui,sans-serif">一个 GUI，一台机器一个 Core，Task UUID 贯穿所有 Workspace</text>
 
-  <g filter="url(#shadow)">
-    <rect x="64" y="170" width="280" height="370" rx="22" fill="#17283f" stroke="#31506f"/>
-    <rect x="88" y="194" width="232" height="58" rx="14" fill="url(#brand)"/>
-    <text x="204" y="231" text-anchor="middle" fill="#fff" font-size="22" font-family="system-ui,sans-serif" font-weight="700">Harbor GUI</text>
-    <g font-family="system-ui,sans-serif" font-size="17" fill="#dbe9f8">
-      <rect x="88" y="284" width="232" height="58" rx="12" fill="#203754"/><text x="112" y="320">Workspace 与路径</text>
-      <rect x="88" y="358" width="232" height="58" rx="12" fill="#203754"/><text x="112" y="394">任务、状态与日志</text>
-      <rect x="88" y="432" width="232" height="58" rx="12" fill="#203754"/><text x="112" y="468">Web Panel</text>
+  <rect width="1400" height="760" rx="30" fill="url(#background)"/>
+  <circle cx="1290" cy="60" r="240" fill="#2588ff" opacity=".055"/>
+  <circle cx="90" cy="730" r="260" fill="#22c7a8" opacity=".045"/>
+
+  <g font-family="'Noto Sans SC','Microsoft YaHei',system-ui,sans-serif">
+    <text x="56" y="62" fill="#f5f8fc" font-size="30" font-weight="700">Harbor 如何工作</text>
+    <text x="56" y="96" fill="#8798ad" font-size="16">配置留在项目中 · 单机单 Core · Task 单实例</text>
+
+    <!-- 阶段 1：Harbor GUI -->
+    <g filter="url(#shadow)">
+      <rect x="56" y="145" width="300" height="476" rx="22" fill="#151d29" stroke="#2c3b4e"/>
+      <rect x="76" y="165" width="260" height="62" rx="15" fill="url(#blue)"/>
+      <circle cx="101" cy="196" r="6" fill="#d9efff"/>
+      <text x="218" y="204" text-anchor="middle" fill="#fff" font-size="23" font-weight="700">Harbor GUI</text>
+
+      <text x="82" y="265" fill="#71839a" font-size="13" letter-spacing="2">CURRENT VIEW</text>
+      <rect x="76" y="280" width="260" height="54" rx="12" fill="#1d2938" stroke="#29394c"/>
+      <text x="96" y="304" fill="#f2f6fb" font-size="16" font-weight="600">Workspace</text>
+      <text x="96" y="324" fill="#8395aa" font-size="13">机器连接 + 搜索路径</text>
+
+      <rect x="76" y="350" width="126" height="74" rx="12" fill="#1d2938" stroke="#29394c"/>
+      <text x="92" y="378" fill="#f2f6fb" font-size="15" font-weight="600">Task / Group</text>
+      <text x="92" y="401" fill="#8395aa" font-size="12">启动 · 停止 · 编排</text>
+      <rect x="210" y="350" width="126" height="74" rx="12" fill="#1d2938" stroke="#29394c"/>
+      <text x="226" y="378" fill="#f2f6fb" font-size="15" font-weight="600">Logs</text>
+      <text x="226" y="401" fill="#8395aa" font-size="12">实时 · 历史 · Core</text>
+
+      <text x="82" y="462" fill="#71839a" font-size="13" letter-spacing="2">QUICK ACCESS</text>
+      <g font-size="13">
+        <rect x="76" y="478" width="82" height="42" rx="10" fill="#20334b"/>
+        <text x="117" y="504" text-anchor="middle" fill="#a9d4ff">WebView</text>
+        <rect x="165" y="478" width="82" height="42" rx="10" fill="#20334b"/>
+        <text x="206" y="504" text-anchor="middle" fill="#a9d4ff">Terminal</text>
+        <rect x="254" y="478" width="82" height="42" rx="10" fill="#20334b"/>
+        <text x="295" y="504" text-anchor="middle" fill="#a9d4ff">VNC</text>
+      </g>
+
+      <rect x="76" y="540" width="260" height="56" rx="12" fill="#111923" stroke="#29394c"/>
+      <text x="96" y="565" fill="#f2f6fb" font-size="15" font-weight="600">统一状态</text>
+      <text x="96" y="585" fill="#8395aa" font-size="12">本地与远端使用同一套操作</text>
     </g>
-  </g>
 
-  <path d="M344 355h118" stroke="#55a7ff" stroke-width="4" marker-end="url(#arrow)"/><text x="402" y="340" text-anchor="middle" fill="#8fc5ff" font-size="15" font-family="system-ui,sans-serif">HTTP API v1</text>
+    <!-- GUI 与 Core 的控制通路 -->
+    <path d="M356 330H470" fill="none" stroke="#4ca7ff" stroke-width="4" marker-end="url(#arrow-blue)"/>
+    <path d="M470 365H356" fill="none" stroke="#71839a" stroke-width="3" marker-end="url(#arrow-muted)"/>
+    <text x="413" y="312" text-anchor="middle" fill="#8fc8ff" font-size="13">HTTP API · 29385</text>
+    <text x="413" y="392" text-anchor="middle" fill="#71839a" font-size="12">Snapshot · 状态 · 日志</text>
 
-  <g filter="url(#shadow)">
-    <rect x="474" y="150" width="360" height="410" rx="22" fill="#17283f" stroke="#31506f"/>
-    <text x="654" y="204" text-anchor="middle" fill="#fff" font-size="24" font-family="system-ui,sans-serif" font-weight="700">harbor_core</text>
-    <text x="654" y="232" text-anchor="middle" fill="#8fc5ff" font-size="15" font-family="system-ui,sans-serif">单机单实例 · 端口 29385</text>
-    <g font-family="system-ui,sans-serif" font-size="16" fill="#dbe9f8">
-      <rect x="506" y="264" width="136" height="70" rx="12" fill="#203754"/><text x="574" y="294" text-anchor="middle">YAML</text><text x="574" y="316" text-anchor="middle" fill="#94a9c3" font-size="13">发现与校验</text>
-      <rect x="666" y="264" width="136" height="70" rx="12" fill="#203754"/><text x="734" y="294" text-anchor="middle">UUID</text><text x="734" y="316" text-anchor="middle" fill="#94a9c3" font-size="13">冲突与身份</text>
-      <rect x="506" y="354" width="136" height="70" rx="12" fill="#203754"/><text x="574" y="384" text-anchor="middle">Process</text><text x="574" y="406" text-anchor="middle" fill="#94a9c3" font-size="13">启动与停止</text>
-      <rect x="666" y="354" width="136" height="70" rx="12" fill="#203754"/><text x="734" y="384" text-anchor="middle">Runtime</text><text x="734" y="406" text-anchor="middle" fill="#94a9c3" font-size="13">实时状态</text>
-      <rect x="506" y="444" width="296" height="70" rx="12" fill="#203754"/><text x="654" y="474" text-anchor="middle">Workspace Logs</text><text x="654" y="496" text-anchor="middle" fill="#94a9c3" font-size="13">实时输出与历史记录</text>
+    <!-- 阶段 2：harbor_core -->
+    <g filter="url(#shadow)">
+      <rect x="482" y="125" width="450" height="516" rx="24" fill="url(#core)" stroke="#31506f"/>
+      <rect x="506" y="149" width="402" height="66" rx="15" fill="#1d334d" stroke="#345878"/>
+      <text x="530" y="178" fill="#f7fbff" font-size="23" font-weight="700">harbor_core</text>
+      <text x="530" y="200" fill="#8fb2d5" font-size="13">单机单实例 · 版本与 API 严格匹配</text>
+      <rect x="785" y="165" width="101" height="32" rx="16" fill="#183f33" stroke="#28644f"/>
+      <circle cx="805" cy="181" r="5" fill="#58d39b"/>
+      <text x="841" y="186" text-anchor="middle" fill="#8de1ba" font-size="12">RUNNING</text>
+
+      <text x="510" y="253" fill="#71839a" font-size="13" letter-spacing="2">ORCHESTRATION PIPELINE</text>
+      <g font-size="14">
+        <rect x="506" y="270" width="116" height="72" rx="12" fill="#203247"/>
+        <text x="564" y="300" text-anchor="middle" fill="#eef5fc" font-weight="600">发现 YAML</text>
+        <text x="564" y="322" text-anchor="middle" fill="#8297ad" font-size="12">Task · Group</text>
+        <path d="M622 306h22" stroke="#4ca7ff" stroke-width="3" marker-end="url(#arrow-blue)"/>
+        <rect x="648" y="270" width="116" height="72" rx="12" fill="#203247"/>
+        <text x="706" y="300" text-anchor="middle" fill="#eef5fc" font-weight="600">校验身份</text>
+        <text x="706" y="322" text-anchor="middle" fill="#8297ad" font-size="12">UUID · 单实例</text>
+        <path d="M764 306h22" stroke="#4ca7ff" stroke-width="3" marker-end="url(#arrow-blue)"/>
+        <rect x="790" y="270" width="116" height="72" rx="12" fill="#203247"/>
+        <text x="848" y="300" text-anchor="middle" fill="#eef5fc" font-weight="600">编排进程</text>
+        <text x="848" y="322" text-anchor="middle" fill="#8297ad" font-size="12">启动 · 停止 · 接管</text>
+      </g>
+
+      <rect x="506" y="365" width="190" height="86" rx="13" fill="#1b2b3d" stroke="#2b435c"/>
+      <text x="526" y="394" fill="#eef5fc" font-size="15" font-weight="600">状态与日志</text>
+      <text x="526" y="418" fill="#8297ad" font-size="12">Snapshot 缓存 · Task Log</text>
+      <text x="526" y="438" fill="#8297ad" font-size="12">进程组 · 残留进程识别</text>
+
+      <rect x="716" y="365" width="190" height="86" rx="13" fill="#1b2b3d" stroke="#2b435c"/>
+      <text x="736" y="394" fill="#eef5fc" font-size="15" font-weight="600">运行恢复</text>
+      <text x="736" y="418" fill="#8297ad" font-size="12">Core 重启后重新接管</text>
+      <text x="736" y="438" fill="#8297ad" font-size="12">Task 不依赖 GUI 存活</text>
+
+      <text x="510" y="490" fill="#71839a" font-size="13" letter-spacing="2">CORE SERVICES · REMOTE</text>
+      <g font-size="13">
+        <rect x="506" y="506" width="126" height="78" rx="12" fill="#173449" stroke="#28526d"/>
+        <text x="569" y="535" text-anchor="middle" fill="#aad8ff" font-weight="600">Virtual VNC</text>
+        <text x="569" y="558" text-anchor="middle" fill="#7797b2" font-size="12">:82 · 23682</text>
+        <rect x="643" y="506" width="126" height="78" rx="12" fill="#173449" stroke="#28526d"/>
+        <text x="706" y="535" text-anchor="middle" fill="#aad8ff" font-weight="600">Physical VNC</text>
+        <text x="706" y="558" text-anchor="middle" fill="#7797b2" font-size="12">:0 · 23683</text>
+        <rect x="780" y="506" width="126" height="78" rx="12" fill="#173449" stroke="#28526d"/>
+        <text x="843" y="535" text-anchor="middle" fill="#aad8ff" font-weight="600">ttyd</text>
+        <text x="843" y="558" text-anchor="middle" fill="#7797b2" font-size="12">127.0.0.1:29386</text>
+      </g>
+      <text x="706" y="614" text-anchor="middle" fill="#668097" font-size="11">noVNC 与 ttyd 通过 SSH Tunnel 打开</text>
     </g>
-  </g>
 
-  <path d="M834 290h116" stroke="#55a7ff" stroke-width="4" marker-end="url(#arrow)"/><path d="M834 455h116" stroke="#55a7ff" stroke-width="4" marker-end="url(#arrow)"/>
-  <g filter="url(#shadow)" font-family="system-ui,sans-serif">
-    <rect x="962" y="200" width="174" height="180" rx="20" fill="#17283f" stroke="#31506f"/>
-    <text x="1049" y="246" text-anchor="middle" fill="#fff" font-size="20" font-weight="700">项目配置</text>
-    <rect x="986" y="270" width="126" height="40" rx="10" fill="#203754"/><text x="1049" y="296" text-anchor="middle" fill="#dbe9f8" font-size="15">Task YAML</text>
-    <rect x="986" y="320" width="126" height="40" rx="10" fill="#203754"/><text x="1049" y="346" text-anchor="middle" fill="#dbe9f8" font-size="15">Group YAML</text>
-    <rect x="962" y="410" width="174" height="130" rx="20" fill="#17283f" stroke="#31506f"/>
-    <text x="1049" y="456" text-anchor="middle" fill="#fff" font-size="20" font-weight="700">任务进程</text>
-    <text x="1049" y="488" text-anchor="middle" fill="#94a9c3" font-size="14">ROS 2 · Web · Script</text>
-    <text x="1049" y="512" text-anchor="middle" fill="#94a9c3" font-size="14">本地或远端机器</text>
+    <!-- 阶段 3：配置与运行结果 -->
+    <g filter="url(#shadow)">
+      <rect x="1058" y="145" width="286" height="204" rx="22" fill="#151d29" stroke="#2c3b4e"/>
+      <text x="1082" y="179" fill="#71839a" font-size="13" letter-spacing="2">PROJECT REPOSITORY</text>
+      <text x="1082" y="211" fill="#f3f7fb" font-size="21" font-weight="700">harbor_taskcfg</text>
+      <rect x="1082" y="232" width="112" height="72" rx="12" fill="#1d2938" stroke="#2b3c50"/>
+      <text x="1138" y="261" text-anchor="middle" fill="#dce9f6" font-size="14" font-weight="600">Task YAML</text>
+      <text x="1138" y="283" text-anchor="middle" fill="#8294a8" font-size="11">命令 · 环境 · UI</text>
+      <rect x="1208" y="232" width="112" height="72" rx="12" fill="#1d2938" stroke="#2b3c50"/>
+      <text x="1264" y="261" text-anchor="middle" fill="#dce9f6" font-size="14" font-weight="600">Group YAML</text>
+      <text x="1264" y="283" text-anchor="middle" fill="#8294a8" font-size="11">顺序 · 覆盖 · 等待</text>
+      <text x="1082" y="329" fill="#7890a7" font-size="12">定义随代码维护，不复制到 Harbor</text>
+
+      <rect x="1058" y="393" width="286" height="228" rx="22" fill="#151d29" stroke="#2c3b4e"/>
+      <text x="1082" y="427" fill="#71839a" font-size="13" letter-spacing="2">MACHINE RUNTIME</text>
+      <text x="1082" y="459" fill="#f3f7fb" font-size="21" font-weight="700">Task Processes</text>
+      <g font-size="13">
+        <rect x="1082" y="480" width="238" height="42" rx="10" fill="#1d2938"/>
+        <circle cx="1102" cy="501" r="5" fill="#58d39b"/>
+        <text x="1117" y="506" fill="#dce9f6">ROS 2 · Driver · Service</text>
+        <rect x="1082" y="532" width="112" height="42" rx="10" fill="#1d2938"/>
+        <text x="1138" y="558" text-anchor="middle" fill="#a8bad0">stdout / stderr</text>
+        <rect x="1208" y="532" width="112" height="42" rx="10" fill="#1d2938"/>
+        <text x="1264" y="558" text-anchor="middle" fill="#a8bad0">Web / Window</text>
+      </g>
+      <text x="1082" y="600" fill="#7890a7" font-size="12">进程、日志与界面都由 Core 统一关联</text>
+    </g>
+
+    <!-- Core 与配置、运行时的数据流 -->
+    <path d="M1058 247H950" fill="none" stroke="#71839a" stroke-width="3" marker-end="url(#arrow-muted)"/>
+    <text x="1004" y="232" text-anchor="middle" fill="#71839a" font-size="12">发现与读取</text>
+    <path d="M932 480h108" fill="none" stroke="#4ca7ff" stroke-width="4" marker-end="url(#arrow-blue)"/>
+    <text x="986" y="464" text-anchor="middle" fill="#8fc8ff" font-size="12">启动与接管</text>
+
+    <!-- 本地 / 远端选择 -->
+    <rect x="482" y="83" width="450" height="28" rx="14" fill="#101a26" stroke="#27384a"/>
+    <text x="707" y="102" text-anchor="middle" fill="#7f94aa" font-size="12">LOCAL 127.0.0.1  或  REMOTE SSH HOST</text>
+
+    <!-- 核心原则 -->
+    <rect x="56" y="676" width="1288" height="46" rx="14" fill="#101a26" stroke="#27384a"/>
+    <text x="700" y="705" text-anchor="middle" fill="#9cb3c9" font-size="14">Workspace 选择机器与发现范围　·　UUID 标识同一个 Task　·　切换界面不会复制任务，也不会停止进程</text>
   </g>
-  <g font-family="system-ui,sans-serif" font-size="15"><rect x="64" y="598" width="1072" height="42" rx="12" fill="#10243b" stroke="#294a69"/><text x="600" y="625" text-anchor="middle" fill="#9fc4e8">Workspace 隔离搜索路径与日志；UUID 让实时运行状态跨 Workspace 共享</text></g>
 </svg>

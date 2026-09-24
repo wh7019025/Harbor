@@ -58,7 +58,7 @@ Workspace 决定两件事：**连接哪台机器，以及在这台机器上查�
 
 - 切换连接的本地或远端机器。
 - 使用该 Workspace 自己的搜索路径。
-- 显示该 Workspace 中的任务历史日志。
+- 本地 Workspace 显示自己的历史日志；远端 Workspace 显示对应远端机器上的任务日志。
 
 **正在运行的任务不会因为切换 Workspace 而停止。**
 
@@ -85,6 +85,10 @@ Workspace 决定两件事：**连接哪台机器，以及在这台机器上查�
 适合操作机器人或服务器。首次使用远端 Workspace 时，需要点击 Workspace 旁的连接按钮；Harbor 会先检查 SSH、Core 和版本，必要时才准备远端 Core。连接会一直保留到你主动断开或关闭 Harbor GUI。
 
 远端 Workspace 中的 `~`、项目路径和日志都属于远端用户，而不是当前电脑。配置方法见 [远端运行](./remote.md)。
+
+Workspace 定义只在运行 Harbor GUI 的电脑上维护。连接远端时，GUI 会把当前 Workspace
+的名称和搜索路径发送给远端 Core 作为运行时视图；远端不会成为第二份 Workspace 配置
+来源。远端持久化的是 Task 日志、Core 日志和进程接管信息。
 
 ## Workspace 不会做什么
 

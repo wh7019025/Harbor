@@ -15,11 +15,15 @@ Harbor 的用户数据统一位于：
 
 ```text
 ~/.harbor/
-├── core/                       # GUI 管理的 release harbor_core
-├── runtime/run/                # 机器级实时运行状态
-├── workspace/<workspace-id>/
-└── remote/
-    └── log/                    # Workspace 独立日志
+├── settings.json               # 当前电脑上的 Workspace 配置源
+├── core/<version>/             # GUI 管理的 release harbor_core
+├── tools/ttyd/<sha256>/        # GUI 部署的固定 ttyd 运行时
+├── runtime/run/tasks.json      # 机器级 Task 接管信息
+├── workspace/<workspace-id>/log/ # 本地 Workspace 任务日志
+├── remote/log/                 # 远端 Core 所在机器的 Task 日志
+└── log/
+    ├── harbor.log              # GUI 与 Core 日志
+    └── workspace-terminal.log  # 托管 ttyd 输出
 ```
 
 ## Workspace 设置
@@ -30,6 +34,11 @@ Harbor 的用户数据统一位于：
 - 本地或远端连接类型。
 - 一个或多个 `search_paths`。
 - 远端模式下的 SSH host、port 与 user。
+
+Workspace 配置只由运行 GUI 的电脑维护。远端 Core 接收当前 Workspace 的名称与
+`search_paths` 作为运行时视图，不会把它当成另一份用户配置源。远端的
+`~/.harbor/remote/log/`、`runtime/` 和 `log/` 仍会持久化，以便 Core 重启后恢复日志与
+进程状态。
 
 ## 指标刷新
 

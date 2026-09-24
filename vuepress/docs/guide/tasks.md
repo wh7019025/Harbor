@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # 任务
 
-Task 是 Harbor 中最基本的运行单元，表示一个可以反复启动的程序。
+Task 是 Harbor 中最基本的运行单元，也是项目“可执行 README”里的一条运行说明。
 
 驱动、ROS 2 Launch、Python 脚本、Web 服务或一条调试命令，都可以成为 Task。Harbor 会记住它的运行目录、环境和启动方式，让你不必每次重新打开终端、切换目录和输入命令。
 
@@ -40,7 +40,7 @@ Task 是 Harbor 中最基本的运行单元，表示一个可以反复启动的�
 
 - **没有 UI**：不配置任何 interface。服务、ROS 2 节点、脚本和 headless 程序都属于这一类。
 - **程序自带 Web 页面**：配置 `webview_interface`，Harbor 显示网页图标。
-- **程序只有原生窗口**：需要远端操作时配置 `vnc_interface`，窗口会进入 Harbor 顶部显示器图标对应的共享桌面。
+- **程序只有原生窗口**：需要远端操作时配置 `vnc_interface`，窗口会进入 Harbor 顶部立方体图标对应的共享虚拟桌面。
 
 本地运行带 `vnc_interface` 的 Task 时仍直接打开原生窗口；只有 remote workspace
 会使用机器级共享 VNC 桌面。远端无 UI 任务不需要 VNC。

@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # 任务组
 
-Group 把多个 Task 的启动顺序保存为一次操作。
+Group 把多个 Task 的启动顺序保存为一次操作，也是项目“可执行 README”中的完整运行流程。
 
 例如，机器人启动时总要依次运行底盘驱动、相机、感知和控制程序。把它们放进 Group 后，只需启动一次，Harbor 就会按照固定顺序执行，不必再逐个操作。
 
@@ -72,7 +72,7 @@ Harbor 会在启动第一个 Task 前检查完整引用，避免因为名称错�
 Group 配置保存在项目的 `harbor_taskcfg/groups/` 中：
 
 ```yaml
-version: "0.2.0-preview.4"
+version: "0.2.0-preview.6"
 id: robot-bringup
 name: Robot Bringup
 description: 依次启动驱动和控制面板

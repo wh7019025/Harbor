@@ -8,7 +8,7 @@ createTime: 2026/09/20 00:44:43
 ## 完整示例
 
 ```yaml
-version: "0.2.0-preview.4"
+version: "0.2.0-preview.6"
 uuid: a35b7f18-9d64-4e2a-8f31-6c0d72b94511
 id: demo-ping
 name: Demo Ping

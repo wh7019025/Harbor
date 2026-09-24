@@ -20,9 +20,10 @@ harbor_core
 ├── YAML discovery and validation
 ├── UUID registry
 ├── Process supervisor
+├── Core services: VNC + ttyd
 ├── Runtime state
 ├── Log storage
-└── HTTP API v1 (revision 6)
+└── HTTP API v1 (revision 18)
 ```
 
 ## 数据职责
@@ -73,7 +74,9 @@ GUI ── SSH ──> verify / inspect / optional deploy / start harbor_core
 GUI ── HTTP ─> remote harbor_core ──> Task process
 ```
 
-SSH 不参与持续日志传输和任务控制，它只负责部署与启动 Core。
+SSH 不参与持续日志传输和任务控制，它负责验证、部署与启动 Core。远端终端和两种
+noVNC 页面使用独立的 SSH Tunnel，把远端回环端口映射到 GUI 本机的随机端口；Core API
+和 WebView 仍按 Workspace 配置的网络地址访问。
 
 ## 连接原则
 
@@ -99,10 +102,12 @@ Core 为每次 Task 启动记录 leader PID、PGID、session 和启动时刻，�
 project/harbor_taskcfg/                 Task 与 Group 定义
 ~/.harbor/settings.json                 GUI 与 Workspace 设置
 ~/.harbor/core/<version>/harbor_core    受管理的 release Core
+~/.harbor/tools/ttyd/<sha256>/          受管理的 ttyd 运行时
 ~/.harbor/runtime/                      机器级运行状态
 ~/.harbor/workspace/<id>/log/           本地 Workspace 任务日志
-~/.harbor/remote/log/                   远端机器任务日志
+~/.harbor/remote/log/                   远端 Core 所在机器的 Task 日志
 ~/.harbor/log/harbor.log                Core 日志
+~/.harbor/log/workspace-terminal.log    托管 ttyd 输出
 ~/.agents/skills/harbor/                Harbor Skill
 ```
 

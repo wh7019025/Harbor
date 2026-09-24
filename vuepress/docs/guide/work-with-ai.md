@@ -5,9 +5,11 @@ createTime: 2026/09/20 01:23:29
 ---
 # Work with AI
 
-Harbor 不只是让 AI 帮你编写 YAML。由于 `harbor_core` 提供完整的 Web API，AI 可以读取真实状态、修改配置、执行任务并检查结果，成为 Harbor 的直接操作者。
+Harbor 让 AI 面对的不是一段可能已经过时的启动说明，而是项目的“可执行 README”。
+Task 与 Group 给出明确的运行方式，`harbor_core` API 则让 AI 可以读取真实状态、修改
+配置、执行任务并检查结果。
 
-你只需要描述目标，不必把每一步操作翻译成按钮或命令。
+你只需要描述目标，不必再把 README 中的每一步操作翻译成按钮或命令。
 
 ## 从建议到执行
 

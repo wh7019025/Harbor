@@ -1,7 +1,7 @@
 # Group YAML
 
 ```yaml
-version: "0.2.0-preview.4"
+version: "0.2.0-preview.6"
 uuid: 4c9e2d73-6b15-4f80-a271-95d38c7e1a42
 id: system-info
 name: System Info

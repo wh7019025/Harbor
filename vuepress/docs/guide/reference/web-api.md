@@ -27,6 +27,7 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | `POST` | `/access/release` | 释放 GUI 访问租约。 |
 | `GET` | `/snapshot` | 一次获取 Workspace、Task、Group 与状态快照。 |
 | `GET` | `/services` | 列出 Core 管理的 VNC 与 ttyd 基础服务状态。 |
+| `POST` | `/displays/physical/ensure` | 启动或复用真实 `DISPLAY=:0` 的抓取与 noVNC 通路。 |
 | `POST` | `/discovery/refresh` | 重新扫描搜索路径。 |
 | `POST` | `/terminal/ensure` | 确保 Core 托管的机器级 ttyd 已按指定 Workspace 启动。 |
 
@@ -35,6 +36,10 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 启动 GUI 已按哈希部署到 `~/.harbor/tools/ttyd/current/run` 的固定入口，不接受任意命令。
 
 `/snapshot` 直接返回 Core 维护的缓存，不会在请求中同步扫描 YAML 或进程。缓存超过 5 秒时仍会立即返回最后一份数据，将 `stale` 标记为 `true`，并触发一次后台刷新；刷新进行中不会重复扫描。`generated_at_ms` 表示该快照的生成时间。
+
+`POST /displays/physical/ensure` 可能执行依赖检查和进程启动，因此客户端应使用比普通
+状态请求更长的超时。成功后返回更新后的 Snapshot；依赖缺失、没有活动 X11 `:0` 或
+固定端口 `23683` 被占用时返回明确错误。
 
 ## Task
 

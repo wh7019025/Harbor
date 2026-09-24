@@ -36,7 +36,7 @@ GitHub Releases 提供的是可直接安装的发行二进制文件。普通用�
 在任意项目中创建 `harbor_taskcfg/tasks/hello.yaml`：
 
 ```yaml
-version: "0.2.0-preview.4"
+version: "0.2.0-preview.6"
 id: hello
 name: Hello Harbor
 description: 每秒输出一条问候信息
@@ -53,6 +53,9 @@ command:
 ```
 
 首次扫描时，`harbor_core` 会生成 `uuid` 并写回文件。不要从其他任务复制 UUID。
+
+YAML 中的 `version` 应与当前 Harbor 版本一致。可以运行 `harbor --version` 查看；通过
+Harbor 新建或保存 Task 时，GUI 会自动写入当前版本。
 
 ## 在 Harbor 中发现任务
 

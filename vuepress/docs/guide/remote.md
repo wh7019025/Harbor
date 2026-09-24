@@ -74,7 +74,7 @@ Harbor 会在这些路径下发现 `harbor_taskcfg`。任务出现后，启动�
 
 ## 在 Harbor 中打开远端终端
 
-远端 Workspace 的工具栏会显示终端按钮。点击后，GUI 请求远端 `harbor_core` 确保
+远端 Workspace 的顶部快捷入口区会显示终端按钮。点击后，GUI 请求远端 `harbor_core` 确保
 机器级 `ttyd` 可用，再建立仅监听本机 `127.0.0.1` 的 SSH Tunnel，并在 Harbor
 内置窗口中打开终端。
 
@@ -196,7 +196,8 @@ sudo apt-get install -y ubuntu-session gnome-shell-extension-ubuntu-dock \
 
 - 只在可信局域网、VPN 或受控防火墙内使用。
 - 不要把 `29385` 直接暴露到公网。
-- WebView 或 noVNC 页面监听远端网卡时，同样需要限制网络访问或自行实现鉴权。
+- WebView 监听远端网卡时，同样需要限制网络访问或自行实现鉴权。Harbor 托管的 noVNC
+  与 ttyd 固定监听远端回环地址，由 GUI 通过 SSH Tunnel 访问。
 - Harbor 远端终端通过 SSH Tunnel 连接，ttyd 本身只监听远端回环地址；不要手动把它改成 `0.0.0.0`。
 
 ## 常见问题
@@ -219,9 +220,10 @@ sudo apt-get install -y ubuntu-session gnome-shell-extension-ubuntu-dock \
 
 ### 远端终端无法打开
 
-确认远端 `~/.harbor` 可写、磁盘空间充足，并且远端具有 `ss` 命令。Harbor 会自动避开
-已占用的终端端口，并把托管 ttyd 的部署与启动日志写入本机
-`~/.harbor/log/workspace-terminal.log`。
+确认远端 `~/.harbor` 可写、磁盘空间充足，并且远端具有 `ss` 命令。ttyd 固定使用
+`127.0.0.1:29386`；该端口被其他程序占用时，Harbor 会明确报告冲突，不会改用随机端口。
+托管 ttyd 的部署与启动日志位于远端 `~/.harbor/log/workspace-terminal.log`，GUI 的
+SSH Tunnel 过程记录在本机 Harbor Log 中。
 
 ### Task 启动但无法打开窗口
 

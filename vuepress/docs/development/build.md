@@ -10,7 +10,7 @@ createTime: 2026/09/20 00:44:43
 Harbor 的有效版本只由 Git 管理。发布提交使用精确标签，例如：
 
 ```bash
-git tag -a v0.2.0-preview.4 -m "Harbor 0.2.0 preview.4"
+git tag -a v0.2.0-preview.6 -m "Harbor 0.2.0 preview.6"
 ```
 
 查看当前构建将使用的版本：
@@ -19,10 +19,10 @@ git tag -a v0.2.0-preview.4 -m "Harbor 0.2.0 preview.4"
 scripts/git_version.sh
 ```
 
-位于 Tag 上的干净提交输出 `0.2.0-preview.4`。Tag 之后的开发提交输出类似
-`0.2.0-preview.4+3.g4d65765`；有未提交改动时再附加 `.dirty`。
+位于 Tag 上的干净提交输出 `0.2.0-preview.6`。Tag 之后的开发提交输出类似
+`0.2.0-preview.6+3.g4d65765`；有未提交改动时再附加 `.dirty`。
 
-`package.json`、Cargo manifest 与 `tauri.conf.json` 中统一使用 `0.0.0` 占位，不再保存或人工同步应用版本。源码包脱离 Git 时，构建脚本回退到基线版本 `0.2.0-preview.4`。
+`package.json`、Cargo manifest 与 `tauri.conf.json` 中统一使用 `0.0.0` 占位，不再保存或人工同步应用版本。源码包脱离 Git 时，构建脚本回退到基线版本 `0.2.0-preview.6`。
 
 ## 1. 前端检查
 

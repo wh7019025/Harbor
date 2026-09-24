@@ -82,11 +82,14 @@ Harbor Skill 可以通过 API 直接读取状态和日志，不需要先手动�
 
 ## 日志保存位置
 
-每个 Workspace 使用独立目录：
+本地 Workspace 按 id 使用独立目录；远端 Task 日志统一保存在执行机器的远端运行目录：
 
 ```text
 ~/.harbor/workspace/<workspace-id>/log
 ~/.harbor/remote/log
 ```
+
+因此，重命名本地的远端 Workspace 不会重命名或丢失远端 Task 日志。日志归属执行机器
+和 Task 启动记录，而不是 GUI 中显示的 Workspace 名称。
 
 一般不需要直接操作这些文件；通过 Harbor 界面或 API 查看，可以保持本地与远端使用方式一致。
