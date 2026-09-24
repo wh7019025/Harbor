@@ -31,7 +31,36 @@ pub fn spawn_forward(
     ];
     let ssh_command = ssh_exec_command_with_args(ssh, remote_command, &extra_args)?;
 
-    // --- 阶段 2：将隧道诊断信息写入 Harbor 日志 ---
+    spawn_ssh_command(ssh, ssh_command, log_path)
+}
+
+pub fn spawn_forward_only(
+    ssh: &WorkspaceSsh,
+    local_port: u16,
+    remote_port: u16,
+    log_path: &Path,
+) -> Result<Child, String> {
+    // --- 阶段 1：构造不执行远端命令的纯 SSH Tunnel ---
+    let forwarding = format!("127.0.0.1:{local_port}:127.0.0.1:{remote_port}");
+    let extra_args = vec![
+        "-o".into(),
+        "ExitOnForwardFailure=yes".into(),
+        "-N".into(),
+        "-T".into(),
+        "-L".into(),
+        forwarding,
+    ];
+    let ssh_command = ssh_exec_command_with_args(ssh, "", &extra_args)?;
+
+    // --- 阶段 2：启动并记录 Tunnel 诊断信息 ---
+    spawn_ssh_command(ssh, ssh_command, log_path)
+}
+
+fn spawn_ssh_command(
+    ssh: &WorkspaceSsh,
+    ssh_command: harbor_core::settings::SshVerifyCommand,
+    log_path: &Path,
+) -> Result<Child, String> {
     let stdout = OpenOptions::new()
         .create(true)
         .append(true)

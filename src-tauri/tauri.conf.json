@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "identifier": "com.harbor.desktop",
   "build": {
-    "beforeDevCommand": "npm run core:release && npm run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run core:release && npm run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {

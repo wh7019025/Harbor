@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   BookOpen,
+  Box,
   ChevronDown,
   ExternalLink,
   FolderSearch,
@@ -23,6 +24,7 @@ import {
   Square,
   Terminal,
   Trash2,
+  Unplug,
   X,
 } from "lucide-vue-next";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -43,6 +45,7 @@ import {
   createTaskYaml,
   deleteGroup,
   deleteTask,
+  ensurePhysicalDisplay,
   fetchGroupTemplate,
   fetchGroupYaml,
   fetchLogs,
@@ -53,6 +56,8 @@ import {
   listPathSuggestions,
   openPanelWindow,
   interfaceUrls,
+  physicalVncUrl,
+  sharedVncUrl,
   readLog,
   readLogChunk,
   removeSearchPath,
@@ -76,8 +81,10 @@ import {
   createWorkspace,
   connectRemoteWorkspaceCore,
   deleteWorkspace,
+  disconnectRemoteWorkspaceCore,
   getHarborCopyProgress,
   getSettings,
+  isRemoteWorkspaceConnected,
   openWorkspaceTerminal,
   switchWorkspace,
   updateWorkspace,
@@ -93,6 +100,7 @@ const settings = ref<HarborSettings | null>(null);
 const logs = ref<TaskLogSummary[]>([]);
 const loading = ref(true);
 const refreshing = ref(false);
+const remoteWorkspaceConnected = ref(false);
 const pathsPanelOpen = ref(false);
 const settingsPanelOpen = ref(false);
 const agentSkillPanelOpen = ref(false);
@@ -198,6 +206,22 @@ const webPanelShortcuts = computed(() =>
         })),
     ),
 );
+const virtualVncShortcut = computed(() => {
+  if (!isRemoteWorkspace.value) return null;
+  const url = sharedVncUrl(settings.value, snapshot.value?.vnc_port);
+  return url ? { url, ready: snapshot.value?.vnc_ready ?? false } : null;
+});
+const physicalVncShortcut = computed(() => {
+  if (!isRemoteWorkspace.value) return null;
+  const url = physicalVncUrl(settings.value, snapshot.value?.physical_vnc_port);
+  return url
+    ? {
+        url,
+        ready: snapshot.value?.physical_vnc_ready ?? false,
+        error: snapshot.value?.physical_vnc_error ?? null,
+      }
+    : null;
+});
 const listedLogs = computed(() =>
   [...logs.value]
     .sort((left, right) => {
@@ -506,14 +530,33 @@ function showFailure(message: string, options: { preserveError?: boolean } = {})
   }
 }
 
+function isPollingRequestError(message: string) {
+  return ["/api/v1/snapshot", "/api/v1/logs/tasks", "/api/v1/access/claim"].some((path) =>
+    message.includes(path),
+  );
+}
+
 async function refreshSettings() {
   settings.value = await getSettings();
+}
+
+async function refreshRemoteConnectionState() {
+  remoteWorkspaceConnected.value = isRemoteWorkspace.value
+    ? await isRemoteWorkspaceConnected()
+    : false;
 }
 
 async function load(options: { preserveError?: boolean; scan?: boolean } = {}) {
   refreshing.value = true;
   try {
     await refreshSettings();
+    await refreshRemoteConnectionState();
+    if (isRemoteWorkspace.value && !remoteWorkspaceConnected.value) {
+      snapshot.value = null;
+      logs.value = [];
+      if (!options.preserveError) error.value = "";
+      return;
+    }
     if (options.scan) {
       await researchTaskCard();
     }
@@ -531,7 +574,7 @@ async function load(options: { preserveError?: boolean; scan?: boolean } = {}) {
     if (!copyProgress.value.active) {
       notice.value = "";
     }
-    if (!options.preserveError) error.value = "";
+    if (!options.preserveError || isPollingRequestError(error.value)) error.value = "";
   } catch (err) {
     showFailure(failureMessage(err), options);
   } finally {
@@ -709,6 +752,65 @@ function taskInterfaceUrls(task: TaskCardTask) {
     snapshot.value?.default_route_ip,
     snapshot.value?.vnc_port,
   );
+}
+
+function taskWebviewUrls(task: TaskCardTask) {
+  return taskInterfaceUrls(task).filter((panel) => panel.kind === "webview");
+}
+
+type MachineDisplayKind = "physical" | "virtual";
+
+function machineDisplayShortcut(kind: MachineDisplayKind) {
+  return kind === "physical" ? physicalVncShortcut.value : virtualVncShortcut.value;
+}
+
+function machineDisplayReady(nextSnapshot: TaskCardSnapshot, kind: MachineDisplayKind) {
+  return kind === "physical" ? nextSnapshot.physical_vnc_ready : nextSnapshot.vnc_ready;
+}
+
+async function openMachineDisplay(kind: MachineDisplayKind) {
+  const pendingKey = `${kind}-vnc`;
+  if (!machineDisplayShortcut(kind) || isPending(pendingKey)) return;
+  const displayName = kind === "physical" ? "真实桌面" : "虚拟桌面";
+  pending.value = { key: pendingKey, label: `连接${displayName}` };
+  error.value = "";
+  openHarborLog();
+  try {
+    if (!machineDisplayShortcut(kind)?.ready) {
+      await connectRemoteWorkspaceCore();
+      remoteWorkspaceConnected.value = true;
+      if (kind === "physical") {
+        const nextSnapshot = await ensurePhysicalDisplay();
+        snapshot.value = nextSnapshot;
+        syncTaskConfigSelections(nextSnapshot.tasks);
+      }
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const nextSnapshot = await fetchTaskCard();
+        snapshot.value = nextSnapshot;
+        syncTaskConfigSelections(nextSnapshot.tasks);
+        if (kind === "physical" && nextSnapshot.physical_vnc_error) {
+          throw new Error(nextSnapshot.physical_vnc_error);
+        }
+        if (machineDisplayReady(nextSnapshot, kind)) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+      }
+    }
+
+    const readyShortcut = machineDisplayShortcut(kind);
+    const displayError = kind === "physical" ? physicalVncShortcut.value?.error : null;
+    if (displayError) {
+      throw new Error(displayError);
+    }
+    if (!readyShortcut?.ready) {
+      throw new Error(`${displayName}启动超时，请查看 Harbor 日志中的依赖或启动错误`);
+    }
+    await openPanelWindow(kind === "physical" ? "Physical Display" : "Virtual Display", readyShortcut.url);
+  } catch (err) {
+    showFailure(failureMessage(err));
+    await pollHarborLog();
+  } finally {
+    pending.value = null;
+  }
 }
 
 async function openTaskPanel(task: TaskCardTask, panelName: string) {
@@ -968,7 +1070,17 @@ async function connectRemoteWorkspace() {
   notice.value = "";
   openHarborLog();
   try {
+    if (remoteWorkspaceConnected.value) {
+      await disconnectRemoteWorkspaceCore();
+      remoteWorkspaceConnected.value = false;
+      snapshot.value = null;
+      logs.value = [];
+      selectedLog.value = null;
+      notice.value = "远端 Workspace 已断开";
+      return;
+    }
     await connectRemoteWorkspaceCore();
+    remoteWorkspaceConnected.value = true;
     notice.value = "远端 Workspace 已连接";
     await load({ scan: true });
   } catch (err) {
@@ -999,15 +1111,22 @@ async function applyWorkspaceSwitch(id: string) {
   try {
     settings.value = await switchWorkspace(id);
     if (target.mode === "remote") {
+      openHarborLog();
+      await refreshRemoteConnectionState();
+      if (remoteWorkspaceConnected.value) {
+        notice.value = "已恢复远端 Workspace 连接";
+        await load({ scan: true });
+        return;
+      }
       snapshot.value = null;
       logs.value = [];
       selectedLog.value = null;
       harborLogText.value = "";
       logText.value = "";
       notice.value = "请选择连接按钮以连接远端 Workspace";
-      openHarborLog();
       return;
     }
+    remoteWorkspaceConnected.value = false;
     openHarborLog();
     await load();
   } catch (err) {
@@ -1093,15 +1212,13 @@ async function confirmWorkspacePrompt() {
     const name = workspaceName.value.trim();
     const mode = workspaceMode.value;
     const ssh = workspaceSshPayload();
+    const previousWorkspaceIds = new Set(settings.value?.workspaces.map((workspace) => workspace.id) ?? []);
     workspacePrompt.value = null;
     let createdId = "";
     await run("create-workspace", "新建 workspace", async () => {
       const next = await createWorkspace(name, mode, ssh);
       settings.value = next;
-      createdId =
-        next.workspaces.find((workspace) => workspace.name === name)?.id ??
-        next.workspaces[next.workspaces.length - 1]?.id ??
-        "";
+      createdId = next.workspaces.find((workspace) => !previousWorkspaceIds.has(workspace.id))?.id ?? "";
     });
     if (createdId) requestWorkspaceSwitch(createdId);
     return;
@@ -1292,8 +1409,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Teleport>
-    <header class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex min-w-0 items-center gap-2">
+    <header class="top-toolbar">
+      <div class="top-toolbar__workspace flex min-w-0 items-center gap-2">
         <span class="readout shrink-0 select-none text-[11px] text-[var(--faint)]">Workspace</span>
         <SelectField
           compact
@@ -1306,11 +1423,12 @@ onBeforeUnmount(() => {
           v-if="isRemoteWorkspace"
           class="btn !px-1.5 !py-0.5"
           type="button"
-          title="连接远端 Workspace"
+          :title="remoteWorkspaceConnected ? '断开远端 Workspace' : '连接远端 Workspace'"
           :disabled="isPending('connect-remote-workspace')"
           @click="connectRemoteWorkspace"
         >
           <LoaderCircle v-if="isPending('connect-remote-workspace')" class="h-3.5 w-3.5 animate-spin" />
+          <Unplug v-else-if="remoteWorkspaceConnected" class="h-3.5 w-3.5 text-[var(--warn)]" />
           <PlugZap v-else class="h-3.5 w-3.5" />
         </button>
         <button class="btn !px-1.5 !py-0.5" type="button" title="new workspace" @click="openCreateWorkspace">
@@ -1330,7 +1448,7 @@ onBeforeUnmount(() => {
         </button>
         <span v-if="copyFlash" class="readout shrink-0 text-[10px] text-[var(--accent)]">{{ copyFlash }}</span>
       </div>
-      <div class="flex items-center gap-1">
+      <div class="top-toolbar__shortcuts flex min-w-0 items-center justify-end gap-1">
         <button
           v-for="shortcut in webPanelShortcuts"
           :key="shortcut.key"
@@ -1353,6 +1471,30 @@ onBeforeUnmount(() => {
           <LoaderCircle v-if="isPending('workspace-terminal')" class="h-3.5 w-3.5 animate-spin" />
           <Terminal v-else class="h-3.5 w-3.5" />
         </button>
+        <button
+          v-if="physicalVncShortcut"
+          class="btn !px-2 !py-1"
+          type="button"
+          :title="physicalVncShortcut.ready ? '打开真实桌面 :0' : physicalVncShortcut.error ?? '连接并打开真实桌面 :0'"
+          :disabled="isPending('physical-vnc')"
+          @click="openMachineDisplay('physical')"
+        >
+          <LoaderCircle v-if="isPending('physical-vnc')" class="h-3.5 w-3.5 animate-spin" />
+          <Monitor v-else class="h-3.5 w-3.5" />
+        </button>
+        <button
+          v-if="virtualVncShortcut"
+          class="btn !px-2 !py-1"
+          type="button"
+          :title="virtualVncShortcut.ready ? '打开虚拟桌面 :82' : '连接并打开虚拟桌面 :82'"
+          :disabled="isPending('virtual-vnc')"
+          @click="openMachineDisplay('virtual')"
+        >
+          <LoaderCircle v-if="isPending('virtual-vnc')" class="h-3.5 w-3.5 animate-spin" />
+          <Box v-else class="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div class="top-toolbar__actions flex items-center justify-end gap-1">
         <button
           class="btn !px-2 !py-1"
           type="button"
@@ -1620,20 +1762,14 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="flex shrink-0 items-center gap-0.5">
                       <button
-                        v-for="panel in taskInterfaceUrls(task)"
+                        v-for="panel in taskWebviewUrls(task)"
                         :key="panel.name"
                         class="btn !px-1.5 !py-1"
                         type="button"
-                        :title="panel.kind === 'webview' ? `复制 ${panel.name} URL` : `打开 VNC ${panel.name}`"
-                        :disabled="panel.kind === 'vnc' && task.status !== 'running'"
-                        @click="
-                          panel.kind === 'webview'
-                            ? copyTaskPanelUrl(task, panel.name)
-                            : openTaskPanel(task, panel.name)
-                        "
+                        :title="`复制 ${panel.name} URL`"
+                        @click="copyTaskPanelUrl(task, panel.name)"
                       >
-                        <Link2 v-if="panel.kind === 'webview'" class="h-3.5 w-3.5" />
-                        <Monitor v-else class="h-3.5 w-3.5" />
+                        <Link2 class="h-3.5 w-3.5" />
                       </button>
                       <button
                         class="btn !px-1.5 !py-1"
@@ -2323,3 +2459,45 @@ onBeforeUnmount(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.top-toolbar {
+  display: grid;
+  grid-template-areas: "workspace shortcuts actions";
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.top-toolbar__workspace {
+  grid-area: workspace;
+}
+
+.top-toolbar__shortcuts {
+  grid-area: shortcuts;
+  overflow: hidden;
+}
+
+.top-toolbar__shortcuts > * {
+  flex: 0 0 auto;
+}
+
+.top-toolbar__actions {
+  grid-area: actions;
+}
+
+@media (max-width: 1280px) {
+  .top-toolbar {
+    grid-template-areas:
+      "workspace actions"
+      "shortcuts shortcuts";
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .top-toolbar__shortcuts {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    overflow: visible;
+  }
+}
+</style>

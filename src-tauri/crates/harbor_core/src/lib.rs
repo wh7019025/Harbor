@@ -1,6 +1,8 @@
 pub mod app_log;
+pub mod service;
 pub mod settings;
 pub mod taskcard;
+pub mod terminal;
 pub mod version;
 mod vnc_interface;
 pub mod web_api;
@@ -14,10 +16,7 @@ use settings::{
     Workspace, WorkspaceMode,
 };
 use taskcard::TaskCardService;
-use web_api::{bind_addr, router, CoreAccessLease, WebApiState};
-
-use parking_lot::Mutex;
-use std::sync::Arc;
+use web_api::{bind_addr, router, WebApiState};
 
 #[derive(Debug)]
 struct CoreInstanceLock {
@@ -132,6 +131,7 @@ fn parse_bool(value: &str) -> Result<bool, String> {
 pub fn ensure_workspace(
     settings: &mut Settings,
     workspace_id: Option<&str>,
+    persist: bool,
 ) -> Result<String, String> {
     if let Some(id) = workspace_id.map(str::trim).filter(|id| !id.is_empty()) {
         if !settings
@@ -151,13 +151,17 @@ pub fn ensure_workspace(
         settings.current_workspace = id.to_string();
     }
     settings.normalize();
-    save_settings(settings)?;
+    if persist {
+        save_settings(settings)?;
+    }
     Ok(settings.current_workspace.clone())
 }
 
-pub fn make_taskcard(settings: &Settings) -> Result<TaskCardService, String> {
+pub fn make_taskcard(settings: &Settings, remote_runtime: bool) -> Result<TaskCardService, String> {
     let taskcard = TaskCardService::new(runtime_data_dir(), settings.current_search_paths()?)?;
-    taskcard.set_log_dir(workspace_data_dir(settings.current()?.id.as_str()).join("log"))?;
+    taskcard.set_log_dir(
+        workspace_data_dir(settings.current()?.id.as_str(), remote_runtime).join("log"),
+    )?;
     Ok(taskcard)
 }
 
@@ -166,14 +170,41 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
     let _instance_lock = acquire_core_instance()?;
 
     // --- 阶段 2：加载 workspace 与任务服务 ---
-    let mut settings = load_settings();
-    let workspace_id = ensure_workspace(&mut settings, args.workspace_id.as_deref())?;
-    let taskcard = make_taskcard(&settings).map_err(|error| {
+    let mut settings = if args.remote_runtime {
+        Settings::default()
+    } else {
+        load_settings()
+    };
+    let workspace_id = ensure_workspace(
+        &mut settings,
+        args.workspace_id.as_deref(),
+        !args.remote_runtime,
+    )?;
+    let taskcard = make_taskcard(&settings, args.remote_runtime).map_err(|error| {
         crate::app_log::core(&error);
         error
     })?;
     taskcard.set_remote_runtime(args.remote_runtime);
-    // --- 阶段 3：绑定 API 端口并提供服务 ---
+
+    // --- 阶段 3：远端 Core 后台维持虚拟与真实 VNC 桌面 ---
+    if args.remote_runtime {
+        std::thread::spawn(|| {
+            if let Err(error) = crate::vnc_interface::ensure_shared_display() {
+                crate::app_log::core(&error);
+            } else {
+                crate::app_log::core("shared Harbor VNC desktop ready");
+            }
+        });
+        std::thread::spawn(|| {
+            if let Err(error) = crate::vnc_interface::ensure_physical_display() {
+                crate::app_log::core(&error);
+            } else {
+                crate::app_log::core("physical Harbor VNC display ready");
+            }
+        });
+    }
+
+    // --- 阶段 4：绑定 API 端口并提供服务 ---
     let addr = bind_addr(args.localhost_only);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -184,19 +215,19 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         web_api::listen_url(args.localhost_only),
         args.localhost_only
     ));
-    let state = WebApiState {
-        taskcard: Arc::new(Mutex::new(taskcard)),
-        settings: Arc::new(Mutex::new(settings)),
-        access: Arc::new(Mutex::new(CoreAccessLease::default())),
-        localhost_only: args.localhost_only,
-    };
+    let state = WebApiState::new(taskcard, settings, args.localhost_only, args.remote_runtime);
     let shutdown_taskcard = state.taskcard.clone();
+    let shutdown_terminal = state.terminal.clone();
     let serve_result = axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(|error| format!("harbor_core server failed: {error}"));
 
-    // --- 阶段 4：Core 退出但保留任务，后续 Core 将从运行记录重新接管 ---
+    // --- 阶段 5：关闭 Core 基础设施，但保留独立运行的 Task ---
+    if args.remote_runtime {
+        crate::vnc_interface::shutdown_displays();
+    }
+    shutdown_terminal.lock().stop();
     let managed_count = shutdown_taskcard.lock().managed_processes().len();
     crate::app_log::core(&format!(
         "harbor_core stopping; leaving {managed_count} managed process groups running"

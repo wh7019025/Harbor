@@ -5,7 +5,7 @@
   - 组：`{project}/harbor_taskcfg/groups/**/*.yaml`
 - 项目必须位于**当前 workspace** 的 `search_paths` 某个条目下。Harbor 从每个条目向下最多 **5 层**查找 `harbor_taskcfg/tasks/` 和 `harbor_taskcfg/groups/`。
 - local workspace 的路径是 harbor_core 本机目录；remote workspace 的路径是远端 harbor_core 所在机器的目录。
-- 日志在 **core 所在机器** 的 `~/.harbor/workspace/<id>/log/`，按 workspace 隔离；全机进程占用记录在 `~/.harbor/runtime/run/`，按 UUID 跨 workspace 共享。这些目录都不存放 Task / Group YAML。
+- 日志保存在 **core 所在机器**：本地按 Workspace 写入 `~/.harbor/workspace/<id>/log/`，远端统一写入 `~/.harbor/remote/log/`；全机进程占用记录在 `~/.harbor/runtime/run/`，按 UUID 跨 workspace 共享。这些目录都不存放 Task / Group YAML。
 
 ## 选择位置
 

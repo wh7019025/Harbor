@@ -36,14 +36,14 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 
 文件不存在时，Harbor 使用内置默认值：一个 `id/name = default` 的 workspace，其 `search_paths` 为空。
 
-每个 workspace 的日志独立保存在 **core 所在机器** 的 `~/.harbor/workspace/<id>/log/`。全机任务占用与进程注册保存在 `~/.harbor/runtime/run/`，按 UUID 跨 workspace 共享；因此切换 workspace 不会停止任务，但日志列表只显示当前 workspace 的日志。Task / Group YAML **不**放在这些目录，只来自当前 workspace 的 `search_paths`。
+任务日志保存在 **core 所在机器**。本地运行按 Workspace 使用 `~/.harbor/workspace/<id>/log/`；远端机器不拥有本地 Workspace 定义，因此统一使用机器级 `~/.harbor/remote/log/`。全机任务占用与进程注册保存在 `~/.harbor/runtime/run/`，按 UUID 跨 workspace 共享。Task / Group YAML **不**放在这些目录，只来自当前 Workspace 的 `search_paths`。远端 Workspace 定义由 GUI 在连接时传入，只驻留于远端 Core 内存，不写入远端 `settings.json`。
 
-远端 Workspace 的内置终端由 GUI 管理：GUI 通过现有 SSH 配置启动远端 `ttyd`，并用
-SSH Tunnel 映射到本机回环端口。远端端口会从 `29386–29486` 自动选择，避免残留进程
-占用固定端口。它不是 Task，不应为此创建 YAML，也不需要加入
-`search_paths`。Harbor 会校验并自动部署自带的静态 `ttyd` 到
+远端 Workspace 的内置终端由 `harbor_core` 管理 ttyd 生命周期，GUI 只通过现有 SSH
+配置建立到本机回环地址的 Tunnel。ttyd 固定绑定远端 `127.0.0.1:29386`；端口被占用
+时应向用户报告冲突，不会静默改用其他端口。它不是 Task，不应为此创建 YAML，也不需要
+加入 `search_paths`。Harbor 会校验并自动部署自带的静态 `ttyd` 到
 `~/.harbor/tools/ttyd/<sha256>/`；不要要求用户在远端安装 `ttyd`，也不要把它手动绑定
-到 `0.0.0.0`。
+到 `0.0.0.0`。GUI 关闭或切换 Workspace 只关闭 Tunnel；Core 退出时才统一关闭 ttyd。
 
 `harbor_core` 二进制按版本分开放在 **core 所在机器** 的 `~/.harbor/core/<version>/harbor_core`，但每台机器同一时间只能运行一个 `harbor_core`，不区分版本。切换 remote workspace 不会自动连接或部署；用户需要在 GUI 中显式连接。连接顺序是 SSH 验证、运行中 Core/API 检查、版本与租约检查、匹配 release 检查、必要时复制、最后唤醒。当前管理它的 GUI 持有短时访问租约；其他版本不得替换使用中的 core。仅能发现存活 PID 但 API 不可达时也拒绝自动替换。
 

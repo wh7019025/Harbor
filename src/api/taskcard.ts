@@ -60,9 +60,15 @@ export interface TaskCardGroup {
 }
 
 export interface TaskCardSnapshot {
+  generated_at_ms: number;
+  stale: boolean;
   root: string;
   default_route_ip: string;
   vnc_port: number;
+  vnc_ready: boolean;
+  physical_vnc_port: number;
+  physical_vnc_ready: boolean;
+  physical_vnc_error: string | null;
   search_paths: string[];
   discovered_task_dirs: string[];
   discovered_group_dirs: string[];
@@ -120,6 +126,10 @@ export interface YamlDocument {
 
 export function fetchTaskCard() {
   return invoke<TaskCardSnapshot>("taskcard_snapshot");
+}
+
+export function ensurePhysicalDisplay() {
+  return invoke<TaskCardSnapshot>("ensure_physical_display");
 }
 
 export function researchTaskCard() {
@@ -191,8 +201,25 @@ export interface ManagedProcessGroup {
   processes: ManagedProcessInfo[];
 }
 
+export interface CoreServiceStatus {
+  id: string;
+  name: string;
+  kind: "vnc" | "terminal" | string;
+  state: "running" | "starting" | "stopped" | "inactive" | "unavailable" | string;
+  pid?: number | null;
+  port: number;
+  bind: string;
+  detail?: string | null;
+  managed_by_core: boolean;
+  stoppable: boolean;
+}
+
 export function fetchManagedProcesses() {
   return invoke<ManagedProcessGroup[]>("managed_processes");
+}
+
+export function fetchCoreServices() {
+  return invoke<CoreServiceStatus[]>("core_services");
 }
 
 export function stopManagedProcesses(uuid: string) {
@@ -298,6 +325,18 @@ export function interfaceUrls(
       }))
     : [];
   return [...webviews, ...vnc];
+}
+
+export function sharedVncUrl(settings: Settings | null, vncPort?: number) {
+  const workspace = settings?.workspaces.find((item) => item.id === settings.current_workspace);
+  if (workspace?.mode !== "remote" || !workspace.ssh?.host.trim()) return null;
+  return `http://${workspace.ssh.host.trim()}:${vncPort ?? 23682}/`;
+}
+
+export function physicalVncUrl(settings: Settings | null, vncPort?: number) {
+  const workspace = settings?.workspaces.find((item) => item.id === settings.current_workspace);
+  if (workspace?.mode !== "remote" || !workspace.ssh?.host.trim()) return null;
+  return `http://${workspace.ssh.host.trim()}:${vncPort ?? 23683}/`;
 }
 
 export function openPanelWindow(title: string, url: string) {

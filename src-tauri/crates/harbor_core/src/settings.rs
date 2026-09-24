@@ -82,10 +82,24 @@ pub struct Settings {
     pub current_workspace: String,
     #[serde(default = "default_workspaces")]
     pub workspaces: Vec<Workspace>,
-    #[serde(alias = "metrics_fast_ms")]
+    #[serde(
+        default = "default_performance_metrics_interval_ms",
+        alias = "metrics_fast_ms"
+    )]
     pub performance_metrics_interval_ms: u64,
-    #[serde(alias = "metrics_slow_ms")]
+    #[serde(
+        default = "default_resource_metrics_interval_ms",
+        alias = "metrics_slow_ms"
+    )]
     pub resource_metrics_interval_ms: u64,
+}
+
+fn default_performance_metrics_interval_ms() -> u64 {
+    1000
+}
+
+fn default_resource_metrics_interval_ms() -> u64 {
+    10000
 }
 
 fn default_workspace_id() -> String {
@@ -202,7 +216,9 @@ pub fn ssh_exec_command_with_args(
                 ssh_args.push("IdentitiesOnly=yes".to_string());
             }
             ssh_args.push(target);
-            ssh_args.push(remote.to_string());
+            if !remote.is_empty() {
+                ssh_args.push(remote.to_string());
+            }
             Ok(SshVerifyCommand {
                 program: "ssh".into(),
                 args: ssh_args,
@@ -224,7 +240,9 @@ pub fn ssh_exec_command_with_args(
                 ],
             );
             ssh_args.push(target);
-            ssh_args.push(remote.to_string());
+            if !remote.is_empty() {
+                ssh_args.push(remote.to_string());
+            }
             let mut args = vec!["-e".to_string(), "ssh".to_string()];
             args.extend(ssh_args);
             Ok(SshVerifyCommand {
@@ -473,8 +491,8 @@ impl Default for Settings {
         Self {
             current_workspace: default_workspace_id(),
             workspaces: default_workspaces(),
-            performance_metrics_interval_ms: 1000,
-            resource_metrics_interval_ms: 10000,
+            performance_metrics_interval_ms: default_performance_metrics_interval_ms(),
+            resource_metrics_interval_ms: default_resource_metrics_interval_ms(),
         }
     }
 }
@@ -528,12 +546,20 @@ pub fn settings_path() -> PathBuf {
     config_dir().join("settings.json")
 }
 
+fn settings_backup_path() -> PathBuf {
+    config_dir().join("settings.json.bak")
+}
+
 pub fn config_dir() -> PathBuf {
     home_dir().join(".harbor")
 }
 
-pub fn workspace_data_dir(id: &str) -> PathBuf {
-    config_dir().join("workspace").join(id)
+pub fn workspace_data_dir(id: &str, remote_runtime: bool) -> PathBuf {
+    if remote_runtime {
+        config_dir().join("remote")
+    } else {
+        config_dir().join("workspace").join(id)
+    }
 }
 
 pub fn runtime_data_dir() -> PathBuf {
@@ -558,21 +584,67 @@ pub fn harbor_log_path() -> PathBuf {
 
 pub fn load_settings() -> Settings {
     let path = settings_path();
-    let mut settings = if let Ok(raw) = fs::read_to_string(&path) {
-        serde_json::from_str(&raw).unwrap_or_default()
-    } else {
-        Settings::default()
-    };
+    let backup_path = settings_backup_path();
+    let primary = fs::read_to_string(&path).ok();
+    let backup = fs::read_to_string(&backup_path).ok();
+    let mut settings = primary
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .or_else(|| {
+            backup
+                .as_deref()
+                .and_then(|raw| serde_json::from_str(raw).ok())
+        })
+        .or_else(|| primary.as_deref().and_then(recover_settings))
+        .or_else(|| backup.as_deref().and_then(recover_settings))
+        .unwrap_or_default();
     settings.normalize();
     settings
+}
+
+fn recover_settings(raw: &str) -> Option<Settings> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let mut settings = Settings::default();
+    if let Some(current_workspace) = value
+        .get("current_workspace")
+        .and_then(|item| item.as_str())
+    {
+        settings.current_workspace = current_workspace.to_string();
+    }
+    if let Some(workspaces) = value.get("workspaces").and_then(|item| item.as_array()) {
+        let recovered = workspaces
+            .iter()
+            .filter_map(|item| serde_json::from_value(item.clone()).ok())
+            .collect::<Vec<_>>();
+        if !recovered.is_empty() {
+            settings.workspaces = recovered;
+        }
+    }
+    settings.performance_metrics_interval_ms = value
+        .get("performance_metrics_interval_ms")
+        .or_else(|| value.get("metrics_fast_ms"))
+        .and_then(|item| item.as_u64())
+        .unwrap_or_else(default_performance_metrics_interval_ms);
+    settings.resource_metrics_interval_ms = value
+        .get("resource_metrics_interval_ms")
+        .or_else(|| value.get("metrics_slow_ms"))
+        .and_then(|item| item.as_u64())
+        .unwrap_or_else(default_resource_metrics_interval_ms);
+    Some(settings)
 }
 
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
     let dir = config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("create config dir failed: {e}"))?;
     let path = settings_path();
+    let backup_path = settings_backup_path();
+    let temporary_path = dir.join("settings.json.tmp");
     let raw = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    fs::write(&path, raw).map_err(|e| format!("write settings failed: {e}"))
+    fs::write(&temporary_path, raw).map_err(|e| format!("write settings failed: {e}"))?;
+    if path.is_file() {
+        fs::copy(&path, &backup_path).map_err(|e| format!("backup settings failed: {e}"))?;
+    }
+    fs::rename(&temporary_path, &path).map_err(|e| format!("replace settings failed: {e}"))
 }
 
 pub fn workspace_id_from_name(name: &str) -> Result<String, String> {
@@ -959,6 +1031,30 @@ mod tests {
     }
 
     #[test]
+    fn ssh_exec_command_supports_forward_only_sessions() {
+        let ssh = WorkspaceSsh {
+            host: "box.example".into(),
+            user: "se".into(),
+            port: 22,
+            auth: WorkspaceSshAuth::Key,
+            identity_file: String::new(),
+            password: String::new(),
+        };
+        let command = ssh_exec_command_with_args(
+            &ssh,
+            "",
+            &[
+                "-N".into(),
+                "-L".into(),
+                "127.0.0.1:1234:127.0.0.1:29386".into(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(command.args.last().unwrap(), "se@box.example");
+        assert!(command.args.contains(&"-N".to_string()));
+    }
+
+    #[test]
     fn verify_sshpass_requires_password() {
         let error = verify_workspace_ssh(WorkspaceSsh {
             host: "box.example".into(),
@@ -994,8 +1090,12 @@ mod tests {
     #[test]
     fn workspace_data_dir_keeps_logs_separate() {
         assert_eq!(
-            workspace_data_dir("lab"),
+            workspace_data_dir("lab", false),
             home_dir().join(".harbor/workspace/lab")
+        );
+        assert_eq!(
+            workspace_data_dir("lab", true),
+            home_dir().join(".harbor/remote")
         );
     }
 
@@ -1017,6 +1117,50 @@ mod tests {
         assert_eq!(settings.performance_metrics_interval_ms, 500);
         assert_eq!(settings.resource_metrics_interval_ms, 2000);
         assert!(settings.current().unwrap().localhost_only());
+    }
+
+    #[test]
+    fn settings_without_metric_fields_keep_workspaces() {
+        let settings: Settings = serde_json::from_str(
+            r#"{
+                "current_workspace": "lab",
+                "workspaces": [{
+                    "id": "lab",
+                    "name": "Lab",
+                    "mode": "local",
+                    "search_paths": ["/work/lab"]
+                }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(settings.current_workspace, "lab");
+        assert_eq!(settings.workspaces[0].id, "lab");
+        assert_eq!(settings.performance_metrics_interval_ms, 1000);
+        assert_eq!(settings.resource_metrics_interval_ms, 10000);
+    }
+
+    #[test]
+    fn partial_settings_recovery_keeps_valid_workspaces() {
+        let settings = recover_settings(
+            r#"{
+                "current_workspace": "lab",
+                "workspaces": [
+                    {
+                        "id": "lab",
+                        "name": "Lab",
+                        "mode": "local",
+                        "search_paths": ["/work/lab"]
+                    },
+                    { "name": "broken" }
+                ],
+                "performance_metrics_interval_ms": "invalid"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(settings.current_workspace, "lab");
+        assert_eq!(settings.workspaces.len(), 1);
+        assert_eq!(settings.workspaces[0].id, "lab");
+        assert_eq!(settings.performance_metrics_interval_ms, 1000);
     }
 
     #[test]

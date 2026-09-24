@@ -1,5 +1,6 @@
 use semver::Version;
 use serde::Serialize;
+use std::time::Duration;
 
 use harbor_core::version::APP_VERSION;
 
@@ -64,7 +65,11 @@ struct RemoteRelease {
 
 fn fetch_releases() -> Result<Vec<RemoteRelease>, String> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=30");
-    let response = ureq::get(&url)
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(5))
+        .build();
+    let response = agent
+        .get(&url)
         .set("User-Agent", "Harbor")
         .set("Accept", "application/vnd.github+json")
         .call()

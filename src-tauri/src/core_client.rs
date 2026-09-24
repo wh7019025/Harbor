@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use harbor_core::service::CoreServiceStatus;
 use harbor_core::settings::{Settings, Workspace, WorkspaceMode};
 use harbor_core::taskcard::{
     ManagedProcessGroup, ResearchResult, TaskCardSnapshot, TaskCardYamlDocument, TaskLogChunk,
@@ -35,6 +36,12 @@ pub struct CoreAccessStatus {
     pub owner_version: Option<String>,
     #[serde(default)]
     pub expires_in_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TerminalStatus {
+    pub ready: bool,
+    pub port: u16,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -388,6 +395,33 @@ pub fn snapshot(settings: &Settings) -> Result<TaskCardSnapshot, String> {
     core_get(settings, "/api/v1/snapshot")
 }
 
+pub fn ensure_physical_display(settings: &Settings) -> Result<TaskCardSnapshot, String> {
+    let path = "/api/v1/displays/physical/ensure";
+    let url = format!("{}{path}", core_base_url(settings)?);
+    let resp = http_agent(Duration::from_secs(15))
+        .post(url.as_str())
+        .send_json(json!({}))
+        .map_err(map_ureq)?;
+    decode_json(path, resp)
+}
+
+pub fn ensure_terminal(
+    settings: &Settings,
+    workdir: &str,
+    title: &str,
+) -> Result<TerminalStatus, String> {
+    let path = "/api/v1/terminal/ensure";
+    let url = format!("{}{path}", core_base_url(settings)?);
+    let resp = http_agent(Duration::from_secs(10))
+        .post(url.as_str())
+        .send_json(json!({
+            "workdir": workdir,
+            "title": title,
+        }))
+        .map_err(map_ureq)?;
+    decode_json(path, resp)
+}
+
 pub fn research(settings: &Settings) -> Result<ResearchResult, String> {
     core_post(settings, "/api/v1/discovery/refresh", json!({}))
 }
@@ -473,6 +507,12 @@ pub fn managed_processes(settings: &Settings) -> Result<Vec<ManagedProcessGroup>
     let body: Value = core_get(settings, "/api/v1/processes")?;
     serde_json::from_value(body.get("groups").cloned().unwrap_or_else(|| json!([])))
         .map_err(|error| format!("decode managed processes failed: {error}"))
+}
+
+pub fn core_services(settings: &Settings) -> Result<Vec<CoreServiceStatus>, String> {
+    let body: Value = core_get(settings, "/api/v1/services")?;
+    serde_json::from_value(body.get("services").cloned().unwrap_or_else(|| json!([])))
+        .map_err(|error| format!("decode core services failed: {error}"))
 }
 
 pub fn stop_managed_processes(settings: &Settings, uuid: &str) -> Result<(), String> {
@@ -737,7 +777,20 @@ pub fn resolve_config_base_path(settings: &Settings, prefix_path: &str) -> Resul
 }
 
 pub fn switch_workspace(settings: &Settings, id: &str) -> Result<(), String> {
-    core_post_ok(settings, "/api/v1/workspaces/switch", json!({ "id": id }))
+    let workspace = settings
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == id)
+        .ok_or_else(|| format!("workspace not found: {id}"))?;
+    core_post_ok(
+        settings,
+        "/api/v1/workspaces/switch",
+        json!({
+            "id": workspace.id,
+            "name": workspace.name,
+            "search_paths": workspace.search_paths,
+        }),
+    )
 }
 
 fn urlencoding_loose(value: &str) -> String {

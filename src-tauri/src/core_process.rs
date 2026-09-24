@@ -351,7 +351,7 @@ fn send_remote_runtime(
     Ok(())
 }
 
-pub fn remote_ttyd_command(ssh: &WorkspaceSsh) -> Result<String, String> {
+pub fn ensure_remote_ttyd_runtime(ssh: &WorkspaceSsh) -> Result<(), String> {
     harbor_core::app_log::gui(&format!(
         "workspace terminal 1/3: checking managed ttyd on {}",
         ssh.host.trim()
@@ -382,13 +382,17 @@ pub fn remote_ttyd_command(ssh: &WorkspaceSsh) -> Result<String, String> {
     } else {
         harbor_core::app_log::gui("workspace terminal 2/3: reusing managed ttyd");
     }
-    harbor_core::app_log::gui("workspace terminal 3/3: ttyd command ready");
-    Ok(remote_runtime_exec(
-        dir.as_str(),
-        "ttyd",
-        loader.as_deref(),
-        "",
-    ))
+    let command = remote_runtime_exec(dir.as_str(), "ttyd", loader.as_deref(), r#""$@""#);
+    let launcher = format!("#!/bin/sh\nexec {command}\n");
+    ssh_run(
+        ssh,
+        &format!(
+            "printf '%s' {} > \"$HOME/{dir}/run\" && chmod +x \"$HOME/{dir}/run\" && ln -sfn \"$HOME/{dir}\" \"$HOME/.harbor/tools/ttyd/current\"",
+            shell_single_quote(launcher.as_str())
+        ),
+    )?;
+    harbor_core::app_log::gui("workspace terminal 3/3: managed ttyd runtime ready");
+    Ok(())
 }
 
 fn deploy_remote_ttyd(
@@ -618,7 +622,8 @@ fn ensure_local_core(settings: &Settings, workspace: &Workspace) -> Result<(), S
                 && managed_core_matches
                 && health.workspace_id == workspace.id =>
         {
-            claim_compatible_access(local_core_url().as_str())
+            claim_compatible_access(local_core_url().as_str())?;
+            switch_workspace(settings, workspace.id.as_str())
         }
         Ok(health)
             if health.ok
@@ -674,9 +679,7 @@ pub fn connect_remote_core(settings: &Settings) -> Result<(), String> {
                 && health.api_revision == CORE_API_REVISION =>
         {
             claim_compatible_access(base.as_str())?;
-            if health.workspace_id != workspace.id {
-                switch_workspace(settings, workspace.id.as_str())?;
-            }
+            switch_workspace(settings, workspace.id.as_str())?;
             harbor_core::app_log::gui("remote connect 4/4: reused running harbor_core");
             return Ok(());
         }
@@ -695,12 +698,13 @@ pub fn connect_remote_core(settings: &Settings) -> Result<(), String> {
     }
 
     // --- 阶段 3：仅在远端缺少匹配 release 时复制，再唤醒 Core ---
-    let result = deploy_remote_core(&workspace);
+    let result = deploy_remote_core(settings, false);
     finish_deploy_progress();
     result
 }
 
-pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
+pub fn deploy_remote_core(settings: &Settings, force: bool) -> Result<(), String> {
+    let workspace = settings.current()?.clone();
     let ssh = workspace
         .ssh
         .as_ref()
@@ -710,7 +714,7 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
     let runtime_hash = runtime_fingerprint(EXPECTED_CORE_SHA256, &runtime)?;
     let loader = loader_basename(&runtime);
     let dir = remote_core_dir();
-    let running_pid = remote_base(workspace)
+    let running_pid = remote_base(&workspace)
         .ok()
         .and_then(|base| fetch_health_url(base.as_str()).ok())
         .map(|health| health.pid)
@@ -721,7 +725,7 @@ pub fn deploy_remote_core(workspace: &Workspace) -> Result<(), String> {
     )?;
 
     // --- 阶段 1：拒绝终止无法通过 API 确认归属的存活 Core ---
-    if running_pid.is_none() {
+    if running_pid.is_none() && !force {
         let unmanaged_pid = ssh_run(
             ssh,
             r#"if [ -f "$HOME/.harbor/run/harbor_core.pid" ]; then
@@ -767,6 +771,10 @@ fi"#,
             r#"if [ -f "$HOME/.harbor/run/harbor_core.pid" ]; then
   old=$(cat "$HOME/.harbor/run/harbor_core.pid")
   if [ -n "$old" ]; then
+    if kill -0 "$old" 2>/dev/null && ! grep -aq 'harbor_core' "/proc/$old/cmdline" 2>/dev/null; then
+      echo "refusing to terminate pid $old: process is not harbor_core" >&2
+      exit 1
+    fi
 {}
   fi
 fi"#,
@@ -806,7 +814,7 @@ fi
     );
     ssh_run(ssh, start.as_str())?;
     if let Err(error) = wait_health(
-        remote_base(workspace)?.as_str(),
+        remote_base(&workspace)?.as_str(),
         Some(workspace.id.as_str()),
     ) {
         let remote_log = ssh_run(
@@ -820,7 +828,8 @@ fi
         }
         return Err(format!("{error}; remote log:\n{remote_log}"));
     }
-    claim_compatible_access(remote_base(workspace)?.as_str())?;
+    claim_compatible_access(remote_base(&workspace)?.as_str())?;
+    switch_workspace(settings, workspace.id.as_str())?;
     harbor_core::app_log::gui("remote connect 4/4: harbor_core started and connected");
     Ok(())
 }
@@ -841,7 +850,9 @@ pub fn ensure_core(settings: &Settings) -> Result<(), String> {
 pub fn restart_core(settings: &Settings) -> Result<(), String> {
     let workspace = settings.current()?.clone();
     if workspace.mode == WorkspaceMode::Remote {
-        connect_remote_core(settings)
+        let result = deploy_remote_core(settings, true);
+        finish_deploy_progress();
+        result
     } else {
         spawn_local_core(&workspace)
     }

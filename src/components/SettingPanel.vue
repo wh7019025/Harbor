@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { LoaderCircle } from "lucide-vue-next";
 import {
   checkAppUpdate,
   connectRemoteWorkspaceCore,
@@ -30,6 +31,9 @@ const form = ref<Settings>({
 const version = ref("");
 const coreStatus = ref<HarborCoreStatus | null>(null);
 const updateInfo = ref<AppUpdateInfo | null>(null);
+const loadingSettings = ref(true);
+const loadingVersion = ref(true);
+const loadingCoreStatus = ref(true);
 const checkingUpdate = ref(false);
 const saving = ref(false);
 const coreBusy = ref("");
@@ -42,15 +46,37 @@ const currentWorkspace = computed(() =>
 );
 const isRemote = computed(() => currentWorkspace.value?.mode === "remote");
 
-onMounted(async () => {
+async function loadSettings() {
   try {
     form.value = await getSettings();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingSettings.value = false;
+  }
+}
+
+async function loadVersion() {
+  try {
     version.value = await getAppVersion();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingVersion.value = false;
+  }
+}
+
+async function loadCoreStatus() {
+  try {
     coreStatus.value = await getHarborCoreStatus();
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loadingCoreStatus.value = false;
   }
+}
 
+async function loadUpdate() {
   checkingUpdate.value = true;
   try {
     updateInfo.value = await checkAppUpdate();
@@ -59,6 +85,13 @@ onMounted(async () => {
   } finally {
     checkingUpdate.value = false;
   }
+}
+
+onMounted(() => {
+  void loadSettings();
+  void loadVersion();
+  void loadCoreStatus();
+  void loadUpdate();
 });
 
 async function openRelease() {
@@ -116,28 +149,39 @@ async function shutdownCoreAndExit() {
 
 <template>
   <form class="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 py-3" @submit.prevent="save">
-    <label class="block">
-      <span class="kicker">Performance Metrics Interval (ms)</span>
-      <input
-        v-model.number="form.performance_metrics_interval_ms"
-        class="field mt-2"
-        type="number"
-        min="200"
-        step="100"
-      />
-    </label>
-    <label class="block">
-      <span class="kicker">Resource Metrics Interval (ms)</span>
-      <input
-        v-model.number="form.resource_metrics_interval_ms"
-        class="field mt-2"
-        type="number"
-        min="1000"
-        step="500"
-      />
-    </label>
+    <div v-if="loadingSettings" class="flex min-h-28 items-center justify-center gap-2 text-[var(--faint)]">
+      <LoaderCircle class="h-4 w-4 animate-spin" />
+      <span class="readout text-xs">正在加载设置…</span>
+    </div>
+    <template v-else>
+      <label class="block">
+        <span class="kicker">Performance Metrics Interval (ms)</span>
+        <input
+          v-model.number="form.performance_metrics_interval_ms"
+          class="field mt-2"
+          type="number"
+          min="200"
+          step="100"
+        />
+      </label>
+      <label class="block">
+        <span class="kicker">Resource Metrics Interval (ms)</span>
+        <input
+          v-model.number="form.resource_metrics_interval_ms"
+          class="field mt-2"
+          type="number"
+          min="1000"
+          step="500"
+        />
+      </label>
+    </template>
     <div class="block">
       <span class="kicker">harbor_core</span>
+      <div v-if="loadingCoreStatus" class="flex min-h-28 items-center justify-center gap-2 text-[var(--faint)]">
+        <LoaderCircle class="h-4 w-4 animate-spin" />
+        <span class="readout text-xs">正在读取 Core 状态…</span>
+      </div>
+      <template v-else>
       <p class="readout mt-2 text-xs text-[var(--ink)]">
         {{ coreStatus?.reachable ? (coreStatus.compatible ? "reachable" : "incompatible") : "unreachable" }}
         · {{ coreStatus?.mode ?? currentWorkspace?.mode ?? "local" }}
@@ -185,17 +229,27 @@ async function shutdownCoreAndExit() {
           {{ coreBusy === "probe" ? "检查中…" : "检查连接" }}
         </button>
         <button
+          v-if="isRemote"
           class="btn !px-2 !py-1 text-[11px]"
           type="button"
           :disabled="!!coreBusy"
-          @click="runCoreAction('restart', isRemote ? connectRemoteWorkspaceCore : restartHarborCore)"
+          @click="runCoreAction('connect', connectRemoteWorkspaceCore)"
         >
-          {{ coreBusy === "restart" ? (isRemote ? "连接中…" : "重启中…") : isRemote ? "连接" : "重启" }}
+          {{ coreBusy === "connect" ? "连接中…" : "连接" }}
+        </button>
+        <button
+          class="btn btn-danger !px-2 !py-1 text-[11px]"
+          type="button"
+          :disabled="!!coreBusy"
+          @click="runCoreAction('restart', restartHarborCore)"
+        >
+          {{ coreBusy === "restart" ? "强制重启中…" : "强制重启 Core" }}
         </button>
       </div>
       <p class="readout mt-2 text-[11px] text-[var(--faint)]">
-        检查连接只读取状态；{{ isRemote ? "连接会先检查 SSH、运行中的 Core 与版本，只有缺少匹配 release 时才复制。使用中的 Core 不会被替换。" : "重启会替换本机 core，请先关闭其他 Harbor。" }}
+        检查连接只读取状态；{{ isRemote ? "连接不会替换使用中的 Core；强制重启会终止远端 Core 并启动匹配版本，请先关闭其他 Harbor。" : "强制重启会替换本机 Core，请先关闭其他 Harbor。" }}
       </p>
+      </template>
     </div>
 
     <p v-if="message" class="readout text-sm text-[var(--accent)]">{{ message }}</p>
@@ -228,8 +282,14 @@ async function shutdownCoreAndExit() {
 
     <div class="mt-auto flex items-center justify-between gap-3 border-t border-[var(--line-soft)] pt-3">
       <div>
-        <p class="readout text-xs text-[var(--muted)]">Harbor {{ version }}</p>
-        <p v-if="checkingUpdate" class="readout mt-1 text-xs text-[var(--faint)]">正在检查更新…</p>
+        <p class="readout flex items-center gap-1.5 text-xs text-[var(--muted)]">
+          <LoaderCircle v-if="loadingVersion" class="h-3 w-3 animate-spin" />
+          Harbor {{ loadingVersion ? "正在读取版本…" : version }}
+        </p>
+        <p v-if="checkingUpdate" class="readout mt-1 flex items-center gap-1.5 text-xs text-[var(--faint)]">
+          <LoaderCircle class="h-3 w-3 animate-spin" />
+          正在检查更新…
+        </p>
         <p
           v-else-if="updateInfo?.updateAvailable && updateInfo.latest"
           class="readout mt-1 text-xs text-[var(--accent)]"
@@ -250,7 +310,7 @@ async function shutdownCoreAndExit() {
       </div>
       <div class="flex gap-2">
         <button class="btn" type="button" :disabled="saving" @click="emit('close')">cancel</button>
-        <button class="btn btn-accent" type="submit" :disabled="saving">
+        <button class="btn btn-accent" type="submit" :disabled="saving || loadingSettings">
           {{ saving ? "writing…" : "save" }}
         </button>
       </div>

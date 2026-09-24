@@ -138,10 +138,21 @@ vnc_interface:
   - panel_name: desktop
 ```
 
-`vnc_interface` 只有 `panel_name`，不配置端口。local workspace 会忽略该入口并直接
+`vnc_interface` 只有 `panel_name`，不配置端口。远端 `harbor_core` 启动后会持续维护
+机器级共享 VNC 桌面，所有 VNC Task 只是在该桌面中打开窗口。local workspace 会忽略该入口并直接
 打开原生窗口。remote workspace 会按需启动当前机器唯一的共享 X11、TigerVNC 和
 noVNC 桌面，并统一在 Harbor 固定端口 `23682` 发布页面。所有 VNC Task 共用同一个
 `DISPLAY`；停止一个 Task 不会关闭共享桌面，也不会影响其中的其他 Task。
+
+`23682` 是远端 noVNC HTTP/WebSocket 服务端口，不是 TigerVNC RFB 端口。Harbor GUI
+通过 Workspace SSH Tunnel 将远端 `127.0.0.1:23682` 转发到本机随机空闲端口，通常
+不需要开放远端防火墙，也不要让 Task 自己监听或占用 `23682`。端口被占用时，共享
+桌面启动失败并记录到 Harbor 日志。本地 Workspace 不使用该端口。
+
+远端 Core 还会尝试在 `23683` 提供真实 `DISPLAY=:0` 的画面与交互入口。该入口
+属于机器级功能，不改变 `vnc_interface` Task 仍运行于虚拟桌面的规则。真实桌面要求
+活动 X11 会话和 `x0vncserver`；缺少时提示安装
+`sudo apt install tigervnc-scraping-server`，但不会影响虚拟桌面。
 
 使用 `vnc_interface` 时不要在 `env` 或启动脚本中设置 `DISPLAY`、`XAUTHORITY`、
 `WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端由 Harbor 设置共享显示

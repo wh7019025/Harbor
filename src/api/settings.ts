@@ -84,6 +84,14 @@ export function connectRemoteWorkspaceCore() {
   return invoke<HarborCoreStatus>("connect_remote_workspace_core");
 }
 
+export function isRemoteWorkspaceConnected() {
+  return invoke<boolean>("is_remote_workspace_connected");
+}
+
+export function disconnectRemoteWorkspaceCore() {
+  return invoke<void>("disconnect_remote_workspace_core");
+}
+
 export interface HarborCopyProgress {
   active: boolean;
   percent: number;

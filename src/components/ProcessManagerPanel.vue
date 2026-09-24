@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { LoaderCircle, RefreshCw, Square } from "lucide-vue-next";
+import { LoaderCircle, LockKeyhole, Monitor, RefreshCw, Square, SquareTerminal } from "lucide-vue-next";
 import { onMounted, ref } from "vue";
 import {
   fetchManagedProcesses,
+  fetchCoreServices,
   stopManagedProcesses,
+  type CoreServiceStatus,
   type ManagedProcessGroup,
 } from "../api/taskcard";
 
 const groups = ref<ManagedProcessGroup[]>([]);
+const services = ref<CoreServiceStatus[]>([]);
 const loading = ref(false);
 const error = ref("");
 const stopping = ref("");
@@ -16,12 +19,30 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    groups.value = await fetchManagedProcesses();
+    [services.value, groups.value] = await Promise.all([
+      fetchCoreServices(),
+      fetchManagedProcesses(),
+    ]);
   } catch (reason) {
     error.value = String(reason);
   } finally {
     loading.value = false;
   }
+}
+
+function serviceStateLabel(state: string) {
+  if (state === "running") return "运行中";
+  if (state === "starting") return "启动中";
+  if (state === "unavailable") return "不可用";
+  if (state === "inactive") return "未启用";
+  return "已停止";
+}
+
+function serviceStateClass(state: string) {
+  if (state === "running") return "bg-[color-mix(in_srgb,var(--running)_18%,transparent)] text-[var(--running)]";
+  if (state === "starting") return "bg-[var(--accent-soft)] text-[var(--accent)]";
+  if (state === "unavailable") return "bg-[color-mix(in_srgb,var(--danger)_18%,transparent)] text-[var(--danger)]";
+  return "bg-[var(--surface-3)] text-[var(--muted)]";
 }
 
 async function stopGroup(group: ManagedProcessGroup) {
@@ -44,7 +65,7 @@ onMounted(load);
   <div class="flex min-h-0 flex-1 flex-col">
     <div class="flex shrink-0 items-center justify-between border-b border-[var(--line-soft)] px-3 py-2">
       <p class="text-[11px] text-[var(--muted)]">
-        显示 Harbor 启动且仍然存活的进程。Core 重启后会重新接管；主进程退出但子进程仍存活时标记为残留。
+        Core 基础服务只读展示；Task 进程可手动终止。主进程退出但子进程仍存活时标记为残留。
       </p>
       <button class="btn ml-3 !px-2 !py-1" type="button" title="刷新" :disabled="loading" @click="load">
         <RefreshCw :class="['h-3.5 w-3.5', loading ? 'animate-spin' : '']" />
@@ -56,8 +77,44 @@ onMounted(load);
     </div>
 
     <div class="min-h-0 flex-1 overflow-auto p-3">
-      <div v-if="!loading && groups.length === 0" class="py-12 text-center text-xs text-[var(--faint)]">
-        没有 Harbor 托管的存活进程
+      <section class="mb-4">
+        <div class="mb-2 flex select-none items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+          <LockKeyhole class="h-3.5 w-3.5 text-[var(--accent)]" />
+          Core 服务
+          <span class="normal-case tracking-normal text-[var(--faint)]">随 harbor_core 启停，不可单独关闭</span>
+        </div>
+        <div class="grid gap-2 lg:grid-cols-3">
+          <article
+            v-for="service in services"
+            :key="service.id"
+            class="rounded border border-[var(--line)] bg-[var(--surface-2)] px-3 py-2.5"
+          >
+            <div class="flex items-start gap-2.5">
+              <Monitor v-if="service.kind === 'vnc'" class="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+              <SquareTerminal v-else class="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <strong class="truncate text-xs">{{ service.name }}</strong>
+                  <span class="readout rounded px-1.5 py-0.5 text-[9px]" :class="serviceStateClass(service.state)">
+                    {{ serviceStateLabel(service.state) }}
+                  </span>
+                </div>
+                <p class="mt-1 truncate font-mono text-[10px] text-[var(--faint)]" :title="service.bind">
+                  {{ service.bind }}<template v-if="service.pid"> · PID {{ service.pid }}</template>
+                </p>
+                <p v-if="service.detail" class="mt-1 line-clamp-2 text-[10px] text-[var(--muted)]" :title="service.detail">
+                  {{ service.detail }}
+                </p>
+              </div>
+              <LockKeyhole class="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <div class="mb-2 select-none text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">Task 进程</div>
+      <div v-if="!loading && groups.length === 0" class="rounded border border-dashed border-[var(--line)] py-8 text-center text-xs text-[var(--faint)]">
+        没有 Harbor 托管的 Task 进程
       </div>
       <article
         v-for="group in groups"

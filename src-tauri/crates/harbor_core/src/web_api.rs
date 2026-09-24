@@ -16,17 +16,22 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 
+use crate::service::CoreServiceStatus;
 use crate::settings::{
     add_current_search_path, list_path_suggestions, path_suggestion_query,
     remove_current_search_path, save_settings, workspace_data_dir, Settings,
 };
-use crate::taskcard::{GroupDefinition, TaskCardService, TaskCardYamlDocument, TaskSummary};
+use crate::taskcard::{
+    GroupDefinition, TaskCardService, TaskCardSnapshot, TaskCardYamlDocument, TaskSummary,
+};
+use crate::terminal::{TerminalService, TerminalStatus};
 use crate::version::APP_VERSION;
 
 pub const WEB_API_PORT: u16 = 29385;
-pub const CORE_API_REVISION: u32 = 6;
-const CORE_API_REVISION_HEADER: &str = "6";
+pub const CORE_API_REVISION: u32 = 18;
+const CORE_API_REVISION_HEADER: &str = "18";
 const ACCESS_LEASE_TTL: Duration = Duration::from_secs(8);
+const SNAPSHOT_STALE_AFTER: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Default)]
 pub struct CoreAccessLease {
@@ -68,7 +73,40 @@ pub struct WebApiState {
     pub taskcard: Arc<Mutex<TaskCardService>>,
     pub settings: Arc<Mutex<Settings>>,
     pub access: Arc<Mutex<CoreAccessLease>>,
+    pub terminal: Arc<Mutex<TerminalService>>,
+    snapshot_cache: Arc<Mutex<SnapshotCache>>,
     pub localhost_only: bool,
+    pub remote_runtime: bool,
+}
+
+struct SnapshotCache {
+    snapshot: TaskCardSnapshot,
+    refreshed_at: Instant,
+    refreshing: bool,
+}
+
+impl WebApiState {
+    pub fn new(
+        taskcard: TaskCardService,
+        settings: Settings,
+        localhost_only: bool,
+        remote_runtime: bool,
+    ) -> Self {
+        let snapshot = taskcard.snapshot();
+        Self {
+            taskcard: Arc::new(Mutex::new(taskcard)),
+            settings: Arc::new(Mutex::new(settings)),
+            access: Arc::new(Mutex::new(CoreAccessLease::default())),
+            terminal: Arc::new(Mutex::new(TerminalService::default())),
+            snapshot_cache: Arc::new(Mutex::new(SnapshotCache {
+                snapshot,
+                refreshed_at: Instant::now(),
+                refreshing: false,
+            })),
+            localhost_only,
+            remote_runtime,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -136,6 +174,12 @@ struct ManagedProcessAction {
     uuid: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct TerminalAction {
+    workdir: String,
+    title: String,
+}
+
 pub fn bind_addr(localhost_only: bool) -> SocketAddr {
     if localhost_only {
         SocketAddr::from(([127, 0, 0, 1], WEB_API_PORT))
@@ -159,6 +203,12 @@ pub fn router(state: WebApiState) -> Router {
         .route("/api/v1/access/claim", post(claim_access))
         .route("/api/v1/access/release", post(release_access))
         .route("/api/v1/snapshot", get(serve_snapshot))
+        .route("/api/v1/services", get(list_core_services))
+        .route(
+            "/api/v1/displays/physical/ensure",
+            post(ensure_physical_display),
+        )
+        .route("/api/v1/terminal/ensure", post(ensure_terminal))
         .route("/api/v1/discovery/refresh", post(refresh_discovery))
         .route("/api/v1/tasks", get(list_tasks))
         .route("/api/v1/tasks/running", get(list_running_tasks))
@@ -341,7 +391,70 @@ async fn release_access(
 }
 
 async fn serve_snapshot(State(state): State<WebApiState>) -> Json<Value> {
-    Json(json!(snapshot(&state)))
+    Json(json!(cached_snapshot(&state)))
+}
+
+async fn list_core_services(State(state): State<WebApiState>) -> Json<Value> {
+    let services = if state.remote_runtime {
+        let mut services = crate::vnc_interface::service_statuses();
+        services.push(state.terminal.lock().status());
+        services
+    } else {
+        vec![
+            CoreServiceStatus::inactive(
+                "virtual-vnc",
+                "虚拟桌面 VNC",
+                "vnc",
+                crate::vnc_interface::VNC_PORT,
+                "仅远端 Core 启用",
+            ),
+            CoreServiceStatus::inactive(
+                "physical-vnc",
+                "真实桌面 VNC",
+                "vnc",
+                crate::vnc_interface::PHYSICAL_VNC_PORT,
+                "仅远端 Core 启用",
+            ),
+            CoreServiceStatus::inactive(
+                "terminal",
+                "远端终端 ttyd",
+                "terminal",
+                crate::terminal::TTYD_PORT,
+                "仅远端 Core 启用",
+            ),
+        ]
+    };
+    Json(json!({ "services": services }))
+}
+
+async fn ensure_physical_display(
+    State(state): State<WebApiState>,
+) -> Result<Json<Value>, ApiError> {
+    tokio::task::spawn_blocking(crate::vnc_interface::ensure_physical_display)
+        .await
+        .map_err(|error| ApiError::BadRequest(format!("physical display worker failed: {error}")))?
+        .map_err(ApiError::BadRequest)?;
+    Ok(Json(json!(snapshot(&state))))
+}
+
+async fn ensure_terminal(
+    State(state): State<WebApiState>,
+    payload: Result<Json<TerminalAction>, JsonRejection>,
+) -> Result<Json<TerminalStatus>, ApiError> {
+    if !state.remote_runtime {
+        return Err(ApiError::BadRequest(
+            "managed ttyd is only available in remote runtime mode".into(),
+        ));
+    }
+    let action = payload
+        .map_err(|error| ApiError::BadRequest(error.body_text()))?
+        .0;
+    let terminal = state.terminal.clone();
+    tokio::task::spawn_blocking(move || terminal.lock().ensure(action.workdir, action.title))
+        .await
+        .map_err(|error| ApiError::BadRequest(format!("terminal worker failed: {error}")))?
+        .map(Json)
+        .map_err(ApiError::BadRequest)
 }
 
 async fn list_tasks(State(state): State<WebApiState>) -> Json<Value> {
@@ -438,6 +551,14 @@ async fn start_task(
             optional_text(action.sudo_password.as_deref()),
         )
         .map_err(map_service_error)?;
+    update_cached_task_status(
+        &state,
+        prefix_path.as_str(),
+        id.as_str(),
+        true,
+        action.config_id.as_deref(),
+    );
+    request_snapshot_refresh(&state);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -452,6 +573,8 @@ async fn stop_task(
         .lock()
         .stop_task(prefix_path.as_str(), id.as_str())
         .map_err(map_service_error)?;
+    update_cached_task_status(&state, prefix_path.as_str(), id.as_str(), false, None);
+    request_snapshot_refresh(&state);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -472,6 +595,14 @@ async fn restart_task(
             optional_text(action.sudo_password.as_deref()),
         )
         .map_err(map_service_error)?;
+    update_cached_task_status(
+        &state,
+        prefix_path.as_str(),
+        id.as_str(),
+        true,
+        action.config_id.as_deref(),
+    );
+    request_snapshot_refresh(&state);
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -564,6 +695,8 @@ struct PathQuery {
 struct PathAction {
     path: Option<String>,
     id: Option<String>,
+    name: Option<String>,
+    search_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -665,7 +798,9 @@ async fn add_search_path(
     let path = required_text(action.path.as_deref(), "path")?;
     let mut settings = state.settings.lock().clone();
     add_current_search_path(&mut settings, path).map_err(map_service_error)?;
-    save_settings(&settings).map_err(map_service_error)?;
+    if !state.remote_runtime {
+        save_settings(&settings).map_err(map_service_error)?;
+    }
     let service = state.taskcard.lock();
     service.set_search_paths(settings.current_search_paths().map_err(map_service_error)?);
     service.research();
@@ -687,7 +822,9 @@ async fn remove_search_path(
     let path = required_text(action.path.as_deref(), "path")?;
     let mut settings = state.settings.lock().clone();
     remove_current_search_path(&mut settings, path).map_err(map_service_error)?;
-    save_settings(&settings).map_err(map_service_error)?;
+    if !state.remote_runtime {
+        save_settings(&settings).map_err(map_service_error)?;
+    }
     let service = state.taskcard.lock();
     service.set_search_paths(settings.current_search_paths().map_err(map_service_error)?);
     service.research();
@@ -820,31 +957,52 @@ async fn switch_workspace(
     payload: Result<Json<PathAction>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let action = json_path_action(payload)?;
-    let id = required_text(action.id.as_deref(), "id")?;
     let mut settings = state.settings.lock().clone();
-    if !settings
-        .workspaces
-        .iter()
-        .any(|workspace| workspace.id == id)
-    {
-        return Err(ApiError::NotFound(format!("workspace not found: {id}")));
+    let id = register_workspace_definition(&mut settings, action)?;
+    settings.current_workspace = id.clone();
+    settings.normalize();
+    let paths = settings.current_search_paths().map_err(map_service_error)?;
+    let taskcard = state.taskcard.lock();
+    let discovery_cached = taskcard.activate_search_paths(paths);
+    taskcard
+        .set_log_dir(workspace_data_dir(id.as_str(), state.remote_runtime).join("log"))
+        .map_err(map_service_error)?;
+    if !discovery_cached {
+        taskcard.research();
     }
-    if settings.current_workspace != id {
-        settings.current_workspace = id.to_string();
-        settings.normalize();
-        let paths = settings.current_search_paths().map_err(map_service_error)?;
-        let taskcard = state.taskcard.lock();
-        let discovery_cached = taskcard.activate_search_paths(paths);
-        taskcard
-            .set_log_dir(workspace_data_dir(id).join("log"))
-            .map_err(map_service_error)?;
-        if !discovery_cached {
-            taskcard.research();
-        }
-        save_settings(&settings).map_err(map_service_error)?;
-        *state.settings.lock() = settings;
-    }
+    drop(taskcard);
+    *state.settings.lock() = settings;
+    request_snapshot_refresh(&state);
     Ok(Json(json!({ "ok": true, "workspace_id": id })))
+}
+
+fn register_workspace_definition(
+    settings: &mut Settings,
+    action: PathAction,
+) -> Result<String, ApiError> {
+    let id = required_text(action.id.as_deref(), "id")?.to_string();
+    if let Some(workspace) = settings
+        .workspaces
+        .iter_mut()
+        .find(|workspace| workspace.id == id.as_str())
+    {
+        if let Some(name) = action.name.as_deref() {
+            workspace.name = name.to_string();
+        }
+        if let Some(search_paths) = action.search_paths.as_ref() {
+            workspace.search_paths = search_paths.clone();
+        }
+    } else {
+        settings.workspaces.push(crate::settings::Workspace {
+            id: id.clone(),
+            name: action.name.unwrap_or_else(|| id.clone()),
+            mode: crate::settings::WorkspaceMode::Local,
+            ssh: None,
+            localhost_only: None,
+            search_paths: action.search_paths.unwrap_or_default(),
+        });
+    }
+    Ok(id)
 }
 
 fn json_path_action(
@@ -871,6 +1029,72 @@ fn snapshot(state: &WebApiState) -> crate::taskcard::TaskCardSnapshot {
     state.taskcard.lock().snapshot()
 }
 
+fn cached_snapshot(state: &WebApiState) -> TaskCardSnapshot {
+    let (mut snapshot, stale) = {
+        let cache = state.snapshot_cache.lock();
+        (
+            cache.snapshot.clone(),
+            cache.refreshed_at.elapsed() >= SNAPSHOT_STALE_AFTER,
+        )
+    };
+    snapshot.stale = stale;
+    if stale {
+        request_snapshot_refresh(state);
+    }
+    snapshot
+}
+
+fn request_snapshot_refresh(state: &WebApiState) {
+    let mut cache = state.snapshot_cache.lock();
+    if cache.refreshing {
+        return;
+    }
+    cache.refreshing = true;
+    drop(cache);
+
+    let service = state.taskcard.lock().clone();
+    let snapshot_cache = state.snapshot_cache.clone();
+    tokio::spawn(async move {
+        let refreshed = tokio::task::spawn_blocking(move || service.snapshot()).await;
+        let mut cache = snapshot_cache.lock();
+        if let Ok(snapshot) = refreshed {
+            cache.snapshot = snapshot;
+            cache.refreshed_at = Instant::now();
+        }
+        cache.refreshing = false;
+    });
+}
+
+fn update_cached_task_status(
+    state: &WebApiState,
+    prefix_path: &str,
+    id: &str,
+    running: bool,
+    config_id: Option<&str>,
+) {
+    let mut cache = state.snapshot_cache.lock();
+    let Some(task) = cache
+        .snapshot
+        .tasks
+        .iter_mut()
+        .find(|task| task.prefix_path == prefix_path && task.id == id)
+    else {
+        return;
+    };
+    if running {
+        task.status = "running".into();
+        task.running_config_id = config_id
+            .map(str::to_string)
+            .or_else(|| task.default_config.clone());
+    } else {
+        task.status = "stopped".into();
+        task.running_config_id = None;
+        task.pid = None;
+        task.started_at_ms = None;
+        task.log_file = None;
+    }
+}
+
 fn json_action(payload: Result<Json<TaskAction>, JsonRejection>) -> Result<TaskAction, ApiError> {
     payload
         .map(|Json(action)| action)
@@ -882,7 +1106,7 @@ fn resolve_task_key(
     action: &TaskAction,
 ) -> Result<(String, String), ApiError> {
     let id = required_id(Some(action.id.as_str()))?;
-    let snapshot = snapshot(state);
+    let snapshot = cached_snapshot(state);
     let task = resolve_task(
         &snapshot.tasks,
         id,
@@ -896,7 +1120,7 @@ fn resolve_group_key(
     action: &TaskAction,
 ) -> Result<(String, String), ApiError> {
     let id = required_id(Some(action.id.as_str()))?;
-    let snapshot = snapshot(state);
+    let snapshot = cached_snapshot(state);
     let group = resolve_group(
         &snapshot.groups,
         id,
@@ -911,7 +1135,7 @@ fn resolve_log_file(state: &WebApiState, query: &IdQuery) -> Result<String, ApiE
     }
     let id = required_id(query.id.as_deref())
         .map_err(|_| ApiError::BadRequest("file or id is required".into()))?;
-    let snapshot = snapshot(state);
+    let snapshot = cached_snapshot(state);
     let task = resolve_task(
         &snapshot.tasks,
         id,
@@ -1100,12 +1324,7 @@ command:
         .unwrap();
         let service = TaskCardService::new(root.clone(), vec![project]).unwrap();
         (
-            WebApiState {
-                taskcard: Arc::new(Mutex::new(service)),
-                settings: Arc::new(Mutex::new(Settings::default())),
-                access: Arc::new(Mutex::new(CoreAccessLease::default())),
-                localhost_only: true,
-            },
+            WebApiState::new(service, Settings::default(), true, false),
             root,
         )
     }
@@ -1157,6 +1376,8 @@ command:
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tasks"][0]["id"], "demo");
+        assert!(body["generated_at_ms"].as_u64().unwrap() > 0);
+        assert_eq!(body["stale"], false);
 
         let (status, body) = send(
             state.clone(),
@@ -1170,6 +1391,22 @@ command:
         assert_eq!(body["tasks"][0]["id"], "demo");
 
         let (status, body) = send(
+            state.clone(),
+            Request::builder()
+                .uri("/api/v1/services")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["services"].as_array().unwrap().len(), 3);
+        assert!(body["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|service| service["stoppable"] == false));
+
+        let (status, body) = send(
             state,
             Request::builder()
                 .uri("/api/v1/tasks/status")
@@ -1179,6 +1416,120 @@ command:
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["error"], "id is required");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn snapshot_route_returns_cache_while_refresh_runs_in_background() {
+        let (state, root) = test_service();
+        fs::write(
+            root.join("project/harbor_taskcfg/tasks/second.yaml"),
+            r#"version: 1
+id: second
+workdir: /tmp
+command:
+  argv: [echo, second]
+"#,
+        )
+        .unwrap();
+
+        let (_, cached) = send(
+            state.clone(),
+            Request::builder()
+                .uri("/api/v1/snapshot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(cached["tasks"].as_array().unwrap().len(), 1);
+
+        request_snapshot_refresh(&state);
+        for _ in 0..100 {
+            if !state.snapshot_cache.lock().refreshing {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let (_, refreshed) = send(
+            state,
+            Request::builder()
+                .uri("/api/v1/snapshot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(refreshed["tasks"].as_array().unwrap().len(), 2);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_task_status_updates_without_rebuilding_snapshot() {
+        let (state, root) = test_service();
+        let prefix_path = cached_snapshot(&state).tasks[0].prefix_path.clone();
+        update_cached_task_status(&state, prefix_path.as_str(), "demo", true, None);
+        let snapshot = cached_snapshot(&state);
+        assert_eq!(snapshot.tasks[0].status, "running");
+
+        update_cached_task_status(&state, prefix_path.as_str(), "demo", false, None);
+        assert_eq!(cached_snapshot(&state).tasks[0].status, "stopped");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn workspace_switch_registers_new_workspace_definition() {
+        let mut settings = Settings::default();
+        let id = register_workspace_definition(
+            &mut settings,
+            PathAction {
+                id: Some("lab".into()),
+                name: Some("Lab".into()),
+                search_paths: Some(vec!["/work/lab".into()]),
+                ..PathAction::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(id, "lab");
+        let workspace = settings
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == id)
+            .unwrap();
+        assert_eq!(workspace.name, "Lab");
+        assert_eq!(workspace.search_paths, vec!["/work/lab"]);
+    }
+
+    #[tokio::test]
+    async fn workspace_switch_updates_paths_when_id_is_unchanged() {
+        let (state, root) = test_service();
+        let next_project = root.join("next-project");
+        fs::create_dir_all(&next_project).unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/switch")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "id": "default",
+                    "name": "default",
+                    "search_paths": [next_project.to_string_lossy()]
+                })
+                .to_string(),
+            ))
+            .unwrap();
+
+        let (status, body) = send(state.clone(), request).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["workspace_id"], "default");
+        assert_eq!(
+            state.settings.lock().current().unwrap().search_paths,
+            vec![next_project.to_string_lossy().into_owned()]
+        );
+        assert_eq!(
+            state.taskcard.lock().search_paths(),
+            vec![next_project.to_string_lossy().into_owned()]
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1308,6 +1659,7 @@ command:
             "/api/v1/health",
             "/api/v1/access",
             "/api/v1/snapshot",
+            "/api/v1/services",
             "/api/v1/tasks",
             "/api/v1/tasks/running",
             "/api/v1/tasks/status",
@@ -1329,6 +1681,7 @@ command:
         const POST_ROUTES: &[&str] = &[
             "/api/v1/access/claim",
             "/api/v1/access/release",
+            "/api/v1/terminal/ensure",
             "/api/v1/discovery/refresh",
             "/api/v1/tasks/start",
             "/api/v1/tasks/stop",

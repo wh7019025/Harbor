@@ -175,11 +175,23 @@ pub struct TaskSummary {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskCardSnapshot {
+    #[serde(default)]
+    pub generated_at_ms: u128,
+    #[serde(default)]
+    pub stale: bool,
     pub root: String,
     #[serde(default = "loopback_address")]
     pub default_route_ip: String,
     #[serde(default = "crate::vnc_interface::vnc_port")]
     pub vnc_port: u16,
+    #[serde(default)]
+    pub vnc_ready: bool,
+    #[serde(default = "crate::vnc_interface::physical_vnc_port")]
+    pub physical_vnc_port: u16,
+    #[serde(default)]
+    pub physical_vnc_ready: bool,
+    #[serde(default)]
+    pub physical_vnc_error: Option<String>,
     pub search_paths: Vec<String>,
     pub discovered_task_dirs: Vec<String>,
     pub discovered_group_dirs: Vec<String>,
@@ -556,9 +568,15 @@ impl TaskCardService {
         });
 
         TaskCardSnapshot {
+            generated_at_ms: now_ms(),
+            stale: false,
             root: absolutize(&self.root),
             default_route_ip: default_route_ip(),
             vnc_port: crate::vnc_interface::VNC_PORT,
+            vnc_ready: crate::vnc_interface::is_ready(),
+            physical_vnc_port: crate::vnc_interface::PHYSICAL_VNC_PORT,
+            physical_vnc_ready: crate::vnc_interface::is_physical_ready(),
+            physical_vnc_error: crate::vnc_interface::physical_error(),
             search_paths: self.search_paths(),
             discovered_task_dirs: self
                 .discovered_task_dirs

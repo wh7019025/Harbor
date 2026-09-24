@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`6`。
+- 当前 `api_revision`：`18`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -29,7 +29,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 - API 在当前 workspace 的发现范围内用 `(prefix_path, id)` 查找 YAML。`prefix_path` 可省略，但同名 id 不唯一时返回 `409`。
 - 任务运行占用使用 YAML `uuid`，同一台机器同一 UUID 同时只能运行一个实例。
-- workspace 各自维护 `search_paths` 和 `~/.harbor/workspace/<id>/log/`。
+- workspace 各自维护 `search_paths`；本地日志位于 `~/.harbor/workspace/<id>/log/`，远端机器统一使用 `~/.harbor/remote/log/`。
 - `POST /api/v1/workspaces/switch` 只切换发现范围和日志视图，不停止任务；重新发现相同 UUID 时共享实时运行状态。
 - start / restart 可带 `config_id`、`sudo_password`，密码不写入日志或响应。
 
@@ -42,8 +42,10 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 | POST | `/api/v1/access/claim` | `{ "client_id", "gui_version" }` | 获取或刷新租约；其他 GUI 已占用时返回 `409` |
 | POST | `/api/v1/access/release` | `{ "client_id", "gui_version" }` | 主动释放自己的租约 |
 | GET | `/api/v1/snapshot` | - | `TaskCardSnapshot`：当前 workspace 的 paths、tasks、groups、UUID 冲突与错误 |
+| GET | `/api/v1/services` | - | Core 托管的 Virtual VNC、Physical VNC 与 ttyd 状态；只读，不可单独停止 |
 | POST | `/api/v1/discovery/refresh` | `{}` | `ResearchResult`：重新扫描后的目录与 search paths |
 | POST | `/api/v1/workspaces/switch` | `{ "id" }` | `{ "ok": true, "workspace_id" }` |
+| POST | `/api/v1/terminal/ensure` | `{ "workdir", "title" }` | `{ "ready": true, "port": 29386 }`；仅 remote runtime 可用 |
 
 ## Task 与 Group
 
