@@ -1,18 +1,20 @@
 use std::fs;
 use std::io::Read;
+#[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use harbor_core::settings::{
+use harbor_common as harbor_support;
+use harbor_common::settings::{
     core_bin_dir, core_bin_path, core_pid_path, ssh_run, ssh_send_file, Settings, Workspace,
     WorkspaceMode, WorkspaceSsh,
 };
-use harbor_core::version::APP_VERSION;
-use harbor_core::web_api::{CORE_API_REVISION, WEB_API_PORT};
+use harbor_common::version::APP_VERSION;
+use harbor_protocol::web_api::{CORE_API_REVISION, WEB_API_PORT};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -23,9 +25,23 @@ use crate::core_client::{
 };
 
 const EXPECTED_CORE_SHA256: &str = env!("HARBOR_CORE_SHA256");
+const EXPECTED_CORE_RUNTIME_SHA256: &str = env!("HARBOR_CORE_RUNTIME_SHA256");
+const CORE_RUNTIME_LOADER: &str = env!("HARBOR_CORE_RUNTIME_LOADER");
+const BUILD_CORE_RUNTIME_PATH: &str = env!("HARBOR_CORE_RUNTIME_BUILD_PATH");
+#[cfg(target_os = "linux")]
 const BUILD_CORE_PATH: &str = env!("HARBOR_CORE_BUILD_PATH");
 const EXPECTED_TTYD_SHA256: &str = env!("HARBOR_TTYD_SHA256");
-const BUILD_TTYD_PATH: &str = env!("HARBOR_TTYD_BUILD_PATH");
+const EXPECTED_TTYD_RUNTIME_SHA256: &str = env!("HARBOR_TTYD_RUNTIME_SHA256");
+const TTYD_RUNTIME_LOADER: &str = env!("HARBOR_TTYD_RUNTIME_LOADER");
+const BUILD_TTYD_RUNTIME_PATH: &str = env!("HARBOR_TTYD_RUNTIME_BUILD_PATH");
+const CORE_RUNTIME_NAME: &str = "harbor_core-runtime-linux-x86_64.tar.gz";
+const TTYD_RUNTIME_NAME: &str = "harbor_ttyd-runtime-linux-x86_64.tar.gz";
+
+static ARTIFACT_RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_artifact_resource_dir(path: PathBuf) {
+    let _ = ARTIFACT_RESOURCE_DIR.set(path);
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DeployProgress {
@@ -87,6 +103,7 @@ pub fn deploy_progress() -> DeployProgress {
         .clone()
 }
 
+#[cfg(target_os = "linux")]
 pub fn packaged_core_bin() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|error| format!("current exe failed: {error}"))?;
     let sibling = exe
@@ -111,22 +128,36 @@ pub fn packaged_core_bin() -> Result<PathBuf, String> {
     ))
 }
 
-fn packaged_ttyd_bin() -> Result<PathBuf, String> {
+fn packaged_runtime_bundle(
+    file_name: &str,
+    build_path: &str,
+    expected_hash: &str,
+) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|error| format!("current exe failed: {error}"))?;
-    let candidates = [
+    let mut candidates = vec![
         exe.parent()
-            .ok_or_else(|| "cannot resolve ttyd next to Harbor".to_string())?
-            .join("ttyd"),
-        PathBuf::from("/usr/lib/harbor/ttyd"),
-        PathBuf::from(BUILD_TTYD_PATH),
+            .ok_or_else(|| "cannot resolve Harbor runtime directory".to_string())?
+            .join(file_name),
+        PathBuf::from("/usr/lib/harbor").join(file_name),
     ];
+    if let Some(resource_dir) = ARTIFACT_RESOURCE_DIR.get() {
+        candidates.push(resource_dir.join(file_name));
+    }
+    candidates.push(PathBuf::from(build_path));
+    let mut rejected = Vec::new();
     for candidate in candidates {
-        if candidate.is_file() && sha256_file(&candidate)? == EXPECTED_TTYD_SHA256 {
+        if !candidate.is_file() {
+            continue;
+        }
+        let hash = sha256_file(&candidate)?;
+        if hash == expected_hash {
             return Ok(candidate);
         }
+        rejected.push(format!("{}={hash}", candidate.display()));
     }
     Err(format!(
-        "managed ttyd not found; expected sha256 {EXPECTED_TTYD_SHA256}; restart or reinstall Harbor"
+        "matching Linux runtime {file_name} not found; expected sha256 {expected_hash}; candidates: {}",
+        rejected.join(", ")
     ))
 }
 
@@ -155,82 +186,18 @@ fn managed_local_core_matches() -> bool {
             .unwrap_or(false)
 }
 
-fn shared_objects(bin: &Path) -> Result<Vec<PathBuf>, String> {
-    let output = Command::new("ldd")
-        .arg(bin)
-        .output()
-        .map_err(|error| format!("ldd failed: {error}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let text = format!("{stdout}\n{stderr}");
-    if text.contains("not a dynamic executable") {
-        return Ok(Vec::new());
-    }
-    if !output.status.success() {
-        let stderr = stderr.trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("ldd {} failed", bin.display())
-        } else {
-            format!("ldd {} failed: {stderr}", bin.display())
-        });
-    }
-    let mut files = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.contains("linux-vdso") || line.contains("linux-gate") {
-            continue;
-        }
-        if line.contains("not found") {
-            return Err(format!(
-                "missing shared library for {}: {line}",
-                bin.display()
-            ));
-        }
-        let path = if let Some((_, right)) = line.split_once(" => ") {
-            right.split_whitespace().next().unwrap_or("")
-        } else {
-            line.split_whitespace().next().unwrap_or("")
-        };
-        if path.starts_with('/') {
-            files.push(PathBuf::from(path));
-        }
-    }
-    Ok(files)
+fn runtime_loader(value: &str) -> Option<&str> {
+    (!value.is_empty()).then_some(value)
 }
 
-fn runtime_fingerprint(binary_hash: &str, runtime: &[PathBuf]) -> Result<String, String> {
-    let mut entries = runtime
-        .iter()
-        .map(|path| {
-            let name = path
-                .file_name()
-                .ok_or_else(|| format!("invalid runtime path {}", path.display()))?
-                .to_string_lossy()
-                .into_owned();
-            Ok((name, sha256_file(path)?))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    entries.sort();
-    let mut hasher = Sha256::new();
-    hasher.update(binary_hash.as_bytes());
-    for (name, hash) in entries {
-        hasher.update(b"\n");
-        hasher.update(name.as_bytes());
-        hasher.update(b"=");
-        hasher.update(hash.as_bytes());
+fn ensure_remote_runtime_architecture(ssh: &WorkspaceSsh) -> Result<(), String> {
+    let architecture = ssh_run(ssh, "uname -m")?;
+    match architecture.trim() {
+        "x86_64" | "amd64" => Ok(()),
+        other => Err(format!(
+            "remote architecture {other} is unsupported by this Harbor build; expected x86_64"
+        )),
     }
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn loader_basename(files: &[PathBuf]) -> Option<String> {
-    files.iter().find_map(|path| {
-        let name = path.file_name()?.to_string_lossy();
-        if name.starts_with("ld-linux") || name.starts_with("ld-musl") {
-            Some(name.into_owned())
-        } else {
-            None
-        }
-    })
 }
 
 fn remote_core_dir() -> String {
@@ -264,63 +231,14 @@ fn remote_runtime_exec(dir: &str, binary: &str, loader: Option<&str>, args: &str
     }
 }
 
-fn create_remote_runtime_bundle(
-    bin: &Path,
-    binary_name: &str,
-    runtime: &[PathBuf],
-) -> Result<PathBuf, String> {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temp_root =
-        std::env::temp_dir().join(format!("harbor-runtime-{}-{nonce}", std::process::id()));
-    let staging = temp_root.join("files");
-    let archive = temp_root.join("runtime.tar.gz");
-
-    // --- 阶段 1：收集 core 与兼容运行库 ---
-    fs::create_dir_all(&staging)
-        .map_err(|error| format!("create {} failed: {error}", staging.display()))?;
-    let mut files = vec![(bin.to_path_buf(), binary_name.to_string())];
-    for lib in runtime {
-        let name = lib
-            .file_name()
-            .ok_or_else(|| format!("invalid runtime path {}", lib.display()))?
-            .to_string_lossy()
-            .into_owned();
-        files.push((lib.clone(), name));
-    }
-    for (source, name) in files {
-        fs::copy(&source, staging.join(name))
-            .map_err(|error| format!("copy {} failed: {error}", source.display()))?;
-    }
-
-    // --- 阶段 2：压缩为单个远端部署包 ---
-    let output = Command::new("tar")
-        .args(["-czf"])
-        .arg(&archive)
-        .arg("-C")
-        .arg(&staging)
-        .arg(".")
-        .output()
-        .map_err(|error| format!("create runtime archive failed: {error}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("create runtime archive failed: {stderr}"));
-    }
-    fs::remove_dir_all(&staging)
-        .map_err(|error| format!("clean {} failed: {error}", staging.display()))?;
-    Ok(archive)
-}
-
 fn send_remote_runtime(
     ssh: &WorkspaceSsh,
-    bin: &Path,
-    runtime: &[PathBuf],
+    archive: &Path,
+    dir: &str,
     runtime_hash: &str,
+    binary_name: &str,
+    binary_hash: &str,
 ) -> Result<(), String> {
-    let dir = remote_core_dir();
-    let archive = create_remote_runtime_bundle(bin, "harbor_core", runtime)?;
     let total = fs::metadata(&archive)
         .map_err(|error| format!("stat {} failed: {error}", archive.display()))?
         .len();
@@ -328,23 +246,24 @@ fn send_remote_runtime(
 
     // --- 阶段 1：发送压缩部署包 ---
     set_deploy_progress(2, 0, total);
-    let send_result = ssh_send_file(ssh, &archive, remote_archive.as_str(), |sent, _| {
+    ssh_run(ssh, &format!("mkdir -p \"$HOME/{dir}\""))?;
+    ssh_send_file(ssh, archive, remote_archive.as_str(), |sent, _| {
         let percent = if total == 0 {
             2
         } else {
             (2 + sent.saturating_mul(88) / total).min(90) as u8
         };
         set_deploy_progress(percent, sent, total);
-    });
-    let _ = fs::remove_dir_all(archive.parent().unwrap_or_else(|| Path::new("/tmp")));
-    send_result?;
+    })?;
 
-    // --- 阶段 2：在远端展开运行环境 ---
+    // --- 阶段 2：远端解压并校验二进制 ---
     ssh_run(
         ssh,
         &format!(
-            "tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive} && printf '%s\\n' {} > \"$HOME/{dir}/.runtime-sha256\"",
-            shell_single_quote(runtime_hash)
+            "test \"$(sha256sum {remote_archive} | cut -d ' ' -f 1)\" = {} && tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive} && chmod +x \"$HOME/{dir}/{binary_name}\" && test \"$(sha256sum \"$HOME/{dir}/{binary_name}\" | cut -d ' ' -f 1)\" = {} && printf '%s\\n' {} > \"$HOME/{dir}/.runtime-sha256\"",
+            shell_single_quote(runtime_hash),
+            shell_single_quote(binary_hash),
+            shell_single_quote(runtime_hash),
         ),
     )?;
     set_deploy_progress(90, total, total);
@@ -352,14 +271,17 @@ fn send_remote_runtime(
 }
 
 pub fn ensure_remote_ttyd_runtime(ssh: &WorkspaceSsh) -> Result<(), String> {
-    harbor_core::app_log::gui(&format!(
+    harbor_support::app_log::gui(&format!(
         "workspace terminal 1/3: checking managed ttyd on {}",
         ssh.host.trim()
     ));
-    let local_bin = packaged_ttyd_bin()?;
-    let runtime = shared_objects(local_bin.as_path())?;
-    let runtime_hash = runtime_fingerprint(EXPECTED_TTYD_SHA256, &runtime)?;
-    let loader = loader_basename(&runtime);
+    ensure_remote_runtime_architecture(ssh)?;
+    let archive = packaged_runtime_bundle(
+        TTYD_RUNTIME_NAME,
+        BUILD_TTYD_RUNTIME_PATH,
+        EXPECTED_TTYD_RUNTIME_SHA256,
+    )?;
+    let loader = runtime_loader(TTYD_RUNTIME_LOADER);
     let dir = format!(".harbor/tools/ttyd/{EXPECTED_TTYD_SHA256}");
     let remote_state = ssh_run(
         ssh,
@@ -369,20 +291,21 @@ pub fn ensure_remote_ttyd_runtime(ssh: &WorkspaceSsh) -> Result<(), String> {
     )?;
     let mut remote_state = remote_state.lines();
     let binary_matches = remote_state.next() == Some(EXPECTED_TTYD_SHA256);
-    let runtime_matches = remote_state.next() == Some(runtime_hash.as_str());
+    let runtime_matches = remote_state.next() == Some(EXPECTED_TTYD_RUNTIME_SHA256);
     if !binary_matches || !runtime_matches {
-        harbor_core::app_log::gui("workspace terminal 2/3: deploying managed ttyd");
-        deploy_remote_ttyd(
+        harbor_support::app_log::gui("workspace terminal 2/3: deploying managed ttyd");
+        send_remote_runtime(
             ssh,
-            local_bin.as_path(),
-            &runtime,
+            archive.as_path(),
             dir.as_str(),
-            runtime_hash.as_str(),
+            EXPECTED_TTYD_RUNTIME_SHA256,
+            "ttyd",
+            EXPECTED_TTYD_SHA256,
         )?;
     } else {
-        harbor_core::app_log::gui("workspace terminal 2/3: reusing managed ttyd");
+        harbor_support::app_log::gui("workspace terminal 2/3: reusing managed ttyd");
     }
-    let command = remote_runtime_exec(dir.as_str(), "ttyd", loader.as_deref(), r#""$@""#);
+    let command = remote_runtime_exec(dir.as_str(), "ttyd", loader, r#""$@""#);
     let launcher = format!("#!/bin/sh\nexec {command}\n");
     ssh_run(
         ssh,
@@ -391,45 +314,11 @@ pub fn ensure_remote_ttyd_runtime(ssh: &WorkspaceSsh) -> Result<(), String> {
             shell_single_quote(launcher.as_str())
         ),
     )?;
-    harbor_core::app_log::gui("workspace terminal 3/3: managed ttyd runtime ready");
+    harbor_support::app_log::gui("workspace terminal 3/3: managed ttyd runtime ready");
     Ok(())
 }
 
-fn deploy_remote_ttyd(
-    ssh: &WorkspaceSsh,
-    local_bin: &Path,
-    runtime: &[PathBuf],
-    dir: &str,
-    runtime_hash: &str,
-) -> Result<(), String> {
-    // --- 阶段 1：打包并上传 ttyd 与兼容运行库 ---
-    let archive = create_remote_runtime_bundle(local_bin, "ttyd", runtime)?;
-    let remote_archive = format!("\"$HOME/{dir}/runtime.tar.gz.new\"");
-    ssh_run(ssh, &format!("mkdir -p \"$HOME/{dir}\""))?;
-    let send_result = ssh_send_file(ssh, &archive, remote_archive.as_str(), |_, _| {});
-    let _ = fs::remove_dir_all(archive.parent().unwrap_or_else(|| Path::new("/tmp")));
-    send_result?;
-
-    // --- 阶段 2：展开、授权并校验托管二进制 ---
-    ssh_run(
-        ssh,
-        &format!(
-            "tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive} && chmod +x \"$HOME/{dir}/ttyd\" && printf '%s\\n' '{runtime_hash}' > \"$HOME/{dir}/.runtime-sha256\""
-        ),
-    )?;
-    let remote_hash = ssh_run(
-        ssh,
-        &format!("sha256sum \"$HOME/{dir}/ttyd\" | cut -d ' ' -f 1"),
-    )?;
-    if remote_hash.trim() != EXPECTED_TTYD_SHA256 {
-        return Err(format!(
-            "remote managed ttyd hash mismatch: expected {EXPECTED_TTYD_SHA256}, got {}",
-            remote_hash.trim()
-        ));
-    }
-    Ok(())
-}
-
+#[cfg(target_os = "linux")]
 pub fn install_local_core_bin() -> Result<PathBuf, String> {
     let source = packaged_core_bin()?;
     let dest_dir = core_bin_dir();
@@ -500,6 +389,7 @@ fn wait_health(base: &str, expected_workspace: Option<&str>) -> Result<CoreHealt
     Err(last)
 }
 
+#[cfg(target_os = "linux")]
 fn terminate_pid(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGTERM);
@@ -515,6 +405,7 @@ fn terminate_pid(pid: i32) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn pid_is_running(pid: i32) -> bool {
     if unsafe { libc::kill(pid, 0) != 0 } {
         return false;
@@ -541,6 +432,7 @@ fi"#
     )
 }
 
+#[cfg(target_os = "linux")]
 fn stop_local_core() {
     let health_pid = fetch_health_url(local_core_url().as_str())
         .ok()
@@ -554,6 +446,7 @@ fn stop_local_core() {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn spawn_local_core(workspace: &Workspace) -> Result<(), String> {
     stop_local_core();
     thread::sleep(Duration::from_millis(200));
@@ -612,6 +505,7 @@ fn require_replaceable_core(base: &str, health: &CoreHealth) -> Result<(), Strin
     }
 }
 
+#[cfg(target_os = "linux")]
 fn ensure_local_core(settings: &Settings, workspace: &Workspace) -> Result<(), String> {
     let managed_core_matches = managed_local_core_matches();
     match fetch_health_url(&local_core_url()) {
@@ -661,15 +555,15 @@ pub fn connect_remote_core(settings: &Settings) -> Result<(), String> {
         .ok_or_else(|| "remote workspace requires SSH settings".to_string())?;
 
     // --- 阶段 1：验证 SSH，不触碰远端 Core ---
-    harbor_core::app_log::gui(&format!(
+    harbor_support::app_log::gui(&format!(
         "remote connect 1/4: testing SSH to {}",
         ssh.host.trim()
     ));
-    harbor_core::settings::verify_workspace_ssh(ssh.clone())?;
+    harbor_support::settings::verify_workspace_ssh(ssh.clone())?;
 
     // --- 阶段 2：优先复用已经运行且版本匹配的 Core ---
     let base = remote_base(&workspace)?;
-    harbor_core::app_log::gui(&format!(
+    harbor_support::app_log::gui(&format!(
         "remote connect 2/4: checking harbor_core at {base}"
     ));
     match fetch_health_url(base.as_str()) {
@@ -680,18 +574,18 @@ pub fn connect_remote_core(settings: &Settings) -> Result<(), String> {
         {
             claim_compatible_access(base.as_str())?;
             switch_workspace(settings, workspace.id.as_str())?;
-            harbor_core::app_log::gui("remote connect 4/4: reused running harbor_core");
+            harbor_support::app_log::gui("remote connect 4/4: reused running harbor_core");
             return Ok(());
         }
         Ok(health) if health.ok => {
-            harbor_core::app_log::gui(&format!(
+            harbor_support::app_log::gui(&format!(
                 "remote connect 3/4: running harbor_core {} is incompatible",
                 health.version
             ));
             require_replaceable_core(base.as_str(), &health)?;
         }
         Ok(_) | Err(_) => {
-            harbor_core::app_log::gui(
+            harbor_support::app_log::gui(
                 "remote connect 3/4: harbor_core is not reachable; checking managed release",
             );
         }
@@ -709,10 +603,13 @@ pub fn deploy_remote_core(settings: &Settings, force: bool) -> Result<(), String
         .ssh
         .as_ref()
         .ok_or_else(|| "remote workspace requires SSH settings".to_string())?;
-    let local_bin = install_local_core_bin()?;
-    let runtime = shared_objects(local_bin.as_path())?;
-    let runtime_hash = runtime_fingerprint(EXPECTED_CORE_SHA256, &runtime)?;
-    let loader = loader_basename(&runtime);
+    ensure_remote_runtime_architecture(ssh)?;
+    let runtime_bundle = packaged_runtime_bundle(
+        CORE_RUNTIME_NAME,
+        BUILD_CORE_RUNTIME_PATH,
+        EXPECTED_CORE_RUNTIME_SHA256,
+    )?;
+    let loader = runtime_loader(CORE_RUNTIME_LOADER);
     let dir = remote_core_dir();
     let running_pid = remote_base(&workspace)
         .ok()
@@ -750,17 +647,24 @@ fi"#,
     )?;
     let mut remote_state = remote_state.lines();
     let binary_matches = remote_state.next() == Some(EXPECTED_CORE_SHA256);
-    let runtime_matches = remote_state.next() == Some(runtime_hash.as_str());
+    let runtime_matches = remote_state.next() == Some(EXPECTED_CORE_RUNTIME_SHA256);
     if binary_matches && runtime_matches {
-        harbor_core::app_log::gui(&format!(
+        harbor_support::app_log::gui(&format!(
             "remote connect 3/4: matching harbor_core {APP_VERSION} already installed"
         ));
     } else {
-        harbor_core::app_log::gui(&format!(
+        harbor_support::app_log::gui(&format!(
             "remote connect 3/4: copying harbor_core {APP_VERSION} to {}",
             ssh.host.trim()
         ));
-        send_remote_runtime(ssh, local_bin.as_path(), &runtime, runtime_hash.as_str())?;
+        send_remote_runtime(
+            ssh,
+            runtime_bundle.as_path(),
+            dir.as_str(),
+            EXPECTED_CORE_RUNTIME_SHA256,
+            "harbor_core",
+            EXPECTED_CORE_SHA256,
+        )?;
     }
 
     // --- 阶段 3：停止已确认可替换的旧 Core ---
@@ -785,10 +689,10 @@ fi"#,
     // --- 阶段 4：校验并唤醒匹配版本 Core ---
     let dest = format!("\"$HOME/{dir}/harbor_core\"");
     let mut chmod = format!("chmod +x {dest}");
-    if let Some(loader) = loader.as_deref() {
+    if let Some(loader) = loader {
         chmod.push_str(&format!(r#" "$HOME/{dir}/{loader}""#));
     }
-    let exec_version = remote_core_exec(loader.as_deref(), "--version");
+    let exec_version = remote_core_exec(loader, "--version");
     ssh_run(ssh, &format!("{chmod} && {exec_version}"))?;
     let localhost_only = if workspace.localhost_only() {
         "true"
@@ -796,7 +700,7 @@ fi"#,
         "false"
     };
     let exec = remote_core_exec(
-        loader.as_deref(),
+        loader,
         &format!(
             "--localhost-only {localhost_only} --remote-runtime --workspace {id}",
             id = shell_single_quote(&workspace.id),
@@ -830,7 +734,7 @@ fi
     }
     claim_compatible_access(remote_base(&workspace)?.as_str())?;
     switch_workspace(settings, workspace.id.as_str())?;
-    harbor_core::app_log::gui("remote connect 4/4: harbor_core started and connected");
+    harbor_support::app_log::gui("remote connect 4/4: harbor_core started and connected");
     Ok(())
 }
 
@@ -843,8 +747,24 @@ pub fn ensure_core(settings: &Settings) -> Result<(), String> {
     if current.mode == WorkspaceMode::Remote {
         Err("remote workspace requires an explicit connection".into())
     } else {
-        ensure_local_core(settings, &current)
+        ensure_local_core_for_platform(settings, &current)
     }
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_local_core_for_platform(
+    settings: &Settings,
+    workspace: &Workspace,
+) -> Result<(), String> {
+    ensure_local_core(settings, workspace)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_local_core_for_platform(
+    _settings: &Settings,
+    _workspace: &Workspace,
+) -> Result<(), String> {
+    Err("local workspaces require Linux; use a remote workspace on this platform".into())
 }
 
 pub fn restart_core(settings: &Settings) -> Result<(), String> {
@@ -854,8 +774,18 @@ pub fn restart_core(settings: &Settings) -> Result<(), String> {
         finish_deploy_progress();
         result
     } else {
-        spawn_local_core(&workspace)
+        restart_local_core_for_platform(&workspace)
     }
+}
+
+#[cfg(target_os = "linux")]
+fn restart_local_core_for_platform(workspace: &Workspace) -> Result<(), String> {
+    spawn_local_core(workspace)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn restart_local_core_for_platform(_workspace: &Workspace) -> Result<(), String> {
+    Err("local workspaces require Linux; use a remote workspace on this platform".into())
 }
 
 pub fn heartbeat_core(settings: &Settings) -> Result<(), String> {
@@ -900,16 +830,27 @@ fi"#,
         );
         ssh_run(ssh, script.as_str())?;
     } else {
-        terminate_pid(pid);
-        if pid_is_running(pid) {
-            return Err(format!("harbor_core pid {pid} did not exit"));
-        }
-        let pid_path = core_pid_path();
-        if fs::read_to_string(&pid_path).is_ok_and(|raw| raw.trim() == pid.to_string()) {
-            let _ = fs::remove_file(pid_path);
-        }
+        shutdown_local_core_for_platform(pid)?;
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn shutdown_local_core_for_platform(pid: i32) -> Result<(), String> {
+    terminate_pid(pid);
+    if pid_is_running(pid) {
+        return Err(format!("harbor_core pid {pid} did not exit"));
+    }
+    let pid_path = core_pid_path();
+    if fs::read_to_string(&pid_path).is_ok_and(|raw| raw.trim() == pid.to_string()) {
+        let _ = fs::remove_file(pid_path);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn shutdown_local_core_for_platform(_pid: i32) -> Result<(), String> {
+    Err("local workspaces require Linux; use a remote workspace on this platform".into())
 }
 
 pub fn probe_core(settings: &Settings) -> Result<(), String> {
@@ -958,10 +899,18 @@ mod tests {
     }
 
     #[test]
-    fn embedded_hash_matches_managed_ttyd() {
+    fn embedded_hash_matches_core_runtime_bundle() {
         assert_eq!(
-            sha256_file(Path::new(BUILD_TTYD_PATH)).unwrap(),
-            EXPECTED_TTYD_SHA256
+            sha256_file(Path::new(BUILD_CORE_RUNTIME_PATH)).unwrap(),
+            EXPECTED_CORE_RUNTIME_SHA256
+        );
+    }
+
+    #[test]
+    fn embedded_hash_matches_ttyd_runtime_bundle() {
+        assert_eq!(
+            sha256_file(Path::new(BUILD_TTYD_RUNTIME_PATH)).unwrap(),
+            EXPECTED_TTYD_RUNTIME_SHA256
         );
     }
 

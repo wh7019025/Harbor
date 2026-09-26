@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use harbor_core::settings::{config_dir, home_dir};
-use harbor_core::version::APP_VERSION;
+use harbor_common::settings::{config_dir, home_dir};
+use harbor_common::version::APP_VERSION;
 
 const BUNDLED_SKILL_FILES: &[(&str, &str)] = &[
     (

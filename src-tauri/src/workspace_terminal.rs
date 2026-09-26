@@ -5,7 +5,7 @@ use std::process::Child;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use harbor_core::settings::{config_dir, Settings, WorkspaceMode};
+use harbor_common::settings::{config_dir, Settings, WorkspaceMode};
 
 use crate::{core_client, core_process, ssh_tunnel};
 

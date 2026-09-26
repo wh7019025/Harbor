@@ -2,7 +2,7 @@ use semver::Version;
 use serde::Serialize;
 use std::time::Duration;
 
-use harbor_core::version::APP_VERSION;
+use harbor_common::version::APP_VERSION;
 
 const GITHUB_REPO: &str = "wh7019025/Harbor";
 

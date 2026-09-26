@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
 use nvml_wrapper::Nvml;
-use serde::Serialize;
+
+pub use harbor_protocol::metrics::*;
 
 pub struct SystemMetricsSampler {
     previous: Option<SystemSample>,
@@ -47,97 +48,27 @@ struct SystemSample {
     net: NetCounters,
 }
 
-#[derive(Serialize)]
-pub struct CpuCoreMetric {
-    pub id: usize,
-    pub usage_percent: Option<f64>,
-    pub frequency_mhz: Option<f64>,
-}
-
-#[derive(Serialize)]
-pub struct MemoryMetrics {
-    pub total_bytes: u64,
-    pub used_bytes: u64,
-    pub available_bytes: u64,
-    pub usage_percent: Option<f64>,
-}
-
-#[derive(Serialize)]
-pub struct DiskMetrics {
-    pub path: String,
-    pub total_bytes: u64,
-    pub used_bytes: u64,
-    pub available_bytes: u64,
-    pub usage_percent: Option<f64>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct GpuDeviceMetrics {
-    pub index: u32,
-    pub name: String,
-    pub utilization_percent: Option<f64>,
-    pub memory_used_bytes: u64,
-    pub memory_total_bytes: u64,
-    pub memory_usage_percent: Option<f64>,
-    pub temperature_c: Option<f64>,
-}
-
-#[derive(Serialize)]
-pub struct SystemMetrics {
-    pub timestamp_ms: u128,
-    pub cpu_usage_percent: Option<f64>,
-    pub cpu_cores: Vec<CpuCoreMetric>,
-    pub memory: MemoryMetrics,
-    pub swap: MemoryMetrics,
-    pub root_disk: DiskMetrics,
-    pub network_rx_bytes_per_sec: Option<f64>,
-    pub network_tx_bytes_per_sec: Option<f64>,
-    pub network_rx_total_bytes: u64,
-    pub network_tx_total_bytes: u64,
-    pub gpus: Vec<GpuDeviceMetrics>,
-}
-
-#[derive(Serialize)]
-pub struct FastSystemMetrics {
-    pub timestamp_ms: u128,
-    pub cpu_usage_percent: Option<f64>,
-    pub cpu_cores: Vec<CpuCoreMetric>,
-    pub network_rx_bytes_per_sec: Option<f64>,
-    pub network_tx_bytes_per_sec: Option<f64>,
-    pub network_rx_total_bytes: u64,
-    pub network_tx_total_bytes: u64,
-    pub gpus: Vec<GpuDeviceMetrics>,
-}
-
-#[derive(Serialize)]
-pub struct SlowSystemMetrics {
-    pub timestamp_ms: u128,
-    pub memory: MemoryMetrics,
-    pub swap: MemoryMetrics,
-    pub root_disk: DiskMetrics,
-}
-
 impl SystemMetricsSampler {
     pub fn sample(&mut self) -> SystemMetrics {
-        let fast = self.sample_fast();
-        let slow = sample_slow_metrics();
+        let performance = self.sample_performance();
+        let resources = sample_resource_metrics();
 
         SystemMetrics {
-            timestamp_ms: fast.timestamp_ms,
-            cpu_usage_percent: fast.cpu_usage_percent,
-            cpu_cores: fast.cpu_cores,
-            memory: slow.memory,
-            swap: slow.swap,
-            root_disk: slow.root_disk,
-            network_rx_bytes_per_sec: fast.network_rx_bytes_per_sec,
-            network_tx_bytes_per_sec: fast.network_tx_bytes_per_sec,
-            network_rx_total_bytes: fast.network_rx_total_bytes,
-            network_tx_total_bytes: fast.network_tx_total_bytes,
-            gpus: fast.gpus,
+            timestamp_ms: performance.timestamp_ms,
+            cpu_usage_percent: performance.cpu_usage_percent,
+            cpu_cores: performance.cpu_cores,
+            memory: resources.memory,
+            swap: resources.swap,
+            root_disk: resources.root_disk,
+            network_rx_bytes_per_sec: performance.network_rx_bytes_per_sec,
+            network_tx_bytes_per_sec: performance.network_tx_bytes_per_sec,
+            network_rx_total_bytes: performance.network_rx_total_bytes,
+            network_tx_total_bytes: performance.network_tx_total_bytes,
+            gpus: performance.gpus,
         }
     }
 
-    pub fn sample_fast(&mut self) -> FastSystemMetrics {
+    pub fn sample_performance(&mut self) -> PerformanceMetrics {
         let sample = SystemSample {
             captured_at: Instant::now(),
             cpu: read_cpu_snapshot().unwrap_or_else(empty_cpu_snapshot),
@@ -208,7 +139,7 @@ impl SystemMetricsSampler {
         self.previous = Some(sample.clone());
         let gpus = self.sample_nvidia_gpus();
 
-        FastSystemMetrics {
+        PerformanceMetrics {
             timestamp_ms: unix_timestamp_ms(),
             cpu_usage_percent,
             cpu_cores,
@@ -274,8 +205,8 @@ impl SystemMetricsSampler {
     }
 }
 
-pub fn sample_slow_metrics() -> SlowSystemMetrics {
-    SlowSystemMetrics {
+pub fn sample_resource_metrics() -> ResourceMetrics {
+    ResourceMetrics {
         timestamp_ms: unix_timestamp_ms(),
         memory: read_memory_metrics("Mem").unwrap_or_else(empty_memory_metrics),
         swap: read_memory_metrics("Swap").unwrap_or_else(empty_memory_metrics),

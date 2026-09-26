@@ -8,8 +8,7 @@ use std::time::Duration;
 use crate::service::CoreServiceStatus;
 use crate::taskcard::TaskCommand;
 
-pub const VNC_PORT: u16 = 23682;
-pub const PHYSICAL_VNC_PORT: u16 = 23683;
+pub use harbor_protocol::web_api::{PHYSICAL_VNC_PORT, VIRTUAL_VNC_PORT as VNC_PORT};
 const DISPLAY_NUMBER: u16 = 82;
 const PHYSICAL_DISPLAY: &str = ":0";
 
@@ -776,14 +775,6 @@ const INSTALL_HINT: &str =
     "sudo apt install tigervnc-standalone-server novnc websockify openbox util-linux";
 const GNOME_INSTALL_HINT: &str =
     "sudo apt install ubuntu-session gnome-session gnome-shell gnome-session-flashback dbus-x11";
-
-pub fn vnc_port() -> u16 {
-    VNC_PORT
-}
-
-pub fn physical_vnc_port() -> u16 {
-    PHYSICAL_VNC_PORT
-}
 
 fn validate_physical_dependencies() -> Result<(), String> {
     let mut missing = ["X0tigervnc", "websockify", "flock", "setsid"]

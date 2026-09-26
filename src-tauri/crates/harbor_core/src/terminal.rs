@@ -10,7 +10,7 @@ use serde::Serialize;
 use crate::service::CoreServiceStatus;
 use crate::settings::config_dir;
 
-pub const TTYD_PORT: u16 = 29386;
+pub use harbor_protocol::web_api::TERMINAL_PORT as TTYD_PORT;
 const START_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Debug, PartialEq)]

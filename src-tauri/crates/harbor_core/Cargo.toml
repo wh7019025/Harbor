@@ -10,6 +10,8 @@ name = "harbor_core"
 path = "src/main.rs"
 
 [dependencies]
+harbor_common = { path = "../harbor_common" }
+harbor_protocol = { path = "../harbor_protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -19,6 +21,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net",
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors"] }
 uuid = { version = "1", features = ["v4"] }
+nvml-wrapper = "0.12.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

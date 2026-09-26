@@ -29,6 +29,10 @@
   "bundle": {
     "active": true,
     "targets": ["deb"],
+    "resources": {
+      "target/release/harbor_core-runtime-linux-x86_64.tar.gz": "harbor_core-runtime-linux-x86_64.tar.gz",
+      "target/release/harbor_ttyd-runtime-linux-x86_64.tar.gz": "harbor_ttyd-runtime-linux-x86_64.tar.gz"
+    },
     "linux": {
       "deb": {
         "depends": [],

@@ -21,15 +21,18 @@ use crate::settings::{
     add_current_search_path, list_path_suggestions, path_suggestion_query,
     remove_current_search_path, save_settings, workspace_data_dir, Settings,
 };
+use crate::system_metrics::{
+    sample_resource_metrics, PerformanceMetrics, ResourceMetrics, SystemMetrics,
+    SystemMetricsSampler,
+};
 use crate::taskcard::{
     GroupDefinition, TaskCardService, TaskCardSnapshot, TaskCardYamlDocument, TaskSummary,
 };
 use crate::terminal::{TerminalService, TerminalStatus};
 use crate::version::APP_VERSION;
 
-pub const WEB_API_PORT: u16 = 29385;
-pub const CORE_API_REVISION: u32 = 18;
-const CORE_API_REVISION_HEADER: &str = "18";
+use harbor_protocol::web_api::CORE_API_REVISION_HEADER;
+pub use harbor_protocol::web_api::{CORE_API_REVISION, WEB_API_PORT};
 const ACCESS_LEASE_TTL: Duration = Duration::from_secs(8);
 const SNAPSHOT_STALE_AFTER: Duration = Duration::from_secs(5);
 
@@ -74,6 +77,7 @@ pub struct WebApiState {
     pub settings: Arc<Mutex<Settings>>,
     pub access: Arc<Mutex<CoreAccessLease>>,
     pub terminal: Arc<Mutex<TerminalService>>,
+    metrics: Arc<Mutex<SystemMetricsSampler>>,
     snapshot_cache: Arc<Mutex<SnapshotCache>>,
     pub localhost_only: bool,
     pub remote_runtime: bool,
@@ -98,6 +102,7 @@ impl WebApiState {
             settings: Arc::new(Mutex::new(settings)),
             access: Arc::new(Mutex::new(CoreAccessLease::default())),
             terminal: Arc::new(Mutex::new(TerminalService::default())),
+            metrics: Arc::new(Mutex::new(SystemMetricsSampler::default())),
             snapshot_cache: Arc::new(Mutex::new(SnapshotCache {
                 snapshot,
                 refreshed_at: Instant::now(),
@@ -203,6 +208,9 @@ pub fn router(state: WebApiState) -> Router {
         .route("/api/v1/access/claim", post(claim_access))
         .route("/api/v1/access/release", post(release_access))
         .route("/api/v1/snapshot", get(serve_snapshot))
+        .route("/api/v1/metrics", get(system_metrics))
+        .route("/api/v1/metrics/performance", get(performance_metrics))
+        .route("/api/v1/metrics/resources", get(resource_metrics))
         .route("/api/v1/services", get(list_core_services))
         .route(
             "/api/v1/displays/physical/ensure",
@@ -392,6 +400,18 @@ async fn release_access(
 
 async fn serve_snapshot(State(state): State<WebApiState>) -> Json<Value> {
     Json(json!(cached_snapshot(&state)))
+}
+
+async fn system_metrics(State(state): State<WebApiState>) -> Json<SystemMetrics> {
+    Json(state.metrics.lock().sample())
+}
+
+async fn performance_metrics(State(state): State<WebApiState>) -> Json<PerformanceMetrics> {
+    Json(state.metrics.lock().sample_performance())
+}
+
+async fn resource_metrics() -> Json<ResourceMetrics> {
+    Json(sample_resource_metrics())
 }
 
 async fn list_core_services(State(state): State<WebApiState>) -> Json<Value> {
@@ -1369,6 +1389,20 @@ command:
         let (status, body) = send(
             state.clone(),
             Request::builder()
+                .uri("/api/v1/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["timestamp_ms"].as_u64().unwrap() > 0);
+        assert!(body["cpu_cores"].is_array());
+        assert!(body["gpus"].is_array());
+        assert!(body["memory"]["total_bytes"].is_number());
+
+        let (status, body) = send(
+            state.clone(),
+            Request::builder()
                 .uri("/api/v1/snapshot")
                 .body(Body::empty())
                 .unwrap(),
@@ -1659,6 +1693,9 @@ command:
             "/api/v1/health",
             "/api/v1/access",
             "/api/v1/snapshot",
+            "/api/v1/metrics",
+            "/api/v1/metrics/performance",
+            "/api/v1/metrics/resources",
             "/api/v1/services",
             "/api/v1/tasks",
             "/api/v1/tasks/running",

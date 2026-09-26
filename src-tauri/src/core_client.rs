@@ -2,14 +2,15 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harbor_core::service::CoreServiceStatus;
-use harbor_core::settings::{Settings, Workspace, WorkspaceMode};
-use harbor_core::taskcard::{
+use harbor_common::settings::{Settings, Workspace, WorkspaceMode};
+use harbor_common::version::APP_VERSION;
+use harbor_protocol::metrics::{PerformanceMetrics, ResourceMetrics, SystemMetrics};
+use harbor_protocol::service::CoreServiceStatus;
+use harbor_protocol::taskcard::{
     ManagedProcessGroup, ResearchResult, TaskCardSnapshot, TaskCardYamlDocument, TaskLogChunk,
     TaskLogContent, TaskLogSummary,
 };
-use harbor_core::version::APP_VERSION;
-use harbor_core::web_api::{CORE_API_REVISION, WEB_API_PORT};
+use harbor_protocol::web_api::{CORE_API_REVISION, WEB_API_PORT};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -246,6 +247,18 @@ fn core_write<T: DeserializeOwned>(
 pub fn core_post_ok(settings: &Settings, path: &str, body: Value) -> Result<(), String> {
     let _: Value = core_post(settings, path, body)?;
     Ok(())
+}
+
+pub fn system_metrics(settings: &Settings) -> Result<SystemMetrics, String> {
+    core_get(settings, "/api/v1/metrics")
+}
+
+pub fn performance_metrics(settings: &Settings) -> Result<PerformanceMetrics, String> {
+    core_get(settings, "/api/v1/metrics/performance")
+}
+
+pub fn resource_metrics(settings: &Settings) -> Result<ResourceMetrics, String> {
+    core_get(settings, "/api/v1/metrics/resources")
 }
 
 pub fn fetch_health(settings: &Settings) -> Result<CoreHealth, String> {

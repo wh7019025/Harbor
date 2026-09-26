@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`18`。
+- 当前 `api_revision`：`19`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -42,6 +42,9 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 | POST | `/api/v1/access/claim` | `{ "client_id", "gui_version" }` | 获取或刷新租约；其他 GUI 已占用时返回 `409` |
 | POST | `/api/v1/access/release` | `{ "client_id", "gui_version" }` | 主动释放自己的租约 |
 | GET | `/api/v1/snapshot` | - | `TaskCardSnapshot`：当前 workspace 的 paths、tasks、groups、UUID 冲突与错误 |
+| GET | `/api/v1/metrics` | - | Core 所在机器的完整 CPU、内存、磁盘、网络与 GPU 指标 |
+| GET | `/api/v1/metrics/performance` | - | CPU、网络与 GPU 性能指标 |
+| GET | `/api/v1/metrics/resources` | - | 内存、Swap 与根磁盘资源指标 |
 | GET | `/api/v1/services` | - | Core 托管的 Virtual VNC、Physical VNC 与 ttyd 状态；只读，不可单独停止 |
 | POST | `/api/v1/discovery/refresh` | `{}` | `ResearchResult`：重新扫描后的目录与 search paths |
 | POST | `/api/v1/workspaces/switch` | `{ "id" }` | `{ "ok": true, "workspace_id" }` |

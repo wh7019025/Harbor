@@ -62,6 +62,19 @@ jobs:
       - name: Build managed runtimes
         run: npm run core:release
 
+      - name: Upload managed Linux runtimes
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-linux-x86_64-runtimes
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/harbor_core-runtime-linux-x86_64.tar.gz
+            src-tauri/target/release/harbor_core-runtime-linux-x86_64.tar.gz.sha256
+            src-tauri/target/release/harbor_core-runtime-linux-x86_64.tar.gz.env
+            src-tauri/target/release/harbor_ttyd-runtime-linux-x86_64.tar.gz
+            src-tauri/target/release/harbor_ttyd-runtime-linux-x86_64.tar.gz.sha256
+            src-tauri/target/release/harbor_ttyd-runtime-linux-x86_64.tar.gz.env
+
       - name: Build Harbor (.deb)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: tauri-apps/tauri-action@v1

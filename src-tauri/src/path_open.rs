@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::process::{Command, Stdio};
 
-use harbor_core::settings::{expand_path, Workspace, WorkspaceMode, WorkspaceSsh};
+use harbor_common::settings::{expand_path, Workspace, WorkspaceMode, WorkspaceSsh};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PathOpeners {
@@ -168,7 +168,7 @@ fn open_file_manager(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harbor_core::settings::WorkspaceSshAuth;
+    use harbor_common::settings::WorkspaceSshAuth;
 
     fn remote_ssh() -> WorkspaceSsh {
         WorkspaceSsh {

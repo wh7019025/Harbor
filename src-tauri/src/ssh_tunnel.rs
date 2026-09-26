@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-use harbor_core::settings::{ssh_exec_command_with_args, WorkspaceSsh};
+use harbor_common::settings::{ssh_exec_command_with_args, WorkspaceSsh};
 
 pub fn available_local_port(context: &str) -> Result<u16, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -58,7 +58,7 @@ pub fn spawn_forward_only(
 
 fn spawn_ssh_command(
     ssh: &WorkspaceSsh,
-    ssh_command: harbor_core::settings::SshVerifyCommand,
+    ssh_command: harbor_common::settings::SshVerifyCommand,
     log_path: &Path,
 ) -> Result<Child, String> {
     let stdout = OpenOptions::new()

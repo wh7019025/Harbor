@@ -13,48 +13,112 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     git_version::export(&manifest_dir.join(".."));
 
-    // --- 阶段 2：定位已经完成构建的 release core ---
-    let core_path = env::var_os("HARBOR_CORE_BIN")
+    // --- 阶段 2：固化可跨平台传输的 Linux 运行包 ---
+    let release_dir = manifest_dir.join("target/release");
+    let core_runtime = env::var_os("HARBOR_CORE_RUNTIME_BUNDLE")
         .map(PathBuf::from)
-        .unwrap_or_else(|| manifest_dir.join("target/release/harbor_core"));
-    if !core_path.is_file() {
-        panic!(
-            "release harbor_core not found at {}; build it before harbor",
-            core_path.display()
-        );
-    }
-    // --- 阶段 3：计算哈希并固化到 GUI 二进制 ---
-    let (core_hash, hash_path, cached_core_path) = verified_artifact(&core_path, "harbor_core");
-    println!("cargo:rustc-env=HARBOR_CORE_SHA256={core_hash}");
-    println!(
-        "cargo:rustc-env=HARBOR_CORE_BUILD_PATH={}",
-        cached_core_path.display()
-    );
-    println!("cargo:rerun-if-changed={}", core_path.display());
-    println!("cargo:rerun-if-changed={}", hash_path.display());
-    println!("cargo:rerun-if-changed={}", cached_core_path.display());
+        .unwrap_or_else(|| release_dir.join("harbor_core-runtime-linux-x86_64.tar.gz"));
+    export_runtime_bundle(&core_runtime, "harbor_core", "HARBOR_CORE");
 
-    // --- 阶段 4：固化 Harbor 托管 ttyd 的路径与哈希 ---
-    let ttyd_path = core_path.with_file_name("harbor_ttyd");
-    if !ttyd_path.is_file() {
-        panic!(
-            "managed ttyd not found at {}; run npm run core:release before building harbor",
-            ttyd_path.display()
-        );
-    }
-    let (ttyd_hash, ttyd_hash_path, cached_ttyd_path) =
-        verified_artifact(&ttyd_path, "harbor_ttyd");
-    println!("cargo:rustc-env=HARBOR_TTYD_SHA256={ttyd_hash}");
-    println!(
-        "cargo:rustc-env=HARBOR_TTYD_BUILD_PATH={}",
-        cached_ttyd_path.display()
-    );
-    println!("cargo:rerun-if-changed={}", ttyd_path.display());
-    println!("cargo:rerun-if-changed={}", ttyd_hash_path.display());
-    println!("cargo:rerun-if-changed={}", cached_ttyd_path.display());
+    let ttyd_runtime = env::var_os("HARBOR_TTYD_RUNTIME_BUNDLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| release_dir.join("harbor_ttyd-runtime-linux-x86_64.tar.gz"));
+    export_runtime_bundle(&ttyd_runtime, "harbor_ttyd", "HARBOR_TTYD");
 
-    // --- 阶段 5：生成 Tauri 构建信息 ---
+    // --- 阶段 3：Linux GUI 额外固化本机 Core 二进制 ---
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        let core_path = env::var_os("HARBOR_CORE_BIN")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| release_dir.join("harbor_core"));
+        let (core_hash, hash_path, cached_core_path) = verified_artifact(&core_path, "harbor_core");
+        let runtime = runtime_metadata(&core_runtime);
+        if runtime.binary_sha256 != core_hash {
+            panic!(
+                "harbor_core runtime contains binary {}, but local core is {core_hash}",
+                runtime.binary_sha256
+            );
+        }
+        println!(
+            "cargo:rustc-env=HARBOR_CORE_BUILD_PATH={}",
+            cached_core_path.display()
+        );
+        println!("cargo:rerun-if-changed={}", core_path.display());
+        println!("cargo:rerun-if-changed={}", hash_path.display());
+        println!("cargo:rerun-if-changed={}", cached_core_path.display());
+    }
+
+    // --- 阶段 4：生成 Tauri 构建信息 ---
     tauri_build::build()
+}
+
+struct RuntimeMetadata {
+    architecture: String,
+    binary_sha256: String,
+    archive_sha256: String,
+    loader: String,
+}
+
+fn export_runtime_bundle(path: &Path, name: &str, prefix: &str) {
+    if !path.is_file() {
+        panic!(
+            "{name} runtime bundle not found at {}; run npm run core:release before building Harbor",
+            path.display()
+        );
+    }
+    let metadata = runtime_metadata(path);
+    if metadata.architecture != "x86_64" {
+        panic!(
+            "unsupported {name} runtime architecture {}",
+            metadata.architecture
+        );
+    }
+    let actual_hash = sha256_file(path);
+    if metadata.archive_sha256 != actual_hash {
+        panic!(
+            "{name} runtime hash is stale: manifest {}, actual {actual_hash}",
+            metadata.archive_sha256
+        );
+    }
+    let hash_path = PathBuf::from(format!("{}.sha256", path.display()));
+    let recorded_hash = std::fs::read_to_string(&hash_path)
+        .unwrap_or_else(|error| panic!("read {} failed: {error}", hash_path.display()));
+    if recorded_hash.trim() != actual_hash {
+        panic!(
+            "{name} runtime SHA-256 file is stale: manifest {}, actual {actual_hash}",
+            recorded_hash.trim()
+        );
+    }
+    println!("cargo:rustc-env={prefix}_SHA256={}", metadata.binary_sha256);
+    println!("cargo:rustc-env={prefix}_RUNTIME_SHA256={actual_hash}");
+    println!(
+        "cargo:rustc-env={prefix}_RUNTIME_LOADER={}",
+        metadata.loader
+    );
+    println!(
+        "cargo:rustc-env={prefix}_RUNTIME_BUILD_PATH={}",
+        path.display()
+    );
+    println!("cargo:rerun-if-changed={}", path.display());
+    println!("cargo:rerun-if-changed={}", hash_path.display());
+    println!("cargo:rerun-if-changed={}.env", path.display());
+}
+
+fn runtime_metadata(path: &Path) -> RuntimeMetadata {
+    let env_path = PathBuf::from(format!("{}.env", path.display()));
+    let raw = std::fs::read_to_string(&env_path)
+        .unwrap_or_else(|error| panic!("read {} failed: {error}", env_path.display()));
+    let value = |key: &str| {
+        raw.lines()
+            .find_map(|line| line.split_once('=').filter(|(name, _)| *name == key))
+            .map(|(_, value)| value.to_string())
+            .unwrap_or_else(|| panic!("{} is missing {key}", env_path.display()))
+    };
+    RuntimeMetadata {
+        architecture: value("architecture"),
+        binary_sha256: value("binary_sha256"),
+        archive_sha256: value("archive_sha256"),
+        loader: value("loader"),
+    }
 }
 
 fn verified_artifact(path: &Path, name: &str) -> (String, PathBuf, PathBuf) {

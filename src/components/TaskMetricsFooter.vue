@@ -8,11 +8,11 @@ import {
   type HarborCoreStatus,
 } from "../api/settings";
 import {
-  getFastSystemMetrics,
-  getSlowSystemMetrics,
+  getPerformanceMetrics,
+  getResourceMetrics,
   getSystemMetrics,
-  type FastSystemMetrics,
-  type SlowSystemMetrics,
+  type PerformanceMetrics,
+  type ResourceMetrics,
   type SystemMetrics,
 } from "../api/systemMetrics";
 import { clampPercent, formatBytes, formatBytesPerSecond, formatPercent } from "../lib/utils";
@@ -20,8 +20,8 @@ import { clampPercent, formatBytes, formatBytesPerSecond, formatPercent } from "
 const metrics = ref<SystemMetrics | null>(null);
 const coreStatus = ref<HarborCoreStatus | null>(null);
 const deployProgress = ref<HarborCopyProgress | null>(null);
-let fastTimer: number | undefined;
-let slowTimer: number | undefined;
+let performanceTimer: number | undefined;
+let resourceTimer: number | undefined;
 let coreTimer: number | undefined;
 let pollingCore = false;
 
@@ -118,7 +118,7 @@ async function pollCoreStatus() {
   }
 }
 
-function mergeFastMetrics(next: FastSystemMetrics) {
+function mergePerformanceMetrics(next: PerformanceMetrics) {
   if (!metrics.value) return;
   metrics.value = {
     ...metrics.value,
@@ -133,7 +133,7 @@ function mergeFastMetrics(next: FastSystemMetrics) {
   };
 }
 
-function mergeSlowMetrics(next: SlowSystemMetrics) {
+function mergeResourceMetrics(next: ResourceMetrics) {
   if (!metrics.value) return;
   metrics.value = {
     ...metrics.value,
@@ -151,16 +151,16 @@ onMounted(async () => {
   } catch {
     // Keep placeholder values when metrics are unavailable.
   }
-  fastTimer = window.setInterval(async () => {
+  performanceTimer = window.setInterval(async () => {
     try {
-      mergeFastMetrics(await getFastSystemMetrics());
+      mergePerformanceMetrics(await getPerformanceMetrics());
     } catch {
       // Keep last values when sample fails.
     }
   }, settings?.performance_metrics_interval_ms ?? 1000);
-  slowTimer = window.setInterval(async () => {
+  resourceTimer = window.setInterval(async () => {
     try {
-      mergeSlowMetrics(await getSlowSystemMetrics());
+      mergeResourceMetrics(await getResourceMetrics());
     } catch {
       // Keep last values when sample fails.
     }
@@ -171,8 +171,8 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (fastTimer != null) window.clearInterval(fastTimer);
-  if (slowTimer != null) window.clearInterval(slowTimer);
+  if (performanceTimer != null) window.clearInterval(performanceTimer);
+  if (resourceTimer != null) window.clearInterval(resourceTimer);
   if (coreTimer != null) window.clearInterval(coreTimer);
 });
 </script>

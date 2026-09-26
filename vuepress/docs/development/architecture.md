@@ -23,7 +23,19 @@ harbor_core
 ├── Core services: VNC + ttyd
 ├── Runtime state
 ├── Log storage
-└── HTTP API v1 (revision 18)
+└── HTTP API v1 (revision 19)
+
+harbor_protocol
+├── API constants
+├── Task / Group / Snapshot contracts
+├── Process and service contracts
+└── Performance and resource metrics contracts
+
+harbor_common
+├── Workspace settings and paths
+├── SSH command construction
+├── GUI / Core shared logging
+└── Git-derived version information
 ```
 
 ## 数据职责
@@ -48,6 +60,16 @@ Core 负责扫描 YAML、补齐和校验 UUID、启动进程树、记录日志�
 一台机器只允许一个 Core 实例。GUI 退出不会终止 Core 或它已经托管的 Task。
 
 Core 自身退出时同样保留 Task。后续 Core 会读取机器级运行记录并重新接管，因此 GUI 和 Core 都可以独立重启；只有显式停止操作才会终止 Task。
+
+### harbor_protocol
+
+Protocol 是 GUI 与 Core 共同依赖的纯 Rust 契约层，只包含跨平台数据结构、序列化规则和 API 常量，不执行任务、不访问系统进程，也不建立网络连接。Windows 与 macOS GUI 可以使用这些契约，而无需编译 Linux Core 的运行实现。
+
+### harbor_common
+
+Common 是 GUI 与 Core 共同使用的跨平台支持层，负责 Workspace 设置、路径、SSH 调用、应用日志与版本信息。它可以执行桌面端通用 I/O，但不包含 Task 进程管理，也不依赖 `harbor_core`。
+
+`harbor_core` 仅参与 Linux 构建；Windows 与 macOS GUI 只依赖 `harbor_protocol` 和 `harbor_common`，并把远端 Linux Core 作为唯一运行目标。本机 Workspace 在这些平台上明确返回“不支持”，不会退化为不完整的本地运行模式。
 
 ### 项目配置
 
@@ -88,7 +110,7 @@ GUI 使用 `~/.harbor/core/<version>/harbor_core` 中的 release 产物，并校
 2. Core API revision。
 3. 构建时固化的 Core SHA-256。
 
-远端连接优先复用运行中的匹配 Core，其次唤醒已经安装的匹配 release，最后才复制对应 release 产物和运行依赖。运行中的 Core 被其他 GUI 占用，或仅能看到存活 PID 而 API 不可达时，GUI 不会强制替换。
+远端连接优先复用运行中的匹配 Core，其次唤醒已经安装的匹配 release，最后才复制对应的 Linux Runtime Bundle。Bundle 在 Linux 发布阶段预先收集 Core、动态运行库和 loader，并生成 SHA-256；Windows 与 macOS GUI 只把它作为不可变文件校验和传输，不在本机执行 `ldd` 或 `tar` 打包。运行中的 Core 被其他 GUI 占用，或仅能看到存活 PID 而 API 不可达时，GUI 不会强制替换。
 
 ## 运行原则
 

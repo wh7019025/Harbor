@@ -1,0 +1,11 @@
+[package]
+name = "harbor_common"
+version = "0.0.0"
+description = "Cross-platform Harbor desktop and core utilities"
+authors = ["Harbor"]
+edition = "2021"
+
+[dependencies]
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

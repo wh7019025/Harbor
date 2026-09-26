@@ -1,6 +1,7 @@
 pub mod app_log;
 pub mod service;
 pub mod settings;
+pub mod system_metrics;
 pub mod taskcard;
 pub mod terminal;
 pub mod version;

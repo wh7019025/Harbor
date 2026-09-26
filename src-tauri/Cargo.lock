@@ -1511,9 +1511,10 @@ dependencies = [
 name = "harbor"
 version = "0.0.0"
 dependencies = [
+ "harbor_common",
  "harbor_core",
+ "harbor_protocol",
  "libc",
- "nvml-wrapper",
  "parking_lot",
  "semver",
  "serde",
@@ -1528,11 +1529,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "harbor_common"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "harbor_core"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "harbor_common",
+ "harbor_protocol",
  "libc",
+ "nvml-wrapper",
  "parking_lot",
  "serde",
  "serde_json",
@@ -1540,6 +1553,16 @@ dependencies = [
  "tokio",
  "tower",
  "tower-http",
+ "uuid",
+]
+
+[[package]]
+name = "harbor_protocol"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
  "uuid",
 ]
 

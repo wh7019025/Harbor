@@ -4,12 +4,11 @@ mod core_process;
 mod panel_tunnel;
 mod path_open;
 mod ssh_tunnel;
-mod system_metrics;
 pub mod update;
 mod workspace_terminal;
 
 pub fn handle_cli_args() -> bool {
-    harbor_core::version::handle_cli_args()
+    harbor_support::version::handle_cli_args()
 }
 
 use std::collections::{HashMap, HashSet};
@@ -17,25 +16,23 @@ use std::sync::Arc;
 
 use agent_skill::{agent_skill_info, sync_agent_skill, AgentSkillInfo};
 use core_client::HarborCoreStatus;
-use harbor_core::settings::{
+use harbor_common as harbor_support;
+use harbor_common::settings::{
     load_settings, normalize_workspace_ssh, save_settings, unique_workspace_id,
     verify_workspace_ssh, Settings, Workspace, WorkspaceMode, WorkspaceSsh,
 };
-use harbor_core::taskcard::{
+use harbor_protocol::metrics::{PerformanceMetrics, ResourceMetrics, SystemMetrics};
+use harbor_protocol::taskcard::{
     ResearchResult, TaskCardSnapshot, TaskCardYamlDocument, TaskLogChunk, TaskLogContent,
     TaskLogSummary,
 };
 use parking_lot::Mutex;
 use path_open::{detect_path_openers, open_path_with, PathOpeners};
 use serde::Serialize;
-use system_metrics::{
-    sample_slow_metrics, FastSystemMetrics, SlowSystemMetrics, SystemMetrics, SystemMetricsSampler,
-};
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 struct AppState {
     settings: Mutex<Settings>,
-    metrics: Mutex<SystemMetricsSampler>,
     panel_tunnels: Mutex<HashMap<String, panel_tunnel::PanelTunnel>>,
     workspace_terminal: Mutex<Option<workspace_terminal::WorkspaceTerminal>>,
     remote_core_connections: Mutex<HashSet<String>>,
@@ -139,12 +136,14 @@ fn with_core<T>(
         Err(error) if is_core_connect_error(&error) || is_core_version_error(&error) => {
             if workspace.mode == WorkspaceMode::Remote {
                 if core_client::fetch_health(&settings).is_ok() {
-                    harbor_core::app_log::gui(&format!(
+                    harbor_support::app_log::gui(&format!(
                         "remote request failed but harbor_core remains reachable: {error}"
                     ));
                     return Err(error);
                 }
-                harbor_core::app_log::gui(&format!("remote harbor_core connection lost: {error}"));
+                harbor_support::app_log::gui(&format!(
+                    "remote harbor_core connection lost: {error}"
+                ));
                 return Err(error);
             }
             core_process::ensure_core(&settings)?;
@@ -208,12 +207,12 @@ async fn switch_workspace(
             tauri::async_runtime::spawn_blocking(move || core_process::connect_remote_core(&job))
                 .await
                 .map_err(|error| format!("activate remote workspace worker failed: {error}"))??;
-            harbor_core::app_log::gui(&format!(
+            harbor_support::app_log::gui(&format!(
                 "remote workspace {} selected; retained connection activated",
                 settings.current_workspace
             ));
         } else {
-            harbor_core::app_log::gui(&format!(
+            harbor_support::app_log::gui(&format!(
                 "remote workspace {} selected; waiting for manual connection",
                 settings.current_workspace
             ));
@@ -326,7 +325,7 @@ fn delete_workspace(
             .ok_or_else(|| "keep at least one workspace".to_string())?;
         persist_settings(state.inner(), settings.clone())?;
         if let Err(error) = core_process::ensure_core(&settings) {
-            harbor_core::app_log::gui(&format!("ensure harbor_core failed: {error}"));
+            harbor_support::app_log::gui(&format!("ensure harbor_core failed: {error}"));
         }
     }
     settings.workspaces.retain(|workspace| workspace.id != id);
@@ -349,7 +348,8 @@ async fn get_harbor_core_status(
             if core_process::heartbeat_core(&settings).is_ok() {
                 status.connected = true;
                 status.access_occupied = true;
-                status.access_owner_version = Some(harbor_core::version::APP_VERSION.to_string());
+                status.access_owner_version =
+                    Some(harbor_support::version::APP_VERSION.to_string());
             }
         } else if workspace.mode == WorkspaceMode::Remote {
             status.connected = remote_workspace_connected(&app_state, workspace.id.as_str());
@@ -370,7 +370,7 @@ async fn connect_remote_workspace_core(
         return Err("当前 Workspace 不是远端 Workspace".into());
     }
     let workspace_id = workspace.id.clone();
-    harbor_core::app_log::gui(&format!("remote connection requested: {workspace_id}"));
+    harbor_support::app_log::gui(&format!("remote connection requested: {workspace_id}"));
     let result = tauri::async_runtime::spawn_blocking(move || {
         core_process::connect_remote_core(&settings)?;
         Ok(core_client::core_status(&settings))
@@ -387,11 +387,11 @@ async fn connect_remote_workspace_core(
                 .lock()
                 .insert(workspace_id.clone());
             status.connected = true;
-            harbor_core::app_log::gui(&format!("remote workspace connected: {workspace_id}"));
+            harbor_support::app_log::gui(&format!("remote workspace connected: {workspace_id}"));
             Ok(status)
         }
         Err(error) => {
-            harbor_core::app_log::gui(&format!("remote workspace connection failed: {error}"));
+            harbor_support::app_log::gui(&format!("remote workspace connection failed: {error}"));
             Err(error)
         }
     }
@@ -418,7 +418,7 @@ fn disconnect_remote_workspace_core(
     release_remote_workspace(state.inner(), &settings, workspace.id.as_str());
     close_workspace_terminal(&app, state.inner());
     close_panel_tunnels(&app, state.inner());
-    harbor_core::app_log::gui(&format!("remote workspace disconnected: {}", workspace.id));
+    harbor_support::app_log::gui(&format!("remote workspace disconnected: {}", workspace.id));
     Ok(())
 }
 
@@ -472,7 +472,7 @@ async fn shutdown_harbor_core_and_exit(
     tauri::async_runtime::spawn_blocking(move || core_process::shutdown_core(&job))
         .await
         .map_err(|error| format!("shutdown harbor_core worker failed: {error}"))??;
-    harbor_core::app_log::gui("all tasks and harbor_core stopped by user; exiting GUI");
+    harbor_support::app_log::gui("all tasks and harbor_core stopped by user; exiting GUI");
 
     // --- 阶段 2：关闭 GUI 附属进程与窗口 ---
     release_all_core_access(state.inner());
@@ -483,18 +483,18 @@ async fn shutdown_harbor_core_and_exit(
 }
 
 #[tauri::command]
-fn get_system_metrics(state: State<'_, Arc<AppState>>) -> SystemMetrics {
-    state.metrics.lock().sample()
+fn get_system_metrics(state: State<'_, Arc<AppState>>) -> Result<SystemMetrics, String> {
+    with_core(state.inner(), core_client::system_metrics)
 }
 
 #[tauri::command]
-fn get_fast_system_metrics(state: State<'_, Arc<AppState>>) -> FastSystemMetrics {
-    state.metrics.lock().sample_fast()
+fn get_performance_metrics(state: State<'_, Arc<AppState>>) -> Result<PerformanceMetrics, String> {
+    with_core(state.inner(), core_client::performance_metrics)
 }
 
 #[tauri::command]
-fn get_slow_system_metrics() -> SlowSystemMetrics {
-    sample_slow_metrics()
+fn get_resource_metrics(state: State<'_, Arc<AppState>>) -> Result<ResourceMetrics, String> {
+    with_core(state.inner(), core_client::resource_metrics)
 }
 
 #[derive(Serialize)]
@@ -504,12 +504,12 @@ struct MiniMetrics {
 }
 
 #[tauri::command]
-fn get_mini_metrics(state: State<'_, Arc<AppState>>) -> MiniMetrics {
-    let metrics = state.metrics.lock().sample();
-    MiniMetrics {
+fn get_mini_metrics(state: State<'_, Arc<AppState>>) -> Result<MiniMetrics, String> {
+    let metrics = with_core(state.inner(), core_client::system_metrics)?;
+    Ok(MiniMetrics {
         cpu_usage_percent: metrics.cpu_usage_percent,
         memory_usage_percent: metrics.memory.usage_percent,
-    }
+    })
 }
 
 fn panel_window_label(title: &str, url: &str) -> String {
@@ -596,7 +596,7 @@ async fn open_workspace_terminal(
 ) -> Result<(), String> {
     let settings = current_settings(state.inner());
     let workspace = settings.current()?.clone();
-    harbor_core::app_log::gui(&format!("workspace terminal requested: {}", workspace.id));
+    harbor_support::app_log::gui(&format!("workspace terminal requested: {}", workspace.id));
     let title = format!("{} · Terminal", workspace.name);
     let app_state = state.inner().clone();
     let workspace_id = workspace.id.clone();
@@ -608,11 +608,11 @@ async fn open_workspace_terminal(
     .map_err(|error| format!("workspace terminal worker failed: {error}"))?;
     let url = match result {
         Ok(url) => {
-            harbor_core::app_log::gui(&format!("workspace terminal ready: {workspace_id}"));
+            harbor_support::app_log::gui(&format!("workspace terminal ready: {workspace_id}"));
             url
         }
         Err(error) => {
-            harbor_core::app_log::gui(&format!(
+            harbor_support::app_log::gui(&format!(
                 "workspace terminal failed for {workspace_id}: {error}"
             ));
             return Err(error);
@@ -621,7 +621,7 @@ async fn open_workspace_terminal(
     match open_panel_window_with_label(&app, title.as_str(), url.as_str(), "workspace-terminal") {
         Ok(()) => Ok(()),
         Err(error) => {
-            harbor_core::app_log::gui(&format!(
+            harbor_support::app_log::gui(&format!(
                 "workspace terminal window failed for {workspace_id}: {error}"
             ));
             Err(error)
@@ -747,14 +747,14 @@ fn taskcard_stop_all(state: State<'_, Arc<AppState>>) -> Result<Vec<String>, Str
 #[tauri::command]
 fn managed_processes(
     state: State<'_, Arc<AppState>>,
-) -> Result<Vec<harbor_core::taskcard::ManagedProcessGroup>, String> {
+) -> Result<Vec<harbor_protocol::taskcard::ManagedProcessGroup>, String> {
     with_core(state.inner(), core_client::managed_processes)
 }
 
 #[tauri::command]
 fn core_services(
     state: State<'_, Arc<AppState>>,
-) -> Result<Vec<harbor_core::service::CoreServiceStatus>, String> {
+) -> Result<Vec<harbor_protocol::service::CoreServiceStatus>, String> {
     with_core(state.inner(), core_client::core_services)
 }
 
@@ -939,14 +939,14 @@ async fn taskcard_logs(state: State<'_, Arc<AppState>>) -> Result<Vec<TaskLogSum
 async fn harbor_self_log(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let settings = current_settings(state.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let local = harbor_core::app_log::read_text();
+        let local = harbor_support::app_log::read_text();
         let remote = match settings.current() {
             Ok(workspace) if workspace.mode == WorkspaceMode::Remote => {
                 core_client::harbor_log(&settings).unwrap_or_default()
             }
             _ => String::new(),
         };
-        harbor_core::app_log::merge_pretty(&local, &remote)
+        harbor_support::app_log::merge_pretty(&local, &remote)
     })
     .await
     .map_err(|error| format!("harbor log worker failed: {error}"))
@@ -986,7 +986,7 @@ async fn taskcard_read_log_chunk(
 
 #[tauri::command]
 fn app_version() -> String {
-    harbor_core::version::APP_VERSION.to_string()
+    harbor_support::version::APP_VERSION.to_string()
 }
 
 #[tauri::command]
@@ -1029,9 +1029,12 @@ fn taskcard_resolve_config_base_path(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    harbor_core::app_log::gui(&format!("Harbor GUI {}", harbor_core::version::APP_VERSION));
+    harbor_support::app_log::gui(&format!(
+        "Harbor GUI {}",
+        harbor_support::version::APP_VERSION
+    ));
     if let Err(error) = sync_agent_skill() {
-        harbor_core::app_log::gui(&format!("sync Harbor Skill failed: {error}"));
+        harbor_support::app_log::gui(&format!("sync Harbor Skill failed: {error}"));
     }
     let settings = load_settings();
     if settings
@@ -1039,20 +1042,25 @@ pub fn run() {
         .is_ok_and(|workspace| workspace.mode == WorkspaceMode::Local)
     {
         if let Err(error) = core_process::ensure_core(&settings) {
-            harbor_core::app_log::gui(&format!("ensure harbor_core failed: {error}"));
+            harbor_support::app_log::gui(&format!("ensure harbor_core failed: {error}"));
         }
     } else {
-        harbor_core::app_log::gui("remote workspace restored; waiting for manual connection");
+        harbor_support::app_log::gui("remote workspace restored; waiting for manual connection");
     }
     let state = Arc::new(AppState {
         settings: Mutex::new(settings),
-        metrics: Mutex::new(SystemMetricsSampler::default()),
         panel_tunnels: Mutex::new(HashMap::new()),
         workspace_terminal: Mutex::new(None),
         remote_core_connections: Mutex::new(HashSet::new()),
     });
 
     tauri::Builder::default()
+        .setup(|app| {
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                core_process::set_artifact_resource_dir(resource_dir);
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .manage(state)
@@ -1073,8 +1081,8 @@ pub fn run() {
             restart_harbor_core,
             shutdown_harbor_core_and_exit,
             get_system_metrics,
-            get_fast_system_metrics,
-            get_slow_system_metrics,
+            get_performance_metrics,
+            get_resource_metrics,
             get_mini_metrics,
             taskcard_snapshot,
             ensure_physical_display,
@@ -1150,7 +1158,7 @@ pub fn run() {
                                 continue;
                             };
                             if let Err(error) = core_process::heartbeat_core(&selected) {
-                                harbor_core::app_log::gui(&format!(
+                                harbor_support::app_log::gui(&format!(
                                     "remote workspace heartbeat failed for {workspace_id}: {error}"
                                 ));
                             }

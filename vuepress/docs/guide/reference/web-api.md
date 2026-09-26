@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # Web API
 
-Core 默认监听端口 `29385`，当前 API revision 为 **18**，基础路径为：
+Core 默认监听端口 `29385`，当前 API revision 为 **19**，基础路径为：
 
 ```text
 http://<host>:29385/api/v1
@@ -26,6 +26,9 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | `POST` | `/access/claim` | 获取或刷新 GUI 访问租约。 |
 | `POST` | `/access/release` | 释放 GUI 访问租约。 |
 | `GET` | `/snapshot` | 一次获取 Workspace、Task、Group 与状态快照。 |
+| `GET` | `/metrics` | 获取 Core 所在机器的完整性能与资源指标。 |
+| `GET` | `/metrics/performance` | 获取 CPU、网络和 GPU 性能指标。 |
+| `GET` | `/metrics/resources` | 获取内存、Swap 和根磁盘资源指标。 |
 | `GET` | `/services` | 列出 Core 管理的 VNC 与 ttyd 基础服务状态。 |
 | `POST` | `/displays/physical/ensure` | 启动或复用真实 `DISPLAY=:0` 的抓取与 noVNC 通路。 |
 | `POST` | `/discovery/refresh` | 重新扫描搜索路径。 |
@@ -36,6 +39,8 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 启动 GUI 已按哈希部署到 `~/.harbor/tools/ttyd/current/run` 的固定入口，不接受任意命令。
 
 `/snapshot` 直接返回 Core 维护的缓存，不会在请求中同步扫描 YAML 或进程。缓存超过 5 秒时仍会立即返回最后一份数据，将 `stale` 标记为 `true`，并触发一次后台刷新；刷新进行中不会重复扫描。`generated_at_ms` 表示该快照的生成时间。
+
+指标由 Core 在请求时采集，因此远端 Workspace 显示的是远端机器，而不是运行 GUI 的机器。GUI 分别按照 `performance_metrics_interval_ms` 和 `resource_metrics_interval_ms` 请求性能指标与资源指标。
 
 `POST /displays/physical/ensure` 可能执行依赖检查和进程启动，因此客户端应使用比普通
 状态请求更长的超时。成功后返回更新后的 Snapshot；依赖缺失、没有活动 X11 `:0` 或

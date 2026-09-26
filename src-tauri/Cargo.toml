@@ -7,7 +7,12 @@ edition = "2021"
 default-run = "harbor"
 
 [workspace]
-members = [".", "crates/harbor_core"]
+members = [
+  ".",
+  "crates/harbor_common",
+  "crates/harbor_core",
+  "crates/harbor_protocol",
+]
 resolver = "2"
 
 [lib]
@@ -23,7 +28,8 @@ tauri-build = { version = "2", features = [] }
 sha2 = "0.10"
 
 [dependencies]
-harbor_core = { path = "crates/harbor_core" }
+harbor_common = { path = "crates/harbor_common" }
+harbor_protocol = { path = "crates/harbor_protocol" }
 tauri = { version = "2", features = [] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
@@ -34,8 +40,10 @@ libc = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "sync", "signal"] }
 semver = "1"
 ureq = { version = "2", features = ["json"] }
-nvml-wrapper = "0.12.1"
 sha2 = "0.10"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+harbor_core = { path = "crates/harbor_core" }
 
 [profile.release]
 codegen-units = 1

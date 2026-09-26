@@ -45,7 +45,7 @@ export interface SystemMetrics {
   gpus: GpuDeviceMetrics[];
 }
 
-export interface FastSystemMetrics {
+export interface PerformanceMetrics {
   timestamp_ms: number;
   cpu_usage_percent: number | null;
   cpu_cores: CpuCoreMetric[];
@@ -56,7 +56,7 @@ export interface FastSystemMetrics {
   gpus: GpuDeviceMetrics[];
 }
 
-export interface SlowSystemMetrics {
+export interface ResourceMetrics {
   timestamp_ms: number;
   memory: MemoryMetrics;
   swap: MemoryMetrics;
@@ -72,12 +72,12 @@ export function getSystemMetrics() {
   return invoke<SystemMetrics>("get_system_metrics");
 }
 
-export function getFastSystemMetrics() {
-  return invoke<FastSystemMetrics>("get_fast_system_metrics");
+export function getPerformanceMetrics() {
+  return invoke<PerformanceMetrics>("get_performance_metrics");
 }
 
-export function getSlowSystemMetrics() {
-  return invoke<SlowSystemMetrics>("get_slow_system_metrics");
+export function getResourceMetrics() {
+  return invoke<ResourceMetrics>("get_resource_metrics");
 }
 
 export function getMiniMetrics() {
