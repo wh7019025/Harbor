@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`19`。
+- 当前 `api_revision`：`20`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -37,7 +37,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 | 方法 | 路径 | 请求 | 成功响应 |
 |------|------|------|----------|
-| GET | `/api/v1/health` | - | `{ "ok", "version", "api_revision", "workspace_id", "localhost_only", "pid" }` |
+| GET | `/api/v1/health` | - | `{ "ok", "version", "api_revision", "workspace_id", "localhost_only", "mobile_enabled", "mobile_port", "mobile_url", "mobile_error", "pid" }` |
 | GET | `/api/v1/access` | - | 当前 GUI 访问租约状态 |
 | POST | `/api/v1/access/claim` | `{ "client_id", "gui_version" }` | 获取或刷新租约；其他 GUI 已占用时返回 `409` |
 | POST | `/api/v1/access/release` | `{ "client_id", "gui_version" }` | 主动释放自己的租约 |
@@ -117,3 +117,14 @@ curl -X POST http://127.0.0.1:29385/api/v1/tasks/start \
   -H 'Content-Type: application/json' \
   -d '{"id":"demo","config_id":"production"}'
 ```
+
+## Mobile 网页面板
+
+设置中的 `mobile_enabled` 开启后，Core 额外监听 `0.0.0.0:29387`。这个端口与管理 API
+隔离，只提供以下只读入口：
+
+- `GET /mobile`：手机面板容器页面。
+- `GET /api/panels`：当前运行中且 `localhost_only: false` 的 WebView 面板清单。
+
+Mobile 页面不会暴露 Task 起停、日志、YAML、Workspace 或终端接口。手机与 Core 主机必须
+网络互通；Task 自身的 WebView 端口也必须允许手机访问。

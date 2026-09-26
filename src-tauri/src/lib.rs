@@ -164,7 +164,10 @@ fn get_settings(state: State<'_, Arc<AppState>>) -> Settings {
 }
 
 #[tauri::command]
-fn update_settings(state: State<'_, Arc<AppState>>, next: Settings) -> Result<Settings, String> {
+async fn update_settings(
+    state: State<'_, Arc<AppState>>,
+    next: Settings,
+) -> Result<Settings, String> {
     if next.performance_metrics_interval_ms < 200 {
         return Err("performance_metrics_interval_ms must be >= 200".into());
     }
@@ -173,11 +176,29 @@ fn update_settings(state: State<'_, Arc<AppState>>, next: Settings) -> Result<Se
     }
 
     let current = state.settings.lock().clone();
+    let mobile_changed = current.mobile_enabled != next.mobile_enabled;
     let mut saved = next;
     saved.current_workspace = current.current_workspace.clone();
     saved.workspaces = current.workspaces.clone();
     saved.normalize();
-    persist_settings(state.inner(), saved)
+    let saved = persist_settings(state.inner(), saved)?;
+
+    // --- 阶段 1：普通设置仅落盘，不打断 Core ---
+    if !mobile_changed {
+        return Ok(saved);
+    }
+
+    // --- 阶段 2：Mobile 开关变化时重启已连接的当前 Core，使端口立即生效 ---
+    let workspace = saved.current()?.clone();
+    let should_restart = workspace.mode == WorkspaceMode::Local
+        || remote_workspace_connected(state.inner(), workspace.id.as_str());
+    if should_restart {
+        let job = saved.clone();
+        tauri::async_runtime::spawn_blocking(move || core_process::restart_core(&job))
+            .await
+            .map_err(|error| format!("restart harbor_core worker failed: {error}"))??;
+    }
+    Ok(saved)
 }
 
 #[tauri::command]

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { LoaderCircle } from "lucide-vue-next";
+import { Copy, ExternalLink, LoaderCircle, Smartphone, ToggleLeft, ToggleRight } from "lucide-vue-next";
+import QRCode from "qrcode";
 import {
   checkAppUpdate,
   connectRemoteWorkspaceCore,
@@ -16,6 +17,7 @@ import {
   type HarborCoreStatus,
   type Settings,
 } from "../api/settings";
+import { writeClipboardText } from "../lib/clipboard";
 
 const emit = defineEmits<{
   saved: [];
@@ -25,6 +27,7 @@ const emit = defineEmits<{
 const form = ref<Settings>({
   current_workspace: "default",
   workspaces: [{ id: "default", name: "default", mode: "local", search_paths: [] }],
+  mobile_enabled: false,
   performance_metrics_interval_ms: 1000,
   resource_metrics_interval_ms: 10000,
 });
@@ -40,11 +43,24 @@ const coreBusy = ref("");
 const message = ref("");
 const error = ref("");
 const confirmShutdown = ref(false);
+const mobileQrUrl = ref("");
 
 const currentWorkspace = computed(() =>
   form.value.workspaces.find((workspace) => workspace.id === form.value.current_workspace),
 );
 const isRemote = computed(() => currentWorkspace.value?.mode === "remote");
+const mobileUrl = computed(() => coreStatus.value?.mobile_url ?? "");
+
+watch(mobileUrl, async (url) => {
+  mobileQrUrl.value = url
+    ? await QRCode.toDataURL(url, {
+        errorCorrectionLevel: "M",
+        margin: 1,
+        width: 180,
+        color: { dark: "#202020ff", light: "#ffffffff" },
+      })
+    : "";
+}, { immediate: true });
 
 async function loadSettings() {
   try {
@@ -98,6 +114,16 @@ async function openRelease() {
   const url = updateInfo.value?.releaseUrl;
   if (!url) return;
   await openUrl(url);
+}
+
+async function openMobile() {
+  if (mobileUrl.value) await openUrl(mobileUrl.value);
+}
+
+async function copyMobileUrl() {
+  if (!mobileUrl.value) return;
+  await writeClipboardText(mobileUrl.value);
+  message.value = "已复制 Mobile 地址";
 }
 
 async function save() {
@@ -175,6 +201,73 @@ async function shutdownCoreAndExit() {
         />
       </label>
     </template>
+    <section v-if="!loadingSettings" class="border border-[var(--line-soft)] bg-[var(--surface-2)] p-3">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <Smartphone class="h-4 w-4 text-[var(--accent)]" />
+            <span class="kicker">Mobile</span>
+          </div>
+          <p class="readout mt-2 text-xs text-[var(--ink)]">在手机上打开运行中的 Harbor WebView 页面</p>
+          <p class="readout mt-1 text-[11px] text-[var(--faint)]">
+            使用独立只读端口 29387，不会向局域网开放 harbor_core 管理 API。
+          </p>
+        </div>
+        <button
+          class="btn shrink-0 !px-2 !py-1 text-[11px]"
+          :class="form.mobile_enabled ? 'btn-accent' : ''"
+          type="button"
+          role="switch"
+          :aria-checked="form.mobile_enabled"
+          aria-label="开启 Mobile"
+          @click="form.mobile_enabled = !form.mobile_enabled"
+        >
+          <ToggleRight v-if="form.mobile_enabled" class="h-4 w-4" />
+          <ToggleLeft v-else class="h-4 w-4" />
+          {{ form.mobile_enabled ? "已开启" : "已关闭" }}
+        </button>
+      </div>
+
+      <p
+        v-if="coreStatus && !coreStatus.mobile_error && form.mobile_enabled !== coreStatus.mobile_enabled"
+        class="readout mt-3 text-[11px] text-[var(--warn)]"
+      >
+        保存后将重启当前 Core，使 Mobile 设置生效。
+      </p>
+      <p v-if="coreStatus?.mobile_error" class="readout mt-3 text-xs text-[var(--danger)]">
+        {{ coreStatus.mobile_error }}
+      </p>
+
+      <div v-if="coreStatus?.mobile_enabled && mobileUrl" class="mt-3 flex flex-wrap items-center gap-4">
+        <img
+          v-if="mobileQrUrl"
+          :src="mobileQrUrl"
+          class="h-[148px] w-[148px] rounded bg-white p-1"
+          alt="Harbor Mobile 二维码"
+        />
+        <div class="min-w-0 flex-1">
+          <p class="readout break-all text-xs text-[var(--ink-bright)]">{{ mobileUrl }}</p>
+          <p class="readout mt-1 text-[11px] text-[var(--faint)]">手机需与 Harbor 主机网络互通</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button class="btn !px-2 !py-1 text-[11px]" type="button" @click="copyMobileUrl">
+              <Copy class="h-3 w-3" />复制地址
+            </button>
+            <button class="btn !px-2 !py-1 text-[11px]" type="button" @click="openMobile">
+              <ExternalLink class="h-3 w-3" />打开
+            </button>
+          </div>
+        </div>
+      </div>
+      <p v-else-if="!form.mobile_enabled" class="readout mt-3 text-xs text-[var(--faint)]">
+        开启 Mobile 并保存后，这里会显示手机访问地址和二维码。
+      </p>
+      <p v-else-if="!coreStatus?.reachable" class="readout mt-3 text-xs text-[var(--warn)]">
+        当前 Core 尚未连接；连接后保存设置即可生成二维码。
+      </p>
+      <p v-else-if="!coreStatus?.mobile_error" class="readout mt-3 text-xs text-[var(--faint)]">
+        保存设置后将启动 Mobile 服务并生成二维码。
+      </p>
+    </section>
     <div class="block">
       <span class="kicker">harbor_core</span>
       <div v-if="loadingCoreStatus" class="flex min-h-28 items-center justify-center gap-2 text-[var(--faint)]">

@@ -24,6 +24,7 @@ export interface Workspace {
 export interface Settings {
   current_workspace: string;
   workspaces: Workspace[];
+  mobile_enabled: boolean;
   performance_metrics_interval_ms: number;
   resource_metrics_interval_ms: number;
 }
@@ -35,6 +36,10 @@ export interface HarborCoreStatus {
   version: string | null;
   workspace_id: string | null;
   localhost_only: boolean;
+  mobile_enabled: boolean;
+  mobile_port: number;
+  mobile_url: string | null;
+  mobile_error: string | null;
   port: number;
   listen_url: string;
   pid: number | null;

@@ -31,8 +31,8 @@ use crate::taskcard::{
 use crate::terminal::{TerminalService, TerminalStatus};
 use crate::version::APP_VERSION;
 
-use harbor_protocol::web_api::CORE_API_REVISION_HEADER;
 pub use harbor_protocol::web_api::{CORE_API_REVISION, WEB_API_PORT};
+use harbor_protocol::web_api::{CORE_API_REVISION_HEADER, MOBILE_WEB_PORT};
 const ACCESS_LEASE_TTL: Duration = Duration::from_secs(8);
 const SNAPSHOT_STALE_AFTER: Duration = Duration::from_secs(5);
 
@@ -81,6 +81,9 @@ pub struct WebApiState {
     snapshot_cache: Arc<Mutex<SnapshotCache>>,
     pub localhost_only: bool,
     pub remote_runtime: bool,
+    pub mobile_enabled: bool,
+    pub mobile_url: Option<String>,
+    pub mobile_error: Option<String>,
 }
 
 struct SnapshotCache {
@@ -95,8 +98,16 @@ impl WebApiState {
         settings: Settings,
         localhost_only: bool,
         remote_runtime: bool,
+        mobile_enabled: bool,
+        mobile_error: Option<String>,
     ) -> Self {
         let snapshot = taskcard.snapshot();
+        let mobile_url = mobile_enabled.then(|| {
+            format!(
+                "http://{}:{MOBILE_WEB_PORT}/mobile",
+                snapshot.default_route_ip
+            )
+        });
         Self {
             taskcard: Arc::new(Mutex::new(taskcard)),
             settings: Arc::new(Mutex::new(settings)),
@@ -110,6 +121,9 @@ impl WebApiState {
             })),
             localhost_only,
             remote_runtime,
+            mobile_enabled,
+            mobile_url,
+            mobile_error,
         }
     }
 }
@@ -348,6 +362,10 @@ async fn health(State(state): State<WebApiState>) -> Json<Value> {
         "api_revision": CORE_API_REVISION,
         "workspace_id": workspace_id,
         "localhost_only": state.localhost_only,
+        "mobile_enabled": state.mobile_enabled,
+        "mobile_port": MOBILE_WEB_PORT,
+        "mobile_url": state.mobile_url,
+        "mobile_error": state.mobile_error,
         "pid": std::process::id(),
         "access": access,
     }))
@@ -1344,7 +1362,7 @@ command:
         .unwrap();
         let service = TaskCardService::new(root.clone(), vec![project]).unwrap();
         (
-            WebApiState::new(service, Settings::default(), true, false),
+            WebApiState::new(service, Settings::default(), true, false, false, None),
             root,
         )
     }
@@ -1384,6 +1402,8 @@ command:
         assert_eq!(body["api_revision"], CORE_API_REVISION);
         assert_eq!(body["workspace_id"], "default");
         assert_eq!(body["localhost_only"], true);
+        assert_eq!(body["mobile_enabled"], false);
+        assert_eq!(body["mobile_port"], MOBILE_WEB_PORT);
         assert!(body["pid"].as_u64().unwrap() > 0);
 
         let (status, body) = send(

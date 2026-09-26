@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#17191d" />
+    <title>Harbor Mobile</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #101216; color: #edf2f7; }
+      * { box-sizing: border-box; }
+      html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      #app { display: grid; grid-template-rows: minmax(0, 1fr) auto; background: #101216; }
+      #frames { position: relative; min-height: 0; }
+      iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; display: none; }
+      iframe.active { display: block; }
+      #empty { height: 100%; display: grid; place-content: center; gap: 10px; padding: 28px; text-align: center; color: #929aa8; }
+      #empty strong { color: #edf2f7; font-size: 18px; }
+      #tabs { display: flex; gap: 6px; overflow-x: auto; padding: 8px max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid #30343b; background: #17191d; scrollbar-width: none; }
+      #tabs:empty { display: none; }
+      #tabs::-webkit-scrollbar { display: none; }
+      button { flex: 0 0 auto; min-width: 82px; max-width: 150px; border: 1px solid #363b44; border-radius: 9px; padding: 9px 12px; overflow: hidden; color: #aeb6c2; background: #202329; font: inherit; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+      button.active { border-color: #66d9c8; color: #0b1211; background: #66d9c8; }
+    </style>
+  </head>
+  <body>
+    <main id="app">
+      <section id="frames">
+        <div id="empty"><strong>Harbor Mobile</strong><span>暂无可访问的运行中页面</span></div>
+      </section>
+      <nav id="tabs" aria-label="Harbor 页面"></nav>
+    </main>
+    <script>
+      const frames = document.querySelector("#frames");
+      const tabs = document.querySelector("#tabs");
+      const empty = document.querySelector("#empty");
+      const known = new Map();
+      let activeId = "";
+
+      // --- 阶段 1：根据当前手机访问的主机生成面板地址 ---
+      function panelUrl(panel) {
+        const host = location.hostname.includes(":") ? `[${location.hostname}]` : location.hostname;
+        return `${location.protocol}//${host}:${panel.interface_port}/`;
+      }
+
+      // --- 阶段 2：创建并保留各面板 iframe，切换时不丢失页面状态 ---
+      function addPanel(panel) {
+        const frame = document.createElement("iframe");
+        frame.dataset.panelId = panel.id;
+        frame.title = `${panel.task_name} · ${panel.panel_name}`;
+        frame.src = panelUrl(panel);
+        frame.setAttribute("allow", "camera; microphone; fullscreen; clipboard-read; clipboard-write");
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.panelId = panel.id;
+        button.textContent = panel.task_name === panel.panel_name
+          ? panel.panel_name
+          : `${panel.task_name} · ${panel.panel_name}`;
+        button.addEventListener("click", () => activate(panel.id));
+
+        frames.append(frame);
+        tabs.append(button);
+        known.set(panel.id, { frame, button, signature: JSON.stringify(panel) });
+      }
+
+      function removePanel(id) {
+        const entry = known.get(id);
+        if (!entry) return;
+        entry.frame.remove();
+        entry.button.remove();
+        known.delete(id);
+      }
+
+      function activate(id) {
+        if (!known.has(id)) return;
+        activeId = id;
+        for (const [panelId, entry] of known) {
+          entry.frame.classList.toggle("active", panelId === id);
+          entry.button.classList.toggle("active", panelId === id);
+        }
+      }
+
+      // --- 阶段 3：定时同步 Harbor 当前运行中的公开 WebView ---
+      async function refresh() {
+        try {
+          const response = await fetch("/api/panels", { cache: "no-store" });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const { panels } = await response.json();
+          const incoming = new Set(panels.map((panel) => panel.id));
+
+          for (const id of known.keys()) {
+            if (!incoming.has(id)) removePanel(id);
+          }
+          for (const panel of panels) {
+            const entry = known.get(panel.id);
+            if (entry && entry.signature !== JSON.stringify(panel)) {
+              removePanel(panel.id);
+            }
+            if (!known.has(panel.id)) addPanel(panel);
+          }
+
+          empty.hidden = panels.length > 0;
+          if (!known.has(activeId)) activate(panels[0]?.id ?? "");
+        } catch {
+          if (known.size === 0) empty.hidden = false;
+        }
+      }
+
+      refresh();
+      setInterval(refresh, 2500);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) refresh();
+      });
+    </script>
+  </body>
+</html>

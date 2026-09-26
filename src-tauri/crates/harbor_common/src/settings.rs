@@ -84,6 +84,8 @@ pub struct Settings {
     pub current_workspace: String,
     #[serde(default = "default_workspaces")]
     pub workspaces: Vec<Workspace>,
+    #[serde(default)]
+    pub mobile_enabled: bool,
     #[serde(
         default = "default_performance_metrics_interval_ms",
         alias = "metrics_fast_ms"
@@ -493,6 +495,7 @@ impl Default for Settings {
         Self {
             current_workspace: default_workspace_id(),
             workspaces: default_workspaces(),
+            mobile_enabled: false,
             performance_metrics_interval_ms: default_performance_metrics_interval_ms(),
             resource_metrics_interval_ms: default_resource_metrics_interval_ms(),
         }
@@ -622,6 +625,10 @@ fn recover_settings(raw: &str) -> Option<Settings> {
             settings.workspaces = recovered;
         }
     }
+    settings.mobile_enabled = value
+        .get("mobile_enabled")
+        .and_then(|item| item.as_bool())
+        .unwrap_or_default();
     settings.performance_metrics_interval_ms = value
         .get("performance_metrics_interval_ms")
         .or_else(|| value.get("metrics_fast_ms"))

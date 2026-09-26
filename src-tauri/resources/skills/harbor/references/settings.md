@@ -4,7 +4,7 @@
 
 Search Paths 属于**当前 workspace**。Agent 可以直接维护当前 workspace 的 `search_paths`，无需指导用户操作界面。
 
-Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其他 Harbor 设置必须保留原值，包括 `workspaces` 里的 `mode` / `ssh` / `localhost_only`、其余项、`current_workspace`、`performance_metrics_interval_ms` 和 `resource_metrics_interval_ms`。
+Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其他 Harbor 设置必须保留原值，包括 `workspaces` 里的 `mode` / `ssh` / `localhost_only`、其余项、`current_workspace`、`mobile_enabled`、`performance_metrics_interval_ms` 和 `resource_metrics_interval_ms`。
 
 ```json
 {
@@ -20,6 +20,7 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
       ]
     }
   ],
+  "mobile_enabled": false,
   "performance_metrics_interval_ms": 1000,
   "resource_metrics_interval_ms": 10000
 }
@@ -33,6 +34,7 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 | `workspaces[].ssh` | object | remote workspace 的 SSH：`host`、`user`、`port`、`auth`（`key` / `sshpass`）、`identity_file`、`password`（sshpass 时保存）。Agent 不要改 |
 | `workspaces[].localhost_only` | bool | 启动该 workspace 对应 harbor_core 时是否只监听 127.0.0.1。local 默认 `true`，remote 默认 `false`。Agent 不要改 |
 | `workspaces[].search_paths` | string[] | 该 workspace 搜索项目配置的起点目录。路径相对于 **harbor_core 所在机器** |
+| `mobile_enabled` | bool | 是否在 `0.0.0.0:29387` 开启只读 Mobile 网页面板入口；默认 `false` |
 
 文件不存在时，Harbor 使用内置默认值：一个 `id/name = default` 的 workspace，其 `search_paths` 为空。
 

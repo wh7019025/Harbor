@@ -15,7 +15,7 @@ fn wants_core() -> bool {
     if name == "harbor_core" {
         return true;
     }
-    args.any(|arg| arg == "--localhost-only" || arg == "--workspace")
+    args.any(|arg| arg == "--localhost-only" || arg == "--mobile-enabled" || arg == "--workspace")
 }
 
 fn main() {

@@ -1,4 +1,5 @@
 pub mod app_log;
+pub mod mobile;
 pub mod service;
 pub mod settings;
 pub mod system_metrics;
@@ -79,6 +80,7 @@ fn acquire_core_instance() -> Result<CoreInstanceLock, String> {
 
 pub struct CoreArgs {
     pub localhost_only: bool,
+    pub mobile_enabled: Option<bool>,
     pub remote_runtime: bool,
     pub workspace_id: Option<String>,
 }
@@ -86,6 +88,7 @@ pub struct CoreArgs {
 impl CoreArgs {
     pub fn from_env() -> Result<Self, String> {
         let mut localhost_only = true;
+        let mut mobile_enabled = None;
         let mut remote_runtime = false;
         let mut workspace_id = None;
         let mut args = std::env::args().skip(1);
@@ -101,6 +104,12 @@ impl CoreArgs {
                         .ok_or_else(|| "--localhost-only requires true or false".to_string())?;
                     localhost_only = parse_bool(&value)?;
                 }
+                "--mobile-enabled" => {
+                    let value = args
+                        .next()
+                        .ok_or_else(|| "--mobile-enabled requires true or false".to_string())?;
+                    mobile_enabled = Some(parse_bool(&value)?);
+                }
                 "--remote-runtime" => {
                     remote_runtime = true;
                 }
@@ -115,6 +124,7 @@ impl CoreArgs {
         }
         Ok(Self {
             localhost_only,
+            mobile_enabled,
             remote_runtime,
             workspace_id,
         })
@@ -181,6 +191,7 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         args.workspace_id.as_deref(),
         !args.remote_runtime,
     )?;
+    let mobile_enabled = args.mobile_enabled.unwrap_or(settings.mobile_enabled);
     let taskcard = make_taskcard(&settings, args.remote_runtime).map_err(|error| {
         crate::app_log::core(&error);
         error
@@ -205,7 +216,21 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         });
     }
 
-    // --- 阶段 4：绑定 API 端口并提供服务 ---
+    // --- 阶段 4：按设置启动只读 Mobile 页面 ---
+    let (mobile_listener, mobile_error) = if mobile_enabled {
+        match mobile::bind_listener().await {
+            Ok(listener) => (Some(listener), None),
+            Err(error) => {
+                let message = format!("listen mobile port failed: {error}");
+                crate::app_log::core(&message);
+                (None, Some(message))
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    // --- 阶段 5：绑定管理 API 端口并提供服务 ---
     let addr = bind_addr(args.localhost_only);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -216,15 +241,34 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         web_api::listen_url(args.localhost_only),
         args.localhost_only
     ));
-    let state = WebApiState::new(taskcard, settings, args.localhost_only, args.remote_runtime);
+    let state = WebApiState::new(
+        taskcard,
+        settings,
+        args.localhost_only,
+        args.remote_runtime,
+        mobile_listener.is_some(),
+        mobile_error,
+    );
     let shutdown_taskcard = state.taskcard.clone();
     let shutdown_terminal = state.terminal.clone();
+    if let Some(listener) = mobile_listener {
+        let taskcard = state.taskcard.clone();
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(listener, mobile::router(taskcard)).await {
+                crate::app_log::core(&format!("Harbor Mobile server failed: {error}"));
+            }
+        });
+        crate::app_log::core(&format!(
+            "Harbor Mobile listening on http://0.0.0.0:{}",
+            harbor_protocol::web_api::MOBILE_WEB_PORT
+        ));
+    }
     let serve_result = axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(|error| format!("harbor_core server failed: {error}"));
 
-    // --- 阶段 5：关闭 Core 基础设施，但保留独立运行的 Task ---
+    // --- 阶段 6：关闭 Core 基础设施，但保留独立运行的 Task ---
     if args.remote_runtime {
         crate::vnc_interface::shutdown_displays();
     }

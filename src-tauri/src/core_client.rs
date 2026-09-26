@@ -10,10 +10,14 @@ use harbor_protocol::taskcard::{
     ManagedProcessGroup, ResearchResult, TaskCardSnapshot, TaskCardYamlDocument, TaskLogChunk,
     TaskLogContent, TaskLogSummary,
 };
-use harbor_protocol::web_api::{CORE_API_REVISION, WEB_API_PORT};
+use harbor_protocol::web_api::{CORE_API_REVISION, MOBILE_WEB_PORT, WEB_API_PORT};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+fn default_mobile_port() -> u16 {
+    MOBILE_WEB_PORT
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CoreHealth {
@@ -25,6 +29,14 @@ pub struct CoreHealth {
     pub workspace_id: String,
     #[serde(default)]
     pub localhost_only: bool,
+    #[serde(default)]
+    pub mobile_enabled: bool,
+    #[serde(default = "default_mobile_port")]
+    pub mobile_port: u16,
+    #[serde(default)]
+    pub mobile_url: Option<String>,
+    #[serde(default)]
+    pub mobile_error: Option<String>,
     #[serde(default)]
     pub pid: u32,
     #[serde(default)]
@@ -53,6 +65,10 @@ pub struct HarborCoreStatus {
     pub version: Option<String>,
     pub workspace_id: Option<String>,
     pub localhost_only: bool,
+    pub mobile_enabled: bool,
+    pub mobile_port: u16,
+    pub mobile_url: Option<String>,
+    pub mobile_error: Option<String>,
     pub port: u16,
     pub listen_url: String,
     pub pid: Option<u32>,
@@ -72,6 +88,10 @@ impl HarborCoreStatus {
             version: None,
             workspace_id: workspace.map(|item| item.id.clone()),
             localhost_only: workspace.map(Workspace::localhost_only).unwrap_or(true),
+            mobile_enabled: false,
+            mobile_port: MOBILE_WEB_PORT,
+            mobile_url: None,
+            mobile_error: None,
             port: WEB_API_PORT,
             listen_url: core_base_url(settings).unwrap_or_else(|_| local_core_url()),
             pid: None,
@@ -343,6 +363,10 @@ pub fn core_status(settings: &Settings) -> HarborCoreStatus {
                 version: Some(health.version),
                 workspace_id: Some(health.workspace_id),
                 localhost_only: health.localhost_only,
+                mobile_enabled: health.mobile_enabled,
+                mobile_port: health.mobile_port,
+                mobile_url: health.mobile_url,
+                mobile_error: health.mobile_error,
                 port: WEB_API_PORT,
                 listen_url: core_base_url(settings).unwrap_or_else(|_| local_core_url()),
                 pid: if health.pid == 0 {
@@ -375,6 +399,10 @@ pub fn core_status(settings: &Settings) -> HarborCoreStatus {
             status.version = Some(health.version);
             status.workspace_id = Some(health.workspace_id);
             status.localhost_only = health.localhost_only;
+            status.mobile_enabled = health.mobile_enabled;
+            status.mobile_port = health.mobile_port;
+            status.mobile_url = health.mobile_url;
+            status.mobile_error = health.mobile_error;
             status.pid = if health.pid == 0 {
                 None
             } else {

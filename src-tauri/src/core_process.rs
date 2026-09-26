@@ -447,7 +447,7 @@ fn stop_local_core() {
 }
 
 #[cfg(target_os = "linux")]
-fn spawn_local_core(workspace: &Workspace) -> Result<(), String> {
+fn spawn_local_core(workspace: &Workspace, mobile_enabled: bool) -> Result<(), String> {
     stop_local_core();
     thread::sleep(Duration::from_millis(200));
     let bin = install_local_core_bin()?;
@@ -456,6 +456,8 @@ fn spawn_local_core(workspace: &Workspace) -> Result<(), String> {
     command
         .arg("--localhost-only")
         .arg(if localhost_only { "true" } else { "false" })
+        .arg("--mobile-enabled")
+        .arg(if mobile_enabled { "true" } else { "false" })
         .arg("--workspace")
         .arg(workspace.id.as_str())
         .stdin(Stdio::null())
@@ -514,6 +516,7 @@ fn ensure_local_core(settings: &Settings, workspace: &Workspace) -> Result<(), S
                 && health.version == APP_VERSION
                 && health.api_revision == CORE_API_REVISION
                 && managed_core_matches
+                && health.mobile_enabled == settings.mobile_enabled
                 && health.workspace_id == workspace.id =>
         {
             claim_compatible_access(local_core_url().as_str())?;
@@ -523,16 +526,17 @@ fn ensure_local_core(settings: &Settings, workspace: &Workspace) -> Result<(), S
             if health.ok
                 && health.version == APP_VERSION
                 && health.api_revision == CORE_API_REVISION
-                && managed_core_matches =>
+                && managed_core_matches
+                && health.mobile_enabled == settings.mobile_enabled =>
         {
             claim_compatible_access(local_core_url().as_str())?;
             switch_workspace(settings, workspace.id.as_str())
         }
         Ok(health) if health.ok => {
             require_replaceable_core(local_core_url().as_str(), &health)?;
-            spawn_local_core(workspace)
+            spawn_local_core(workspace, settings.mobile_enabled)
         }
-        _ => spawn_local_core(workspace),
+        _ => spawn_local_core(workspace, settings.mobile_enabled),
     }
 }
 
@@ -570,7 +574,8 @@ pub fn connect_remote_core(settings: &Settings) -> Result<(), String> {
         Ok(health)
             if health.ok
                 && health.version == APP_VERSION
-                && health.api_revision == CORE_API_REVISION =>
+                && health.api_revision == CORE_API_REVISION
+                && health.mobile_enabled == settings.mobile_enabled =>
         {
             claim_compatible_access(base.as_str())?;
             switch_workspace(settings, workspace.id.as_str())?;
@@ -702,7 +707,8 @@ fi"#,
     let exec = remote_core_exec(
         loader,
         &format!(
-            "--localhost-only {localhost_only} --remote-runtime --workspace {id}",
+            "--localhost-only {localhost_only} --mobile-enabled {mobile_enabled} --remote-runtime --workspace {id}",
+            mobile_enabled = if settings.mobile_enabled { "true" } else { "false" },
             id = shell_single_quote(&workspace.id),
         ),
     );
@@ -774,17 +780,23 @@ pub fn restart_core(settings: &Settings) -> Result<(), String> {
         finish_deploy_progress();
         result
     } else {
-        restart_local_core_for_platform(&workspace)
+        restart_local_core_for_platform(settings, &workspace)
     }
 }
 
 #[cfg(target_os = "linux")]
-fn restart_local_core_for_platform(workspace: &Workspace) -> Result<(), String> {
-    spawn_local_core(workspace)
+fn restart_local_core_for_platform(
+    settings: &Settings,
+    workspace: &Workspace,
+) -> Result<(), String> {
+    spawn_local_core(workspace, settings.mobile_enabled)
 }
 
 #[cfg(not(target_os = "linux"))]
-fn restart_local_core_for_platform(_workspace: &Workspace) -> Result<(), String> {
+fn restart_local_core_for_platform(
+    _settings: &Settings,
+    _workspace: &Workspace,
+) -> Result<(), String> {
     Err("local workspaces require Linux; use a remote workspace on this platform".into())
 }
 
