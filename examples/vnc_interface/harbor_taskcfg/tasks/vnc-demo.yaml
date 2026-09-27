@@ -1,4 +1,4 @@
-version: "0.2.0-preview.4"
+version: "0.2.0"
 uuid: "cc965e33-8ec1-414a-b6cd-32db5f39e201"
 id: vnc-demo
 name: VNC Interface Demo
@@ -6,8 +6,7 @@ description: 本地直接打开 Obsidian，远端通过 Harbor 共享 VNC 桌面
 workdir: $(harbor_taskcfg_dir)/..
 env: {}
 sudo: false
-vnc_interface:
-  - panel_name: desktop
+remote_display_virtual: true
 command:
   argv:
     - obsidian

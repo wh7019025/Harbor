@@ -109,7 +109,7 @@ mod tests {
                 interface_port: 23842,
                 localhost_only,
             }],
-            vnc_interface: Vec::new(),
+            remote_display_virtual: false,
             folder: String::new(),
             status: status.into(),
             pid: None,

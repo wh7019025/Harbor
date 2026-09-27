@@ -120,75 +120,29 @@ Workspace 已保存的 SSH 配置完成。
 
 Harbor 的搜索路径用于发现和运行项目，不会把远端目录挂载到本机。
 
-## 远端程序是否需要界面
+## 远端界面
 
-远端不代表一定需要 VNC。先判断程序本身属于哪一种：
+是否需要界面取决于程序，而不是 Workspace 是否远端：
 
-- 服务、脚本、ROS 2 节点等没有 UI：不配置 interface，直接运行。
-- 程序自己提供 HTTP 页面：配置 `webview_interface`。
-- Qt、RViz、GTK 等只有原生窗口，并且需要远端操作：配置 `vnc_interface`。
+- 没有 UI：无需额外配置。
+- 程序提供 HTTP 页面：使用 `webview_interface`。
+- 程序只有 Qt、RViz、GTK 等原生窗口：设置 `remote_display_virtual: true`。
 
-如果远端没有桌面会话，程序可能输出：
-
-```text
-qt.qpa.xcb: could not connect to display
+```yaml
+remote_display_virtual: true
 ```
 
-远端 Core 启动后会同时维护两个独立入口：
+远端顶部提供两个机器级入口：
 
-- **真实桌面**：镜像远端物理显示器 `DISPLAY=:0`，顶部使用显示器图标。
-- **虚拟桌面**：Harbor 创建的 `DISPLAY=:82`，顶部使用立方体图标。
+- **虚拟桌面**：Harbor 创建的共享桌面。启用上述字段的 Task 会在这里打开窗口。
+- **真实桌面**：镜像远端已经登录的 X11 `DISPLAY=:0`，不改变 Task 的启动位置。
 
-声明了 `vnc_interface` 的 Task 会把原始命令运行到虚拟桌面。程序无需读取 VNC
-配置，多个 VNC Task 会作为不同窗口出现在同一个虚拟桌面中。真实桌面入口仅用于
-查看和操作远端机器已经登录的物理桌面，不改变 Task 的启动位置。
-local workspace 会忽略 VNC 包装，仍然直接打开原生窗口。
+本地 Workspace 会忽略 `remote_display_virtual`，仍在当前图形会话中直接打开窗口。
+两个远端桌面都通过 SSH Tunnel 访问，无需开放 noVNC 端口。依赖缺失时，Harbor 会在
+界面和日志中给出安装命令。
 
-### 默认端口
-
-- `23682`：虚拟桌面的 noVNC HTTP/WebSocket 端口。
-- `23683`：真实桌面的 noVNC HTTP/WebSocket 端口。
-
-它们都不是 TigerVNC 的 RFB 端口。每台远端机器只运行一组机器级桌面服务，Task
-YAML 中无需也不能重复配置端口。
-
-Harbor GUI 打开顶部显示器图标时，会通过 Workspace 的 SSH 连接，把远端
-`127.0.0.1:23682` 或 `127.0.0.1:23683` 转发到本机随机空闲端口。通常不需要在
-远端防火墙中开放这两个端口，也不需要手动访问远端 URL。端口被其他程序占用时，
-对应桌面无法启动，错误会写入 Harbor 日志。
-
-TigerVNC 本身不监听 TCP 端口，只通过 Harbor 运行时目录中的 Unix Socket 与
-websockify 通信。本地 Workspace 不会使用 `23682`。
-
-如果程序可以提供 Web 页面，优先使用 `webview_interface`；它通常比传输整个桌面
-更轻量。完全不需要界面的程序应使用 offscreen 或 headless 模式，不要配置 VNC。
-
-远端 VNC 依赖：
-
-```bash
-sudo apt-get install -y tigervnc-standalone-server novnc websockify openbox util-linux
-```
-
-查看真实 `DISPLAY=:0` 还需要 TigerVNC 抓屏服务：
-
-```bash
-sudo apt install tigervnc-scraping-server
-```
-
-缺少该依赖时，虚拟桌面仍可正常使用；真实桌面图标会显示安装提示，Harbor 日志也会
-记录相同命令。真实桌面目前要求远端存在活动的 X11 `:0` 会话，Wayland 会话不支持
-此抓取方式。
-
-Harbor 优先使用 Ubuntu Desktop Session；不可用时依次回退到 GNOME、GNOME
-Flashback 和 Openbox。若希望获得接近正常 Ubuntu Desktop 的显示效果，安装：
-
-```bash
-sudo apt-get install -y ubuntu-session gnome-shell-extension-ubuntu-dock \
-  yaru-theme-gnome-shell gnome-session gnome-session-flashback dbus-x11
-```
-
-如需明确选择其他 GNOME Session，可设置 `HARBOR_VNC_DESKTOP_SESSION`；设置为
-`openbox` 可强制使用轻量桌面。
+配置方式与依赖见[程序界面](./panels.md)，固定端口与监听范围见
+[端口使用](/development/ports/)。
 
 ## 安全边界
 
@@ -227,5 +181,5 @@ SSH Tunnel 过程记录在本机 Harbor Log 中。
 
 ### Task 启动但无法打开窗口
 
-如果程序需要原生窗口，确认 Task 配置了 `vnc_interface`，并检查远端 VNC 依赖。
-如果程序只需要控制页面，使用 `webview_interface` 通常更轻量；如果没有 UI，则不应配置任何 interface。
+如果程序需要原生窗口，确认 Task 设置了 `remote_display_virtual: true`，并检查远端 VNC 依赖。
+如果程序只需要控制页面，使用 `webview_interface` 通常更轻量；没有 UI 时无需任何界面配置。

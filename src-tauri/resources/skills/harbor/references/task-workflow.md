@@ -34,7 +34,7 @@ Harbor:remote@user@host:2222:/absolute/remote/path:task-id
 3. 按 [task-yaml.md](task-yaml.md) 写入 `{id}.yaml`。
 4. 填写 `description` 时**尽量用中文**简要说明任务用途；无说明可留 `""`。
 5. 若同一程序只有环境变量参数不同，可在一个 Task 中使用 `configs`，不要复制多个几乎相同的 Task。
-6. 判断界面模式：无 UI 时不写接口；程序自带 HTTP 页面时写 `webview_interface`；远端需要操作原生窗口时写 `vnc_interface`。
+6. 判断界面模式：无 UI 时不写接口；程序自带 HTTP 页面时写 `webview_interface`；远端需要操作原生窗口时写 `remote_display_virtual: true`。
 7. 检查 `id`、`workdir`、`version`，并确认 `command` 使用 `argv` 或 `shell` + `script` 其中一种形式。
 
 文件名建议与 Task `id` 一致，例如：

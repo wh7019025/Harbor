@@ -14,11 +14,6 @@ pub struct WebviewInterface {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct VncInterface {
-    pub panel_name: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TaskConfig {
     pub id: String,
     #[serde(default)]
@@ -79,8 +74,8 @@ pub struct TaskSummary {
     pub requires_sudo: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub webview_interface: Vec<WebviewInterface>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub vnc_interface: Vec<VncInterface>,
+    #[serde(default)]
+    pub remote_display_virtual: bool,
     pub folder: String,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

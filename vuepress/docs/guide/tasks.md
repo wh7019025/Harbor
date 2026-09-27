@@ -40,14 +40,14 @@ Task 是 Harbor 中最基本的运行单元，也是项目“可执行 README”
 
 - **没有 UI**：不配置任何 interface。服务、ROS 2 节点、脚本和 headless 程序都属于这一类。
 - **程序自带 Web 页面**：配置 `webview_interface`，Harbor 显示网页图标。
-- **程序只有原生窗口**：需要远端操作时配置 `vnc_interface`，窗口会进入 Harbor 顶部立方体图标对应的共享虚拟桌面。
+- **程序只有原生窗口**：需要远端操作时设置 `remote_display_virtual: true`，窗口会进入 Harbor 顶部立方体图标对应的共享虚拟桌面。
 
-本地运行带 `vnc_interface` 的 Task 时仍直接打开原生窗口；只有 remote workspace
+本地运行启用了 `remote_display_virtual` 的 Task 时仍直接打开原生窗口；只有 remote workspace
 会使用机器级共享 VNC 桌面。远端无 UI 任务不需要 VNC。
 
 远端虚拟桌面固定使用 `23682` 提供 noVNC HTTP/WebSocket 页面。这个端口由 Harbor
 统一管理，不写入 Task YAML；GUI 会通过 SSH Tunnel 访问它，通常不需要对局域网开放。
-顶部另有真实桌面入口，通过 `23683` 镜像远端 `DISPLAY=:0`，但 `vnc_interface` Task
+顶部另有真实桌面入口，通过 `23683` 镜像远端 `DISPLAY=:0`，但启用远端虚拟显示的 Task
 仍只在隔离的虚拟桌面中启动。
 
 ## 创建 Task

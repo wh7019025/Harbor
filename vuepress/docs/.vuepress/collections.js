@@ -27,7 +27,7 @@ const development = defineCollection({
   type: 'doc',
   dir: 'development',
   title: '开发',
-  sidebar: [{ text: '设计理念', link: '/development/' }, 'architecture', 'environment', 'build', 'security'],
+  sidebar: [{ text: '设计理念', link: '/development/' }, 'architecture', 'ports', 'environment', 'build', 'security'],
 })
 
 export const collections = defineCollections([guide, development])

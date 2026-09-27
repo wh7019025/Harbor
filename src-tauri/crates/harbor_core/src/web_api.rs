@@ -1452,7 +1452,7 @@ mod tests {
             running_config_id: None,
             requires_sudo: false,
             webview_interface: Vec::new(),
-            vnc_interface: Vec::new(),
+            remote_display_virtual: false,
             folder: String::new(),
             status: "stopped".into(),
             pid: None,

@@ -29,9 +29,9 @@ Use Harbor to turn repeatable commands into project-owned Task and Group workflo
 
 - **No UI**: omit both interface fields. This is the default for services, ROS 2 nodes, scripts, and headless programs.
 - **WebView**: use `webview_interface` only when the program itself serves an HTTP page. The program reads `HARBOR_WEBVIEW_*` variables.
-- **VNC**: use `vnc_interface` only for a native X11/Qt/GTK window that must be operated remotely. Local workspaces still launch the native window directly.
+- **Remote virtual display**: set `remote_display_virtual: true` only for a native X11/Qt/GTK window that must be operated remotely. Local workspaces still launch the native window directly.
 - Do not add an interface merely because a Task is remote. Headless remote Tasks need no interface.
-- Do not invent `panel_interface` or `force_display`; those fields are not part of the current schema.
+- Do not invent `vnc_interface`, `panel_interface`, or `force_display`; those fields are not part of the current schema.
 - Treat the remote Workspace terminal as a Core-managed ttyd service reached through a GUI-managed SSH Tunnel. Harbor verifies and deploys its bundled ttyd automatically; do not ask the user to install ttyd or create a Task/interface field for it.
 
 ## Read References as Needed

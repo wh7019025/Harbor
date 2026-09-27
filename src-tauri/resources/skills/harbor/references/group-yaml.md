@@ -1,7 +1,7 @@
 # Group YAML
 
 ```yaml
-version: "0.2.0-preview.6"
+version: "0.2.0"
 uuid: 4c9e2d73-6b15-4f80-a271-95d38c7e1a42
 id: system-info
 name: System Info
@@ -29,7 +29,7 @@ tasks:
 | `tasks` | 是 | 按顺序执行的 Task 条目列表 |
 | `tasks[].task` | 是 | 已存在的 Task `id` |
 | `tasks[].config` | 否 | 使用该 Task 的 config `id`；省略时使用 Task 的默认 config |
-| `tasks[].wait_after_sec` | 否 | 当前 Task 后等待的秒数，默认 `0` |
+| `tasks[].wait_after_sec` | 否 | 当前 Task 后等待的秒数，只接受非负整数，默认 `0` |
 | `tasks[].env` | 否 | 对此次组内执行追加或覆盖的环境变量，默认 `{}`；优先级高于 Task config |
 
 ## description

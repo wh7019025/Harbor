@@ -809,7 +809,6 @@ function taskInterfaceUrls(task: TaskCardTask) {
     task,
     settings.value,
     snapshot.value?.default_route_ip,
-    snapshot.value?.vnc_port,
   );
 }
 

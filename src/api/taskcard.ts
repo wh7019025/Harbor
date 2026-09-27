@@ -7,10 +7,6 @@ export interface TaskWebviewInterface {
   localhost_only: boolean;
 }
 
-export interface TaskVncInterface {
-  panel_name: string;
-}
-
 export interface TaskCardConfig {
   id: string;
   name: string;
@@ -32,7 +28,7 @@ export interface TaskCardTask {
   running_config_id?: string;
   requires_sudo: boolean;
   webview_interface?: TaskWebviewInterface[];
-  vnc_interface?: TaskVncInterface[];
+  remote_display_virtual: boolean;
   folder: string;
   status: "running" | "stopped";
   pid?: number;
@@ -302,7 +298,6 @@ export function interfaceUrls(
   task: TaskCardTask,
   settings: Settings | null,
   defaultRouteIp?: string,
-  vncPort?: number,
 ) {
   const workspace = settings?.workspaces.find((item) => item.id === settings.current_workspace);
   const remote = workspace?.mode === "remote";
@@ -317,14 +312,7 @@ export function interfaceUrls(
       panel.localhost_only ? "127.0.0.1" : defaultRouteIp?.trim() || workspaceHost
     }:${panel.interface_port}/`,
   }));
-  const vnc = remote
-    ? (task.vnc_interface ?? []).map((panel) => ({
-        kind: "vnc" as const,
-        name: panel.panel_name,
-        url: `http://${workspaceHost}:${vncPort ?? 23682}/`,
-      }))
-    : [];
-  return [...webviews, ...vnc];
+  return webviews;
 }
 
 export function sharedVncUrl(settings: Settings | null, vncPort?: number) {

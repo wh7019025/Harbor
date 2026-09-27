@@ -8,7 +8,7 @@ createTime: 2026/09/20 00:44:43
 ## 完整示例
 
 ```yaml
-version: "0.2.0-preview.6"
+version: "0.2.0"
 uuid: a35b7f18-9d64-4e2a-8f31-6c0d72b94511
 id: demo-ping
 name: Demo Ping
@@ -52,7 +52,7 @@ command:
 | `default_config` | 否 | 默认 config id。 |
 | `sudo` | 否 | 是否通过 sudo 启动，默认 `false`。 |
 | `webview_interface` | 否 | 程序自己提供的 Web 页面列表。 |
-| `vnc_interface` | 否 | 远端桌面程序的 VNC 页面，最多一个。 |
+| `remote_display_virtual` | 否 | `true` 时将远端原生窗口放入 Harbor 共享虚拟桌面，默认 `false`。 |
 | `command` | 是 | `argv` 或 `shell` + `script`。 |
 
 ## command
@@ -91,21 +91,36 @@ env → configs[].env → Group tasks[].env
 
 `folder`、`prefix_path`、`taskcfg_dir` 是扫描结果，不应写入 YAML。
 
+## Web Panel
+
+`webview_interface` 可以声明一个或多个由程序自身提供的 HTTP 页面：
+
+```yaml
+webview_interface:
+  - panel_name: status
+    interface_port: 23681
+    localhost_only: false
+```
+
+`interface_port` 由项目选择，但不能与 Harbor 固定端口或同机其他程序冲突。
+`localhost_only` 默认为 `false`；程序应读取 Harbor 注入的 `HARBOR_WEBVIEW_*`
+环境变量决定端口和监听地址，不要在源码中再次固定。完整端口规则见
+[端口使用](/development/ports/)。
+
 ## 桌面程序可视化
 
 Qt、GTK 等桌面程序无需改造成 Web 应用，只需声明 VNC 接口：
 
 ```yaml
-vnc_interface:
-  - panel_name: desktop
+remote_display_virtual: true
 command:
   argv: [your-gui-program]
 ```
 
-`vnc_interface` 只有 `panel_name`，不配置端口。local workspace 仍然直接打开原生
+`remote_display_virtual` 是布尔值，不配置名称或端口。local workspace 仍然直接打开原生
 窗口，不启动 VNC，也不显示该 Panel。remote workspace 会按需启动当前机器唯一的
 共享 X11、TigerVNC 和 noVNC 桌面，并在 Harbor 固定端口 `23682` 提供入口。一个
-Task 最多只能配置一个 `vnc_interface`，所有 VNC Task 共用同一个 `DISPLAY`。
+机器上的所有远端虚拟显示 Task 共用同一个 `DISPLAY`。
 
 不要在这类 Task 的 `env` 或启动脚本中手写 `DISPLAY`、`XAUTHORITY`、
 `WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端显示环境由 Harbor

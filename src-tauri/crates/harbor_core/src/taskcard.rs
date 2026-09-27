@@ -18,10 +18,11 @@ use crate::version::APP_VERSION;
 pub use harbor_protocol::taskcard::{
     GroupDefinition, GroupTask, ManagedProcessGroup, ManagedProcessInfo, ResearchResult,
     TaskCardSnapshot, TaskCardYamlDocument, TaskConfig, TaskLogChunk, TaskLogContent,
-    TaskLogSummary, TaskSummary, UuidConflict, UuidDefinitionRef, VncInterface, WebviewInterface,
+    TaskLogSummary, TaskSummary, UuidConflict, UuidDefinitionRef, WebviewInterface,
 };
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TaskDefinition {
     #[serde(deserialize_with = "deserialize_yaml_version")]
     pub version: String,
@@ -44,7 +45,7 @@ pub struct TaskDefinition {
     #[serde(default)]
     pub webview_interface: Vec<WebviewInterface>,
     #[serde(default)]
-    pub vnc_interface: Vec<VncInterface>,
+    pub remote_display_virtual: bool,
     pub command: TaskCommand,
     #[serde(default, skip_deserializing)]
     pub folder: String,
@@ -356,7 +357,7 @@ impl TaskCardService {
                         .or_else(|| managed.and_then(|item| item.config_id.clone())),
                     requires_sudo: task.sudo,
                     webview_interface: task.webview_interface.clone(),
-                    vnc_interface: task.vnc_interface.clone(),
+                    remote_display_virtual: task.remote_display_virtual,
                     folder: task.folder.clone(),
                     status: if running.is_some() || managed.is_some() {
                         "running".to_string()
@@ -489,7 +490,7 @@ impl TaskCardService {
             create_log_file(log_dir.as_path(), id, selected_config_id.as_deref())?;
         let log_path = log_dir.join(log_file.as_str());
         let remote_runtime = *self.remote_runtime.lock();
-        let uses_vnc = remote_runtime && !task.vnc_interface.is_empty();
+        let uses_vnc = remote_runtime && task.remote_display_virtual;
         let command = if uses_vnc {
             crate::vnc_interface::validate_dependencies()
                 .and_then(|_| crate::vnc_interface::build_command(&task.command, task.sudo))
@@ -1810,16 +1811,6 @@ fn validate_task_definition(task: &TaskDefinition) -> Result<(), String> {
             ));
         }
     }
-    if task.vnc_interface.len() > 1 {
-        return Err("task can declare at most one vnc_interface".into());
-    }
-    for panel in &task.vnc_interface {
-        validate_id(panel.panel_name.as_str())
-            .map_err(|_| format!("invalid panel_name: {}", panel.panel_name))?;
-        if !panel_names.insert(panel.panel_name.as_str()) {
-            return Err(format!("duplicate panel_name: {}", panel.panel_name));
-        }
-    }
     build_command(&task.command)?;
     Ok(())
 }
@@ -2789,13 +2780,12 @@ command:
     }
 
     #[test]
-    fn vnc_interface_is_managed_without_application_environment() {
+    fn remote_virtual_display_is_managed_without_application_environment() {
         let task = validate_task_yaml(
             r#"version: 1
 id: desktop-app
 workdir: /tmp
-vnc_interface:
-  - panel_name: desktop
+remote_display_virtual: true
 command:
   argv: [demo]
 "#,
@@ -2803,22 +2793,21 @@ command:
         .unwrap();
 
         let env = merged_task_env(&task, None, &HashMap::new());
-        assert_eq!(task.vnc_interface.len(), 1);
+        assert!(task.remote_display_virtual);
         assert!(!env.contains_key("HARBOR_WEBVIEW_INTERFACE_PORT"));
         assert!(!env.contains_key("HARBOR_WEBVIEW_DESKTOP_INTERFACE_PORT"));
 
-        let duplicate = r#"version: 1
+        let removed_field = r#"version: 1
 id: desktop-app
 workdir: /tmp
 vnc_interface:
-  - panel_name: first
-  - panel_name: second
+  - panel_name: desktop
 command:
   argv: [demo]
 "#;
-        assert!(validate_task_yaml(duplicate)
+        assert!(validate_task_yaml(removed_field)
             .unwrap_err()
-            .contains("at most one vnc_interface"));
+            .contains("unknown field `vnc_interface`"));
     }
 
     #[test]

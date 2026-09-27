@@ -10,36 +10,35 @@ createTime: 2026/09/20 00:44:43
 当程序还需要提供可视化、控制界面、实时视频或交互操作时，可以选择两种入口：
 
 - `webview_interface`：程序主动提供 Web 页面，使用网页图标。
-- `vnc_interface`：Harbor 把远端原生窗口放入共享虚拟桌面，使用立方体图标。
+- `remote_display_virtual`：Harbor 把远端原生窗口放入共享虚拟桌面，使用立方体图标。
 
 ![Harbor 中运行的 Robot Panel](/images/harbor-app.png)
 
 ::: important 先判断是否有 UI
-没有 UI 的 Task 不配置任何 interface。只有程序自己提供网页时使用
-`webview_interface`；只有远端需要操作原生窗口时使用 `vnc_interface`。
+没有 UI 的 Task 不配置 `webview_interface`，也不启用远端虚拟显示。只有程序自己提供网页时使用
+`webview_interface`；只有远端需要操作原生窗口时设置 `remote_display_virtual: true`。
 :::
 
-## VNC：远端操作原生窗口
+## 远端虚拟显示
 
 如果程序已经有 Qt、GTK 或其他 X11 界面，不需要再开发网页。只需为 Task
-声明 VNC 接口：
+声明远端虚拟显示：
 
 ```yaml
-vnc_interface:
-  - panel_name: desktop
+remote_display_virtual: true
 command:
   argv: [your-gui-program]
 ```
 
 程序不需要读取 Harbor 环境变量，也不需要知道 VNC 如何配置。local workspace
 仍直接打开程序的原生窗口，不启动 VNC；只有 remote workspace 会按需启动机器级
-共享虚拟显示屏，并从固定端口 `23682` 发布 noVNC 页面。所有 VNC Task 的窗口都在
+共享虚拟显示屏，并从固定端口 `23682` 发布 noVNC 页面。所有启用远端虚拟显示的 Task 窗口都在
 同一个桌面中；停止其中一个 Task 不会关闭桌面或其他窗口。WebView 不受影响。完整配置见
-[VNC Interface 示例](https://github.com/wh7019025/Harbor/tree/main/examples/vnc_interface)。
+[远端虚拟显示示例](https://github.com/wh7019025/Harbor/tree/main/examples/vnc_interface)。
 
 运行 Task 的机器需要安装 TigerVNC、noVNC、websockify、Openbox 和 util-linux。远端
 Core 还会提供独立的真实桌面入口：显示器图标镜像 `DISPLAY=:0`，立方体图标则打开
-`vnc_interface` Task 所在的共享虚拟桌面。真实桌面额外需要
+启用 `remote_display_virtual` 的 Task 所在的共享虚拟桌面。真实桌面额外需要
 `tigervnc-scraping-server`，但不改变 Task 的运行位置。
 
 ## WebView：程序提供 Web 页面

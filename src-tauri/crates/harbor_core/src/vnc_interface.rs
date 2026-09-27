@@ -367,7 +367,7 @@ for _ in {1..50}; do
   sleep 0.1
 done
 if [[ ! -S "${vnc_socket}" ]]; then
-  echo "shared vnc_interface failed to start TigerVNC on ${DISPLAY}" >&2
+  echo "shared virtual display failed to start TigerVNC on ${DISPLAY}" >&2
   exit 1
 fi
 
@@ -456,7 +456,7 @@ for _ in {1..50}; do
   sleep 0.1
 done
 if [[ ! -f "${ready_file}" ]]; then
-  echo "shared vnc_interface failed to publish noVNC on port ${panel_port}" >&2
+  echo "shared virtual display failed to publish noVNC on port ${panel_port}" >&2
   exit 1
 fi
 
@@ -527,7 +527,7 @@ if [[ "${shared_display_ready}" != true ]]; then
 fi
 
 if [[ "${shared_display_ready}" != true ]]; then
-  echo "vnc_interface failed to start the shared Harbor VNC desktop" >&2
+  echo "remote_display_virtual failed to start the shared Harbor VNC desktop" >&2
   cat "${infrastructure_log}" >&2 || true
   exit 1
 fi
@@ -854,7 +854,7 @@ pub fn validate_dependencies() -> Result<(), String> {
         INSTALL_HINT
     };
     Err(format!(
-        "vnc_interface unavailable; missing remote dependencies: {}; install with: {install_hint}",
+        "remote_display_virtual unavailable; missing remote dependencies: {}; install with: {install_hint}",
         missing.join(", "),
     ))
 }
@@ -929,7 +929,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn vnc_interface_wraps_argv_for_shared_remote_access() {
+    fn remote_virtual_display_wraps_argv_for_shared_remote_access() {
         let definition = TaskCommand {
             argv: vec!["demo".into(), "--flag".into()],
             shell: String::new(),

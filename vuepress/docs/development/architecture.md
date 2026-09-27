@@ -23,7 +23,7 @@ harbor_core
 ├── Core services: VNC + ttyd
 ├── Runtime state
 ├── Log storage
-└── HTTP API v1 (revision 21)
+└── HTTP API v1 (revision 22)
 
 harbor_protocol
 ├── API constants
@@ -77,7 +77,7 @@ Common 是 GUI 与 Core 共同使用的跨平台支持层，负责 Workspace 设
 
 ### 用户程序
 
-用户程序是 Core 托管的普通系统进程，通过 stdout/stderr 输出日志。界面能力分为三类：无 UI 不做额外处理；`webview_interface` 由程序提供 HTTP 页面；`vnc_interface` 由远端 Core 把原生窗口接入当前机器唯一的共享 X11/noVNC 桌面。
+用户程序是 Core 托管的普通系统进程，通过 stdout/stderr 输出日志。界面能力分为三类：无 UI 不做额外处理；`webview_interface` 由程序提供 HTTP 页面；`remote_display_virtual: true` 由远端 Core 把原生窗口接入当前机器唯一的共享 X11/noVNC 桌面。
 
 ## 本地连接
 

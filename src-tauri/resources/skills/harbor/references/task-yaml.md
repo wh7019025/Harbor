@@ -3,7 +3,7 @@
 完整示例（Agent 直接写**新**文件时，`version` 原样设为 `harbor --version` 的输出；修改已有文件且 version 已正确时不必改）：
 
 ```yaml
-version: "0.2.0-preview.6"
+version: "0.2.0"
 uuid: a35b7f18-9d64-4e2a-8f31-6c0d72b94511
 id: demo-ping
 name: Demo Ping
@@ -32,7 +32,7 @@ command:
 或 argv 形式：
 
 ```yaml
-version: "0.2.0-preview.6"
+version: "0.2.0"
 uuid: 7f2a61c4-3e98-4b57-b026-d14c9a835e60
 id: uname-kernel
 name: Uname Kernel
@@ -64,7 +64,7 @@ command:
 | `default_config` | 否 | 默认 config `id`；省略时使用 `configs` 第一项 |
 | `sudo` | 否 | 默认 `false`；为 `true` 时启动需输入密码 |
 | `webview_interface` | 否 | 程序自己提供的 Web 页面列表 |
-| `vnc_interface` | 否 | 远端桌面程序的 VNC 页面；最多一个 |
+| `remote_display_virtual` | 否 | `true` 时将远端原生窗口放入 Harbor 共享虚拟桌面，默认 `false` |
 | `command` | 是 | 执行方式：`argv` **或** `shell` + `script` 二选一 |
 
 ## command
@@ -87,12 +87,12 @@ command:
 
 每个 Task 先按程序本身选择模式，与 local/remote 无关：
 
-- **无 UI**：不配置 `webview_interface` 和 `vnc_interface`。服务、脚本、ROS 2 节点和 headless 程序默认使用这种方式。
+- **无 UI**：不配置 `webview_interface`，并保持 `remote_display_virtual` 为 `false` 或省略。服务、脚本、ROS 2 节点和 headless 程序默认使用这种方式。
 - **WebView**：程序自身提供 HTTP 页面时配置 `webview_interface`。
-- **VNC**：程序只有原生 X11/Qt/GTK 窗口，并且远端需要操作它时配置 `vnc_interface`。
+- **远端虚拟显示**：程序只有原生 X11/Qt/GTK 窗口，并且远端需要操作它时设置 `remote_display_virtual: true`。
 
 远端 Task 不等于图形 Task。没有 UI 的远端程序不要配置 VNC。禁止使用旧字段
-`panel_interface` 和 `force_display`。
+`vnc_interface`、`panel_interface` 和 `force_display`。
 
 ## description
 
@@ -129,16 +129,15 @@ Harbor 启动 Task 时会把单个面板声明注入以下保留环境变量，�
 `robot-panel` 对应 `HARBOR_WEBVIEW_ROBOT_PANEL_INTERFACE_PORT`。多面板 Task 应读取
 带面板名的变量；只有单面板 Task 会获得不带面板名的三个快捷变量。
 
-## vnc_interface
+## remote_display_virtual
 
 可选。用于无法提供 Web 页面的桌面程序，最多声明一个：
 
 ```yaml
-vnc_interface:
-  - panel_name: desktop
+remote_display_virtual: true
 ```
 
-`vnc_interface` 只有 `panel_name`，不配置端口。远端 `harbor_core` 启动后会持续维护
+`remote_display_virtual` 是布尔值，不配置名称或端口。远端 `harbor_core` 启动后会持续维护
 机器级共享 VNC 桌面，所有 VNC Task 只是在该桌面中打开窗口。local workspace 会忽略该入口并直接
 打开原生窗口。remote workspace 会按需启动当前机器唯一的共享 X11、TigerVNC 和
 noVNC 桌面，并统一在 Harbor 固定端口 `23682` 发布页面。所有 VNC Task 共用同一个
@@ -150,11 +149,11 @@ noVNC 桌面，并统一在 Harbor 固定端口 `23682` 发布页面。所有 VN
 桌面启动失败并记录到 Harbor 日志。本地 Workspace 不使用该端口。
 
 远端 Core 还会尝试在 `23683` 提供真实 `DISPLAY=:0` 的画面与交互入口。该入口
-属于机器级功能，不改变 `vnc_interface` Task 仍运行于虚拟桌面的规则。真实桌面要求
+属于机器级功能，不改变启用 `remote_display_virtual` 的 Task 仍运行于虚拟桌面的规则。真实桌面要求
 活动 X11 会话和 `x0vncserver`；缺少时提示安装
 `sudo apt install tigervnc-scraping-server`，但不会影响虚拟桌面。
 
-使用 `vnc_interface` 时不要在 `env` 或启动脚本中设置 `DISPLAY`、`XAUTHORITY`、
+使用 `remote_display_virtual: true` 时不要在 `env` 或启动脚本中设置 `DISPLAY`、`XAUTHORITY`、
 `WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端由 Harbor 设置共享显示
 环境，本地则继承当前图形会话；手写 `DISPLAY=:0` 会绕过远端 VNC。
 
