@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`20`。
+- 当前 `api_revision`：`21`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -103,10 +103,12 @@ UUID 缺失由扫描过程自动生成并写回。UUID 重复时相关 Task/Grou
 | 方法 | 路径 | 请求 | 成功响应 |
 |------|------|------|----------|
 | GET | `/api/v1/workspaces/search-paths` | - | `{ "search_paths": string[] }` |
-| POST | `/api/v1/workspaces/search-paths` | `{ "path" }` | `{ "search_paths": string[] }` |
-| DELETE | `/api/v1/workspaces/search-paths` | `{ "path" }` | `{ "search_paths": string[] }` |
+| POST | `/api/v1/workspaces/search-paths` | `{ "path" }` | `{ "search_paths": string[], "discovery_pending": bool }` |
+| DELETE | `/api/v1/workspaces/search-paths` | `{ "path" }` | `{ "search_paths": string[], "discovery_pending": bool }` |
 | GET | `/api/v1/paths/suggestions` | `?prefix?=` | `{ "query": string, "paths": string[] }`，展开 `~` 后列 core 所在机器目录，最多 50 项 |
 | GET | `/api/v1/paths/config-base` | `?prefix_path?=` | `{ "path" }` |
+
+Search Path 增删会先保存并立即返回。已缓存的路径组合会直接恢复；否则 Task / Group 发现扫描在后台执行，此时 `discovery_pending` 和快照的 `stale` 为 `true`，完成后自动发布新快照。每个 Search Path 最多向下扫描 4 层。
 
 示例：
 

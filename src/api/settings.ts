@@ -99,6 +99,8 @@ export function disconnectRemoteWorkspaceCore() {
 
 export interface HarborCopyProgress {
   active: boolean;
+  artifact: string;
+  phase: string;
   percent: number;
   transferred: number;
   total: number;

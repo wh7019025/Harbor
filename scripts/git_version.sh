@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_VERSION="0.2.0-preview.6"
+BASE_VERSION="0.2.0-preview.7"
 REQUIRE_TAG=false
 
 if [[ "${1:-}" == "--require-tag" ]]; then

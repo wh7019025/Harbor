@@ -7,67 +7,41 @@ on:
   pull_request:
   workflow_dispatch:
 
-jobs:
-  build-linux-deb:
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+permissions:
+  contents: read
 
+jobs:
+  build-linux-runtimes:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            pkg-config \
-            build-essential
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: lts/*
-          cache: npm
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-
-      - name: Install frontend dependencies
-        run: npm ci
-
       - name: Resolve Git version
         shell: bash
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            version="$(scripts/git_version.sh --require-tag)"
-          else
-            version="$(scripts/git_version.sh)"
-          fi
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then version="$(scripts/git_version.sh --require-tag)"; else version="$(scripts/git_version.sh)"; fi
           printf 'HARBOR_VERSION=%s\n' "$version" >>"$GITHUB_ENV"
-          printf '{"version":"%s"}\n' "$version" >src-tauri/tauri.git.conf.json
           printf 'Harbor version %s\n' "$version"
-
-      - name: Build managed runtimes
-        run: npm run core:release
-
+      - name: Build managed Linux runtimes
+        run: bash scripts/build_core_release.sh
       - name: Upload managed Linux runtimes
         uses: actions/upload-artifact@v4
         with:
           name: harbor-linux-x86_64-runtimes
           if-no-files-found: error
           path: |
+            src-tauri/target/release/harbor_core
+            src-tauri/target/release/harbor_core.sha256
+            src-tauri/target/release/harbor_core-builds/*
+            src-tauri/target/release/harbor_ttyd
+            src-tauri/target/release/harbor_ttyd.sha256
             src-tauri/target/release/harbor_core-runtime-linux-x86_64.tar.gz
             src-tauri/target/release/harbor_core-runtime-linux-x86_64.tar.gz.sha256
             src-tauri/target/release/harbor_core-runtime-linux-x86_64.tar.gz.env
@@ -75,29 +49,166 @@ jobs:
             src-tauri/target/release/harbor_ttyd-runtime-linux-x86_64.tar.gz.sha256
             src-tauri/target/release/harbor_ttyd-runtime-linux-x86_64.tar.gz.env
 
-      - name: Build Harbor (.deb)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+  build-linux:
+    needs: build-linux-runtimes
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config build-essential
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Download managed Linux runtimes
+        uses: actions/download-artifact@v5
+        with:
+          name: harbor-linux-x86_64-runtimes
+          path: src-tauri/target/release
+      - name: Restore Linux runtime permissions
+        run: |
+          chmod 755 src-tauri/target/release/harbor_core
+          chmod 755 src-tauri/target/release/harbor_ttyd
+          chmod 755 src-tauri/target/release/harbor_core-builds/*
+      - name: Resolve Git version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then version="$(scripts/git_version.sh --require-tag)"; else version="$(scripts/git_version.sh)"; fi
+          printf 'HARBOR_VERSION=%s\n' "$version" >>"$GITHUB_ENV"
+          printf '{"version":"%s"}\n' "$version" >src-tauri/tauri.git.conf.json
+      - name: Build Linux package
         uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: --bundles deb --config src-tauri/tauri.git.conf.json
-          uploadArtifacts: true
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-package-linux-amd64
+          if-no-files-found: error
+          path: src-tauri/target/release/bundle/deb/*.deb
 
-      - name: Build Harbor and publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build-windows:
+    needs: build-linux-runtimes
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
         with:
-          args: --bundles deb --config src-tauri/tauri.git.conf.json
-          uploadArtifacts: true
-          tagName: ${{ github.ref_name }}
-          releaseName: Harbor ${{ github.ref_name }}
-          releaseBody: |
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Download managed Linux runtimes
+        uses: actions/download-artifact@v5
+        with:
+          name: harbor-linux-x86_64-runtimes
+          path: src-tauri/target/release
+      - name: Resolve Git version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then version="$(scripts/git_version.sh --require-tag)"; else version="$(scripts/git_version.sh)"; fi
+          printf 'HARBOR_VERSION=%s\n' "$version" >>"$GITHUB_ENV"
+          printf '{"version":"%s"}\n' "$version" >src-tauri/tauri.git.conf.json
+      - name: Build Windows package
+        uses: tauri-apps/tauri-action@v1
+        with:
+          args: --bundles nsis --config src-tauri/tauri.git.conf.json
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-package-windows-x86_64
+          if-no-files-found: error
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  build-macos-arm64:
+    needs: build-linux-runtimes
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Download managed Linux runtimes
+        uses: actions/download-artifact@v5
+        with:
+          name: harbor-linux-x86_64-runtimes
+          path: src-tauri/target/release
+      - name: Resolve Git version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then version="$(scripts/git_version.sh --require-tag)"; else version="$(scripts/git_version.sh)"; fi
+          printf 'HARBOR_VERSION=%s\n' "$version" >>"$GITHUB_ENV"
+          printf '{"version":"%s"}\n' "$version" >src-tauri/tauri.git.conf.json
+      - name: Build macOS ARM64 package
+        uses: tauri-apps/tauri-action@v1
+        with:
+          args: --bundles dmg --config src-tauri/tauri.git.conf.json
+      - name: Upload macOS ARM64 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-package-macos-aarch64
+          if-no-files-found: error
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows, build-macos-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v5
+        with:
+          pattern: harbor-package-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Harbor ${{ github.ref_name }}
+          body: |
             ## 安装
 
-            在下方 **Assets** 下载 Linux amd64 的 `.deb` 安装包并安装。
-          generateReleaseNotes: true
-          releaseDraft: false
+            - Linux x86_64：下载 `.deb`
+            - Windows x86_64：下载 `-setup.exe`
+            - macOS Apple Silicon：下载 `.dmg`
+
+            Windows 与 macOS 版本仅用于连接远端 Linux Harbor Core，不提供本地 Task 运行能力。
+          files: release-assets/*
+          generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}

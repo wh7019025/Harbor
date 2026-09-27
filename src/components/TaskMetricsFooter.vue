@@ -63,8 +63,9 @@ const coreConnection = computed(() => {
   const status = coreStatus.value;
   const target = connectionTarget(status?.listen_url);
   if (deployProgress.value?.active) {
+    const artifact = deployProgress.value.artifact === "ttyd" ? "ttyd" : "harbor_core";
     return {
-      text: `正在连接 ${target} · 部署 ${deployProgress.value.percent}%`,
+      text: `正在连接 ${target} · 部署 ${artifact} ${deployProgress.value.percent}%`,
       tone: "text-[var(--accent)]",
       dot: "bg-[var(--accent)] animate-pulse",
     };

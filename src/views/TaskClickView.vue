@@ -89,6 +89,7 @@ import {
   switchWorkspace,
   updateWorkspace,
   verifyWorkspaceSsh as invokeVerifyWorkspaceSsh,
+  type HarborCopyProgress,
   type Settings as HarborSettings,
   type WorkspaceMode,
   type WorkspaceSsh,
@@ -119,7 +120,14 @@ const pathSuggestionsLoading = ref(false);
 const pathSuggestionListRef = ref<HTMLElement | null>(null);
 const error = ref("");
 const notice = ref("");
-const copyProgress = ref({ active: false, percent: 0, transferred: 0, total: 0 });
+const copyProgress = ref<HarborCopyProgress>({
+  active: false,
+  artifact: "",
+  phase: "",
+  percent: 0,
+  transferred: 0,
+  total: 0,
+});
 const pending = ref<{ key: string; label: string } | null>(null);
 const selectedLog = ref<string | null>(null);
 const harborLogOpen = ref(true);
@@ -177,13 +185,19 @@ let pollingHarborLog = false;
 let pollingLog = false;
 let copyFlashTimer: number | null = null;
 let pathSuggestTimer: number | null = null;
+let searchPathRefreshRevision = 0;
 
 const copyNoticeDismissed = ref(false);
 const showCopyNotice = computed(
-  () =>
-    !copyNoticeDismissed.value &&
-    (copyProgress.value.active || isCoreCopyNotice(notice.value)),
+  () => !copyNoticeDismissed.value && copyProgress.value.active,
 );
+const copyNoticeText = computed(() => {
+  const artifact = copyProgress.value.artifact === "ttyd" ? "远端终端组件 ttyd" : "harbor_core";
+  if (copyProgress.value.phase === "uploading") return `正在上传 ${artifact} 到远端…`;
+  if (copyProgress.value.phase === "installing") return `正在校验并安装 ${artifact}…`;
+  if (copyProgress.value.phase === "ready") return `${artifact} 已安装，正在完成连接…`;
+  return `正在部署 ${artifact}…`;
+});
 const copyBarPercent = computed(() =>
   copyProgress.value.total > 0 || copyProgress.value.percent > 0
     ? copyProgress.value.percent
@@ -231,7 +245,7 @@ const listedLogs = computed(() =>
     })
     .slice(0, 50),
 );
-const searchPaths = computed(() => snapshot.value?.search_paths ?? []);
+const searchPaths = computed(() => snapshot.value?.search_paths ?? currentWorkspace()?.search_paths ?? []);
 const workspaceOptions = computed(() =>
   (settings.value?.workspaces ?? []).map((workspace) => ({
     value: workspace.id,
@@ -251,6 +265,9 @@ const workspaceSshCanVerify = computed(() => {
   if (workspaceSsh.value.auth === "sshpass" && !workspaceSsh.value.password) return false;
   return true;
 });
+const searchPathUpdating = computed(() =>
+  pending.value?.key === "add-search-path" || pending.value?.key.startsWith("remove-search-path-") === true,
+);
 const discoveredSummary = computed(() => {
   const tasks = snapshot.value?.discovered_task_dirs.length ?? 0;
   const groups = snapshot.value?.discovered_group_dirs.length ?? 0;
@@ -487,12 +504,6 @@ async function pollCopyProgress() {
       copyNoticeDismissed.value = false;
     }
     copyProgress.value = next;
-    if (wasActive && !next.active && isCoreCopyNotice(notice.value)) {
-      notice.value = "";
-    }
-    if (next.active && !copyNoticeDismissed.value && !notice.value) {
-      notice.value = "正在复制匹配的 harbor_core 到远端…";
-    }
   } catch {
     // Keep the last known progress if a poll fails.
   }
@@ -507,21 +518,10 @@ function startCopyProgressPoll() {
 }
 
 function dismissCopyNotice() {
-  notice.value = "";
   copyNoticeDismissed.value = true;
 }
 
-function isCoreCopyNotice(message: string) {
-  return message.includes("copying harbor_core to remote") || message.includes("正在复制匹配的 harbor_core 到远端");
-}
-
 function showFailure(message: string, options: { preserveError?: boolean } = {}) {
-  if (isCoreCopyNotice(message) || copyProgress.value.active) {
-    copyNoticeDismissed.value = false;
-    notice.value = isCoreCopyNotice(message) ? message : notice.value || "正在复制匹配的 harbor_core 到远端…";
-    error.value = "";
-    return;
-  }
   if (!copyProgress.value.active) {
     notice.value = "";
   }
@@ -587,10 +587,11 @@ async function submitSearchPath() {
   const path = newSearchPath.value.trim();
   if (!path) return;
   pathSuggestionsOpen.value = false;
-  await run("add-search-path", "添加搜索路径", async () => {
-    await addSearchPath(path);
+  await updateSearchPaths("add-search-path", "添加搜索路径", async () => {
+    const nextSettings = await addSearchPath(path);
     newSearchPath.value = "";
     pathSuggestions.value = [];
+    return nextSettings;
   });
 }
 
@@ -689,7 +690,65 @@ function onSearchPathKeydown(event: KeyboardEvent) {
 }
 
 async function dropSearchPath(path: string) {
-  await run(`remove-search-path-${path}`, "移除搜索路径", () => removeSearchPath(path).then(() => undefined));
+  await updateSearchPaths(
+    `remove-search-path-${path}`,
+    "移除搜索路径",
+    () => removeSearchPath(path),
+  );
+}
+
+function applySearchPathSettings(nextSettings: HarborSettings) {
+  settings.value = nextSettings;
+  const nextPaths = nextSettings.workspaces.find(
+    (workspace) => workspace.id === nextSettings.current_workspace,
+  )?.search_paths ?? [];
+  if (snapshot.value) {
+    snapshot.value = {
+      ...snapshot.value,
+      stale: true,
+      search_paths: [...nextPaths],
+    };
+  }
+}
+
+function scheduleSearchPathSnapshotRefresh() {
+  const revision = ++searchPathRefreshRevision;
+  void (async () => {
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 200));
+      if (revision !== searchPathRefreshRevision) return;
+      try {
+        const nextSnapshot = await fetchTaskCard();
+        if (revision !== searchPathRefreshRevision) return;
+        snapshot.value = nextSnapshot;
+        syncTaskConfigSelections(nextSnapshot.tasks);
+        if (!nextSnapshot.stale) {
+          notice.value = "搜索路径及 Task / Group 已刷新";
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
+  })();
+}
+
+async function updateSearchPaths(
+  key: string,
+  label: string,
+  action: () => Promise<HarborSettings>,
+) {
+  pending.value = { key, label };
+  error.value = "";
+  try {
+    applySearchPathSettings(await action());
+    notice.value = "搜索路径已更新，正在后台刷新 Task / Group";
+    scheduleSearchPathSnapshotRefresh();
+  } catch (err) {
+    showFailure(failureMessage(err));
+  } finally {
+    pending.value = null;
+  }
 }
 
 async function resetUuid(path: string) {
@@ -1358,6 +1417,7 @@ watch(pathsPanelOpen, (open) => {
 });
 
 onBeforeUnmount(() => {
+  searchPathRefreshRevision += 1;
   if (timer != null) window.clearInterval(timer);
   if (logTimer != null) window.clearInterval(logTimer);
   if (copyFlashTimer != null) window.clearTimeout(copyFlashTimer);
@@ -1381,7 +1441,7 @@ onBeforeUnmount(() => {
         <div class="flex items-center justify-between gap-3">
           <span class="flex min-w-0 items-center gap-2">
             <LoaderCircle class="h-3.5 w-3.5 shrink-0 animate-spin" />
-            <span class="min-w-0 truncate">{{ notice || "正在复制匹配的 harbor_core 到远端…" }}</span>
+            <span class="min-w-0 truncate">{{ copyNoticeText }}</span>
             <span v-if="copyProgress.total > 0" class="shrink-0 tabular-nums">
               {{ copyProgress.percent }}%
               · {{ formatCopyBytes(copyProgress.transferred) }} / {{ formatCopyBytes(copyProgress.total) }}
@@ -1586,7 +1646,7 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-2">
             <span class="kicker">{{ isRemoteWorkspace ? "remote paths" : "search paths" }}</span>
             <span class="readout text-[10px] text-[var(--faint)]">
-              ≤5 layers · harbor_taskcfg tasks {{ discoveredSummary.tasks }} · groups {{ discoveredSummary.groups }}
+              ≤4 layers · harbor_taskcfg tasks {{ discoveredSummary.tasks }} · groups {{ discoveredSummary.groups }}
             </span>
           </div>
           <button class="btn !px-1.5 !py-1" type="button" title="close" @click="pathsPanelOpen = false">
@@ -1608,7 +1668,7 @@ onBeforeUnmount(() => {
               class="btn !px-2 !py-1"
               type="button"
               title="add search path"
-              :disabled="isPending('add-search-path') || !newSearchPath.trim()"
+              :disabled="searchPathUpdating || !newSearchPath.trim()"
               @click="submitSearchPath"
             >
               <Plus class="h-3.5 w-3.5" />
@@ -1650,7 +1710,7 @@ onBeforeUnmount(() => {
                 class="btn !border-0 !bg-transparent !px-1 !py-0.5"
                 type="button"
                 title="remove"
-                :disabled="isPending(`remove-search-path-${path}`)"
+                :disabled="searchPathUpdating"
                 @click="dropSearchPath(path)"
               >
                 <Trash2 class="h-3 w-3 text-[var(--faint)]" />

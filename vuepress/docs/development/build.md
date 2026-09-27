@@ -10,7 +10,7 @@ createTime: 2026/09/20 00:44:43
 Harbor 的有效版本只由 Git 管理。发布提交使用精确标签，例如：
 
 ```bash
-git tag -a v0.2.0-preview.6 -m "Harbor 0.2.0 preview.6"
+git tag -a v0.2.0-preview.7 -m "Harbor 0.2.0 preview.7"
 ```
 
 查看当前构建将使用的版本：
@@ -19,10 +19,10 @@ git tag -a v0.2.0-preview.6 -m "Harbor 0.2.0 preview.6"
 scripts/git_version.sh
 ```
 
-位于 Tag 上的干净提交输出 `0.2.0-preview.6`。Tag 之后的开发提交输出类似
-`0.2.0-preview.6+3.g4d65765`；有未提交改动时再附加 `.dirty`。
+位于 Tag 上的干净提交输出 `0.2.0-preview.7`。Tag 之后的开发提交输出类似
+`0.2.0-preview.7+3.g4d65765`；有未提交改动时再附加 `.dirty`。
 
-`package.json`、Cargo manifest 与 `tauri.conf.json` 中统一使用 `0.0.0` 占位，不再保存或人工同步应用版本。源码包脱离 Git 时，构建脚本回退到基线版本 `0.2.0-preview.6`。
+`package.json`、Cargo manifest 与 `tauri.conf.json` 中统一使用 `0.0.0` 占位，不再保存或人工同步应用版本。源码包脱离 Git 时，构建脚本回退到基线版本 `0.2.0-preview.7`。
 
 ## 1. 前端检查
 
@@ -47,8 +47,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run core:release
 ```
 
-该命令构建 release `harbor_core`，同时固化构建机上的 `ttyd`，并为两个二进制生成
-SHA-256。GUI 构建时读取并固化这些哈希，用于本机 Core 管理和远端终端自动部署。
+该命令构建 release `harbor_core`，同时固化 `ttyd`，并预先生成包含 Linux 二进制、
+动态运行库和 loader 的 Runtime Bundle。GUI 构建时读取并固化 Bundle 与二进制的
+SHA-256，用于本机 Core 管理和跨平台远端部署。
 
 构建脚本会下载并校验固定版本的官方静态 `ttyd`，也可以通过 `HARBOR_TTYD_BIN` 指定
 另一份静态二进制。最终 Debian 包会携带这份 `ttyd`；构建机和使用 Harbor 的远端机器
@@ -91,14 +92,20 @@ npm run docs:build
 
 ## 7. CI 与 Release
 
-`.github/workflows/build.yml` 在以下情况构建 Linux `.deb`：
+`.github/workflows/build.yml` 在以下情况构建三平台安装包：
 
 - 推送到 `main`。
 - 创建或更新 Pull Request。
 - 手动触发 workflow。
 
-普通构建把安装包上传为 workflow artifact。推送 `v*` tag 时，GitHub Actions 还会创建对应 Release，附加 `.deb` 安装包，并根据上一 Tag 自动生成版本变更说明。
+Linux Job 首先生成唯一的 x86_64 Linux Runtime Bundle。随后 Linux、Windows 和 ARM64
+macOS Job 下载同一份 Bundle，分别生成 `.deb`、NSIS `-setup.exe` 和 `.dmg`。Windows
+与 macOS 安装包只提供远端模式，不包含本地 Core 运行能力。
 
-Release workflow 要求当前提交存在精确的 `v*` Tag，并拒绝带未提交改动的发布构建。Rust GUI、`harbor_core`、Tauri Bundle 与 `.deb` 文件名使用同一个 Git 版本。
+普通构建把三个安装包上传为 workflow artifact。推送 `v*` Tag 时，统一发布 Job 会在
+所有平台构建成功后创建对应 Release，并根据上一 Tag 自动生成版本变更说明。
+
+Release workflow 要求当前提交存在精确的 `v*` Tag。Rust GUI、`harbor_core`、Linux
+Runtime Bundle 与三个平台的安装包使用同一个 Git 版本。
 
 文档由 `.github/workflows/docs.yml` 独立构建并部署到 GitHub Pages。修改 `vuepress/**`、根 `package.json` 或 lockfile 时会触发文档 workflow。

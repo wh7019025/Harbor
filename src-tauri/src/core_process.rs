@@ -46,6 +46,8 @@ pub fn set_artifact_resource_dir(path: PathBuf) {
 #[derive(Clone, Debug, Serialize)]
 pub struct DeployProgress {
     pub active: bool,
+    pub artifact: String,
+    pub phase: String,
     pub percent: u8,
     pub transferred: u64,
     pub total: u64,
@@ -55,6 +57,8 @@ impl Default for DeployProgress {
     fn default() -> Self {
         Self {
             active: false,
+            artifact: String::new(),
+            phase: String::new(),
             percent: 0,
             transferred: 0,
             total: 0,
@@ -75,12 +79,14 @@ fn remote_deploy_gate() -> &'static Mutex<RemoteDeployGate> {
     })
 }
 
-fn set_deploy_progress(percent: u8, transferred: u64, total: u64) {
+fn set_deploy_progress(artifact: &str, phase: &str, percent: u8, transferred: u64, total: u64) {
     let mut gate = remote_deploy_gate()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     gate.progress = DeployProgress {
         active: true,
+        artifact: artifact.to_string(),
+        phase: phase.to_string(),
         percent: percent.min(100),
         transferred,
         total,
@@ -245,19 +251,33 @@ fn send_remote_runtime(
     let remote_archive = format!("\"$HOME/{dir}/runtime.tar.gz.new\"");
 
     // --- 阶段 1：发送压缩部署包 ---
-    set_deploy_progress(2, 0, total);
+    harbor_support::app_log::gui(&format!(
+        "remote deploy {binary_name}: uploading {total} bytes to {}",
+        ssh.host.trim()
+    ));
+    set_deploy_progress(binary_name, "uploading", 2, 0, total);
     ssh_run(ssh, &format!("mkdir -p \"$HOME/{dir}\""))?;
-    ssh_send_file(ssh, archive, remote_archive.as_str(), |sent, _| {
+    let upload_result = ssh_send_file(ssh, archive, remote_archive.as_str(), |sent, _| {
         let percent = if total == 0 {
             2
         } else {
             (2 + sent.saturating_mul(88) / total).min(90) as u8
         };
-        set_deploy_progress(percent, sent, total);
-    })?;
+        set_deploy_progress(binary_name, "uploading", percent, sent, total);
+    });
+    if let Err(error) = upload_result {
+        harbor_support::app_log::gui(&format!(
+            "remote deploy {binary_name}: upload failed: {error}"
+        ));
+        return Err(error);
+    }
 
     // --- 阶段 2：远端解压并校验二进制 ---
-    ssh_run(
+    harbor_support::app_log::gui(&format!(
+        "remote deploy {binary_name}: upload complete; verifying and installing"
+    ));
+    set_deploy_progress(binary_name, "installing", 92, total, total);
+    let install_result = ssh_run(
         ssh,
         &format!(
             "test \"$(sha256sum {remote_archive} | cut -d ' ' -f 1)\" = {} && tar -xzf {remote_archive} -C \"$HOME/{dir}\" && rm -f {remote_archive} && chmod +x \"$HOME/{dir}/{binary_name}\" && test \"$(sha256sum \"$HOME/{dir}/{binary_name}\" | cut -d ' ' -f 1)\" = {} && printf '%s\\n' {} > \"$HOME/{dir}/.runtime-sha256\"",
@@ -265,8 +285,15 @@ fn send_remote_runtime(
             shell_single_quote(binary_hash),
             shell_single_quote(runtime_hash),
         ),
-    )?;
-    set_deploy_progress(90, total, total);
+    );
+    if let Err(error) = install_result {
+        harbor_support::app_log::gui(&format!(
+            "remote deploy {binary_name}: install failed: {error}"
+        ));
+        return Err(error);
+    }
+    set_deploy_progress(binary_name, "ready", 100, total, total);
+    harbor_support::app_log::gui(&format!("remote deploy {binary_name}: install complete"));
     Ok(())
 }
 
@@ -294,14 +321,16 @@ pub fn ensure_remote_ttyd_runtime(ssh: &WorkspaceSsh) -> Result<(), String> {
     let runtime_matches = remote_state.next() == Some(EXPECTED_TTYD_RUNTIME_SHA256);
     if !binary_matches || !runtime_matches {
         harbor_support::app_log::gui("workspace terminal 2/3: deploying managed ttyd");
-        send_remote_runtime(
+        let deploy_result = send_remote_runtime(
             ssh,
             archive.as_path(),
             dir.as_str(),
             EXPECTED_TTYD_RUNTIME_SHA256,
             "ttyd",
             EXPECTED_TTYD_SHA256,
-        )?;
+        );
+        finish_deploy_progress();
+        deploy_result?;
     } else {
         harbor_support::app_log::gui("workspace terminal 2/3: reusing managed ttyd");
     }

@@ -236,9 +236,12 @@ impl TaskCardService {
     }
 
     pub fn research(&self) -> ResearchResult {
+        // Stage 1: capture one immutable set of roots for this discovery pass.
         let roots = self.search_paths.lock().clone();
         let mut task_dirs = Vec::new();
         let mut group_dirs = Vec::new();
+
+        // Stage 2: discover configuration directories and normalize their paths.
         for root in &roots {
             if !root.is_dir() {
                 continue;
@@ -260,6 +263,8 @@ impl TaskCardService {
         task_dirs.dedup();
         group_dirs.sort();
         group_dirs.dedup();
+
+        // Stage 3: migrate discovered YAML files before publishing the result.
         for dir in task_dirs.iter().chain(group_dirs.iter()) {
             let mut files = Vec::new();
             collect_yaml_files(dir, &mut files);
@@ -272,8 +277,12 @@ impl TaskCardService {
                 }
             }
         }
-        *self.discovered_task_dirs.lock() = task_dirs.clone();
-        *self.discovered_group_dirs.lock() = group_dirs.clone();
+
+        // Stage 4: cache every completed pass, but only publish the newest roots.
+        if *self.search_paths.lock() == roots {
+            *self.discovered_task_dirs.lock() = task_dirs.clone();
+            *self.discovered_group_dirs.lock() = group_dirs.clone();
+        }
         self.discovery_cache.lock().insert(
             roots.clone(),
             DiscoveryCache {
@@ -1618,7 +1627,7 @@ fn absolutize(path: &Path) -> String {
         .to_string()
 }
 
-const SEARCH_MAX_DEPTH: u32 = 5;
+const SEARCH_MAX_DEPTH: u32 = 4;
 const TASK_CFG_DIR: &str = "harbor_taskcfg";
 
 fn walk_named_dirs(root: &Path, name: &str, out: &mut Vec<PathBuf>, depth_left: u32) {
@@ -3563,19 +3572,19 @@ tasks:
     }
 
     #[test]
-    fn research_stops_at_five_directory_layers() {
+    fn research_stops_at_four_directory_layers() {
         let root =
             std::env::temp_dir().join(format!("ucgraph-taskcard-depth-{}", std::process::id()));
         let search = root.join("workspace");
         if root.exists() {
             fs::remove_dir_all(&root).unwrap();
         }
-        // 5 layers: a/b/c/d/e/harbor_taskcfg  → found
+        // 4 layers: a/b/c/d/harbor_taskcfg  → found
+        fs::create_dir_all(search.join("a/b/c/d/harbor_taskcfg/tasks")).unwrap();
+        // 5 layers: a/b/c/d/e/harbor_taskcfg → skipped
         fs::create_dir_all(search.join("a/b/c/d/e/harbor_taskcfg/tasks")).unwrap();
-        // 6 layers: a/b/c/d/e/f/harbor_taskcfg → skipped
-        fs::create_dir_all(search.join("a/b/c/d/e/f/harbor_taskcfg/tasks")).unwrap();
         fs::write(
-            search.join("a/b/c/d/e/harbor_taskcfg/tasks/near.yaml"),
+            search.join("a/b/c/d/harbor_taskcfg/tasks/near.yaml"),
             r#"version: 1
 id: near-task
 workdir: /tmp
@@ -3585,7 +3594,7 @@ command:
         )
         .unwrap();
         fs::write(
-            search.join("a/b/c/d/e/f/harbor_taskcfg/tasks/far.yaml"),
+            search.join("a/b/c/d/e/harbor_taskcfg/tasks/far.yaml"),
             r#"version: 1
 id: far-task
 workdir: /tmp

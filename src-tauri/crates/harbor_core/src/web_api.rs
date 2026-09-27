@@ -79,6 +79,7 @@ pub struct WebApiState {
     pub terminal: Arc<Mutex<TerminalService>>,
     metrics: Arc<Mutex<SystemMetricsSampler>>,
     snapshot_cache: Arc<Mutex<SnapshotCache>>,
+    discovery_refresh: Arc<Mutex<DiscoveryRefresh>>,
     pub localhost_only: bool,
     pub remote_runtime: bool,
     pub mobile_enabled: bool,
@@ -89,6 +90,12 @@ pub struct WebApiState {
 struct SnapshotCache {
     snapshot: TaskCardSnapshot,
     refreshed_at: Instant,
+    refreshing: bool,
+}
+
+#[derive(Default)]
+struct DiscoveryRefresh {
+    requested_revision: u64,
     refreshing: bool,
 }
 
@@ -119,6 +126,7 @@ impl WebApiState {
                 refreshed_at: Instant::now(),
                 refreshing: false,
             })),
+            discovery_refresh: Arc::new(Mutex::new(DiscoveryRefresh::default())),
             localhost_only,
             remote_runtime,
             mobile_enabled,
@@ -832,6 +840,7 @@ async fn add_search_path(
     State(state): State<WebApiState>,
     payload: Result<Json<PathAction>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
+    let started = Instant::now();
     let action = json_path_action(payload)?;
     let path = required_text(action.path.as_deref(), "path")?;
     let mut settings = state.settings.lock().clone();
@@ -839,23 +848,26 @@ async fn add_search_path(
     if !state.remote_runtime {
         save_settings(&settings).map_err(map_service_error)?;
     }
-    let service = state.taskcard.lock();
-    service.set_search_paths(settings.current_search_paths().map_err(map_service_error)?);
-    service.research();
-    drop(service);
+    let paths = settings.current_search_paths().map_err(map_service_error)?;
     let search_paths = settings
         .current()
         .map_err(map_service_error)?
         .search_paths
         .clone();
     *state.settings.lock() = settings;
-    Ok(Json(json!({ "search_paths": search_paths })))
+    let discovery_pending = activate_or_refresh_search_paths(&state, paths, &search_paths);
+    log_search_path_update("add", path, search_paths.len(), discovery_pending, started);
+    Ok(Json(json!({
+        "search_paths": search_paths,
+        "discovery_pending": discovery_pending,
+    })))
 }
 
 async fn remove_search_path(
     State(state): State<WebApiState>,
     payload: Result<Json<PathAction>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
+    let started = Instant::now();
     let action = json_path_action(payload)?;
     let path = required_text(action.path.as_deref(), "path")?;
     let mut settings = state.settings.lock().clone();
@@ -863,17 +875,25 @@ async fn remove_search_path(
     if !state.remote_runtime {
         save_settings(&settings).map_err(map_service_error)?;
     }
-    let service = state.taskcard.lock();
-    service.set_search_paths(settings.current_search_paths().map_err(map_service_error)?);
-    service.research();
-    drop(service);
+    let paths = settings.current_search_paths().map_err(map_service_error)?;
     let search_paths = settings
         .current()
         .map_err(map_service_error)?
         .search_paths
         .clone();
     *state.settings.lock() = settings;
-    Ok(Json(json!({ "search_paths": search_paths })))
+    let discovery_pending = activate_or_refresh_search_paths(&state, paths, &search_paths);
+    log_search_path_update(
+        "remove",
+        path,
+        search_paths.len(),
+        discovery_pending,
+        started,
+    );
+    Ok(Json(json!({
+        "search_paths": search_paths,
+        "discovery_pending": discovery_pending,
+    })))
 }
 
 async fn create_task_yaml(
@@ -1068,15 +1088,16 @@ fn snapshot(state: &WebApiState) -> crate::taskcard::TaskCardSnapshot {
 }
 
 fn cached_snapshot(state: &WebApiState) -> TaskCardSnapshot {
-    let (mut snapshot, stale) = {
+    let (mut snapshot, snapshot_stale) = {
         let cache = state.snapshot_cache.lock();
         (
             cache.snapshot.clone(),
-            cache.refreshed_at.elapsed() >= SNAPSHOT_STALE_AFTER,
+            cache.refreshing || cache.refreshed_at.elapsed() >= SNAPSHOT_STALE_AFTER,
         )
     };
+    let stale = snapshot_stale || state.discovery_refresh.lock().refreshing;
     snapshot.stale = stale;
-    if stale {
+    if snapshot_stale {
         request_snapshot_refresh(state);
     }
     snapshot
@@ -1090,16 +1111,146 @@ fn request_snapshot_refresh(state: &WebApiState) {
     cache.refreshing = true;
     drop(cache);
 
-    let service = state.taskcard.lock().clone();
-    let snapshot_cache = state.snapshot_cache.clone();
+    let state = state.clone();
     tokio::spawn(async move {
-        let refreshed = tokio::task::spawn_blocking(move || service.snapshot()).await;
-        let mut cache = snapshot_cache.lock();
-        if let Ok(snapshot) = refreshed {
-            cache.snapshot = snapshot;
-            cache.refreshed_at = Instant::now();
+        rebuild_snapshot_cache(state).await;
+    });
+}
+
+async fn refresh_snapshot_cache_when_available(state: WebApiState) {
+    // Stage 1: serialize snapshot rebuilds without blocking API responses.
+    loop {
+        let acquired = {
+            let mut cache = state.snapshot_cache.lock();
+            if cache.refreshing {
+                false
+            } else {
+                cache.refreshing = true;
+                true
+            }
+        };
+        if acquired {
+            break;
         }
-        cache.refreshing = false;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    rebuild_snapshot_cache(state).await;
+}
+
+async fn rebuild_snapshot_cache(state: WebApiState) {
+    // Stage 2: rebuild off the async runtime, then publish one complete snapshot.
+    let service = state.taskcard.lock().clone();
+    let refreshed = tokio::task::spawn_blocking(move || service.snapshot()).await;
+    let mut cache = state.snapshot_cache.lock();
+    if let Ok(snapshot) = refreshed {
+        cache.snapshot = snapshot;
+        cache.refreshed_at = Instant::now();
+    }
+    cache.refreshing = false;
+}
+
+fn update_cached_search_paths(state: &WebApiState, search_paths: &[String]) {
+    state.snapshot_cache.lock().snapshot.search_paths = search_paths.to_vec();
+}
+
+fn log_search_path_update(
+    action: &str,
+    path: &str,
+    path_count: usize,
+    discovery_pending: bool,
+    started: Instant,
+) {
+    crate::app_log::core(&format!(
+        "search path {action} accepted path={path:?} paths={path_count} discovery_pending={discovery_pending} response_ms={}",
+        started.elapsed().as_millis()
+    ));
+}
+
+fn activate_or_refresh_search_paths(
+    state: &WebApiState,
+    paths: Vec<std::path::PathBuf>,
+    search_paths: &[String],
+) -> bool {
+    // Stage 1: activate a completed discovery result when this path set is known.
+    let discovery_cached = state.taskcard.lock().activate_search_paths(paths);
+    update_cached_search_paths(state, search_paths);
+
+    // Stage 2: publish cached results immediately or scan a new path set in background.
+    if discovery_cached {
+        request_snapshot_refresh(state);
+    } else {
+        request_discovery_refresh(state);
+    }
+    !discovery_cached
+}
+
+fn request_discovery_refresh(state: &WebApiState) {
+    let (revision, should_start) = {
+        let mut refresh = state.discovery_refresh.lock();
+        refresh.requested_revision = refresh.requested_revision.wrapping_add(1);
+        let should_start = if refresh.refreshing {
+            false
+        } else {
+            refresh.refreshing = true;
+            true
+        };
+        (refresh.requested_revision, should_start)
+    };
+    crate::app_log::core(&format!(
+        "discovery queued revision={revision} worker_started={should_start}"
+    ));
+    if !should_start {
+        return;
+    }
+
+    let state = state.clone();
+    tokio::spawn(async move {
+        loop {
+            // Stage 1: scan the latest requested roots on a blocking worker.
+            let revision = state.discovery_refresh.lock().requested_revision;
+            let service = state.taskcard.lock().clone();
+            let path_count = service.search_paths().len();
+            let started = Instant::now();
+            crate::app_log::core(&format!(
+                "discovery started revision={revision} paths={path_count}"
+            ));
+            let result = tokio::task::spawn_blocking(move || service.research()).await;
+            match &result {
+                Ok(result) => crate::app_log::core(&format!(
+                    "discovery scanned revision={revision} task_dirs={} group_dirs={} elapsed_ms={}",
+                    result.discovered_task_dirs.len(),
+                    result.discovered_group_dirs.len(),
+                    started.elapsed().as_millis()
+                )),
+                Err(error) => crate::app_log::core(&format!(
+                    "discovery worker failed revision={revision} elapsed_ms={} error={error}",
+                    started.elapsed().as_millis()
+                )),
+            }
+
+            // Stage 2: discard superseded passes and rescan the newest roots.
+            let requested_revision = state.discovery_refresh.lock().requested_revision;
+            if requested_revision != revision {
+                crate::app_log::core(&format!(
+                    "discovery superseded revision={revision} next_revision={requested_revision}"
+                ));
+                continue;
+            }
+
+            // Stage 3: publish a fresh snapshot, then mark discovery complete.
+            let publish_started = Instant::now();
+            refresh_snapshot_cache_when_available(state.clone()).await;
+            let mut refresh = state.discovery_refresh.lock();
+            if refresh.requested_revision == revision {
+                refresh.refreshing = false;
+                crate::app_log::core(&format!(
+                    "discovery published revision={revision} snapshot_ms={}",
+                    publish_started.elapsed().as_millis()
+                ));
+                break;
+            }
+        }
     });
 }
 
@@ -1514,6 +1665,58 @@ command:
         )
         .await;
         assert_eq!(refreshed["tasks"].as_array().unwrap().len(), 2);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn search_path_update_returns_before_background_discovery_is_published() {
+        let (mut state, root) = test_service();
+        state.remote_runtime = true;
+        let next_project = root.join("next-project");
+        fs::create_dir_all(next_project.join("harbor_taskcfg/tasks")).unwrap();
+        fs::write(
+            next_project.join("harbor_taskcfg/tasks/background.yaml"),
+            r#"version: 1
+id: background
+workdir: /tmp
+command:
+  argv: [echo, background]
+"#,
+        )
+        .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/search-paths")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({ "path": next_project.to_string_lossy() }).to_string(),
+            ))
+            .unwrap();
+        let (status, body) = send(state.clone(), request).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["discovery_pending"], true);
+        assert_eq!(
+            body["search_paths"][0],
+            next_project.to_string_lossy().as_ref()
+        );
+        assert_eq!(
+            cached_snapshot(&state).search_paths[0],
+            next_project.to_string_lossy().as_ref()
+        );
+
+        for _ in 0..200 {
+            if !state.discovery_refresh.lock().refreshing && !state.snapshot_cache.lock().refreshing
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let refreshed = cached_snapshot(&state);
+        assert!(!refreshed.stale);
+        assert_eq!(refreshed.tasks.len(), 1);
+        assert_eq!(refreshed.tasks[0].id, "background");
         let _ = fs::remove_dir_all(root);
     }
 

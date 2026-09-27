@@ -53,7 +53,7 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 
 ## 发现规则
 
-每个 Search Path 必须是已存在的目录。Harbor 从该目录向下最多 5 层查找：
+每个 Search Path 必须是已存在的目录。Harbor 从该目录向下最多 4 层查找：
 
 - `{search_path}/**/harbor_taskcfg/tasks/`
 - `{search_path}/**/harbor_taskcfg/groups/`
@@ -69,7 +69,7 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 1. 读取现有 `~/.harbor/settings.json`；文件不存在时以 Harbor 默认值为基础创建。
 2. 找到 `current_workspace` 对应的 workspace 项。
 3. 确认当前项目的绝对路径和 `harbor_taskcfg` 位置。
-4. 检查该 workspace 的 `search_paths` 是否已经覆盖该项目，并确认 `harbor_taskcfg` 位于向下 5 层以内。
+4. 检查该 workspace 的 `search_paths` 是否已经覆盖该项目，并确认 `harbor_taskcfg` 位于向下 4 层以内。
 5. 已覆盖时不要重复添加。
 
 ### 阶段二：添加路径
