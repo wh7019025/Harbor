@@ -328,6 +328,10 @@ export function physicalVncUrl(settings: Settings | null, vncPort?: number) {
   return `http://${workspace.ssh.host.trim()}:${vncPort ?? 23683}/`;
 }
 
-export function openPanelWindow(title: string, url: string) {
-  return invoke<void>("open_panel_window", { title, url });
+export function openPanelWindow(
+  title: string,
+  url: string,
+  clipboardTarget?: "physical" | "virtual",
+) {
+  return invoke<void>("open_panel_window", { title, url, clipboardTarget });
 }

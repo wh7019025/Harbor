@@ -175,6 +175,21 @@ fn with_core<T>(
     }
 }
 
+fn with_workspace_core<T>(
+    state: &AppState,
+    workspace_id: &str,
+    op: impl Fn(&Settings) -> Result<T, String>,
+) -> Result<T, String> {
+    let settings = current_settings(state);
+    let selected = workspace_settings(&settings, workspace_id)
+        .ok_or_else(|| format!("Workspace 不存在：{workspace_id}"))?;
+    let workspace = selected.current()?;
+    if workspace.mode == WorkspaceMode::Remote && !remote_workspace_connected(state, workspace_id) {
+        return Err("该远端 Workspace 已断开，请重新连接后再操作剪贴板".into());
+    }
+    op(&selected)
+}
+
 fn merge_search_paths(settings: &mut Settings, search_paths: Vec<String>) -> Result<(), String> {
     settings.current_mut()?.search_paths = search_paths;
     Ok(())
@@ -565,8 +580,16 @@ async fn open_panel_window(
     state: State<'_, Arc<AppState>>,
     title: String,
     url: String,
+    clipboard_target: Option<String>,
 ) -> Result<(), String> {
     let workspace = current_settings(state.inner()).current()?.clone();
+    let workspace_id = workspace.id.clone();
+    if clipboard_target
+        .as_deref()
+        .is_some_and(|target| !matches!(target, "physical" | "virtual"))
+    {
+        return Err("invalid panel clipboard target".into());
+    }
     let label = panel_window_label(workspace.id.as_str(), title.as_str(), url.as_str());
     if let Some(existing) = app.get_webview_window(label.as_str()) {
         existing.set_focus().map_err(|error| error.to_string())?;
@@ -584,9 +607,14 @@ async fn open_panel_window(
     })
     .await
     .map_err(|error| format!("panel tunnel worker failed: {error}"))??;
-    if let Err(error) =
-        open_panel_window_with_label(&app, title.as_str(), panel_url.as_str(), label.as_str())
-    {
+    if let Err(error) = open_panel_window_with_label(
+        &app,
+        title.as_str(),
+        panel_url.as_str(),
+        label.as_str(),
+        Some(workspace_id.as_str()),
+        clipboard_target.as_deref(),
+    ) {
         panel_tunnel::stop(&mut state.panel_tunnels.lock(), label.as_str());
         return Err(error);
     }
@@ -598,6 +626,8 @@ fn open_panel_window_with_label(
     title: &str,
     url: &str,
     label: &str,
+    workspace_id: Option<&str>,
+    clipboard_target: Option<&str>,
 ) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("panel url must be http or https".into());
@@ -611,9 +641,11 @@ fn open_panel_window_with_label(
         return Ok(());
     }
     let script = format!(
-        "window.__HARBOR_PANEL__ = {{ title: {}, url: {} }};",
+        "window.__HARBOR_PANEL__ = {{ title: {}, url: {}, workspaceId: {}, clipboardTarget: {} }};",
         serde_json::to_string(title).unwrap_or_else(|_| "\"Panel\"".into()),
         serde_json::to_string(&url).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(&workspace_id).unwrap_or_else(|_| "null".into()),
+        serde_json::to_string(&clipboard_target).unwrap_or_else(|_| "null".into()),
     );
     WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title(title)
@@ -657,7 +689,14 @@ async fn open_workspace_terminal(
         }
     };
     let window_label = workspace_terminal_window_label(workspace_id.as_str());
-    match open_panel_window_with_label(&app, title.as_str(), url.as_str(), window_label.as_str()) {
+    match open_panel_window_with_label(
+        &app,
+        title.as_str(),
+        url.as_str(),
+        window_label.as_str(),
+        None,
+        None,
+    ) {
         Ok(()) => Ok(()),
         Err(error) => {
             harbor_support::app_log::gui(&format!(
@@ -666,6 +705,39 @@ async fn open_workspace_terminal(
             Err(error)
         }
     }
+}
+
+#[tauri::command]
+async fn read_display_clipboard(
+    state: State<'_, Arc<AppState>>,
+    workspace_id: String,
+    display: String,
+) -> Result<String, String> {
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_workspace_core(&app_state, workspace_id.as_str(), |settings| {
+            core_client::read_display_clipboard(settings, display.as_str())
+        })
+    })
+    .await
+    .map_err(|error| format!("clipboard worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn write_display_clipboard(
+    state: State<'_, Arc<AppState>>,
+    workspace_id: String,
+    display: String,
+    text: String,
+) -> Result<(), String> {
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_workspace_core(&app_state, workspace_id.as_str(), |settings| {
+            core_client::write_display_clipboard(settings, display.as_str(), text.as_str())
+        })
+    })
+    .await
+    .map_err(|error| format!("clipboard worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1160,6 +1232,8 @@ pub fn run() {
             taskcard_resolve_config_base_path,
             open_panel_window,
             open_workspace_terminal,
+            read_display_clipboard,
+            write_display_clipboard,
         ])
         .on_window_event(|window, event| {
             if window.label() == "task-click" && matches!(event, WindowEvent::CloseRequested { .. })

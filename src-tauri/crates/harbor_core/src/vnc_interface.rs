@@ -1,7 +1,8 @@
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -11,6 +12,7 @@ use crate::taskcard::TaskCommand;
 pub use harbor_protocol::web_api::{PHYSICAL_VNC_PORT, VIRTUAL_VNC_PORT as VNC_PORT};
 const DISPLAY_NUMBER: u16 = 82;
 const X11_SOCKET_DIR: &str = "/tmp/.X11-unix";
+const CLIPBOARD_LIMIT_BYTES: usize = 1024 * 1024;
 
 fn runtime_dir() -> PathBuf {
     let runtime_base = std::env::var_os("XDG_RUNTIME_DIR")
@@ -215,6 +217,130 @@ pub fn ensure_physical_display() -> Result<(), String> {
     })
 }
 
+pub fn read_clipboard(display: &str) -> Result<String, String> {
+    let (display_name, xauthority) = clipboard_display(display)?;
+    let mut command = clipboard_command(display_name.as_str(), xauthority.as_deref());
+    let output = command
+        .arg("-out")
+        .output()
+        .map_err(|error| clipboard_command_error(error))?;
+    if !output.status.success() {
+        return Err(clipboard_failure(&output.stderr));
+    }
+    if output.stdout.len() > CLIPBOARD_LIMIT_BYTES {
+        return Err("remote clipboard exceeds Harbor's 1 MiB text limit".into());
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|_| "remote clipboard is not valid UTF-8 text".to_string())
+}
+
+pub fn write_clipboard(display: &str, text: &str) -> Result<(), String> {
+    if text.len() > CLIPBOARD_LIMIT_BYTES {
+        return Err("clipboard text exceeds Harbor's 1 MiB limit".into());
+    }
+    let (display_name, xauthority) = clipboard_display(display)?;
+    let mut child = clipboard_command(display_name.as_str(), xauthority.as_deref())
+        .arg("-in")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(clipboard_command_error)?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "open xclip stdin failed".to_string())?
+        .write_all(text.as_bytes())
+        .map_err(|error| format!("write remote clipboard failed: {error}"))?;
+    for _ in 0..10 {
+        match child
+            .try_wait()
+            .map_err(|error| format!("check xclip failed: {error}"))?
+        {
+            Some(status) if status.success() => return Ok(()),
+            Some(status) => return Err(format!("remote clipboard operation failed: {status}")),
+            None => thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+fn clipboard_display(display: &str) -> Result<(String, Option<PathBuf>), String> {
+    match display {
+        "virtual" => {
+            require_clipboard_command()?;
+            if !is_ready() {
+                return Err("virtual display is not running".into());
+            }
+            Ok((format!(":{DISPLAY_NUMBER}"), None))
+        }
+        "physical" => {
+            require_clipboard_command()?;
+            if !is_physical_ready() {
+                return Err("physical display is not running".into());
+            }
+            let display_name = physical_display_name()
+                .ok_or_else(|| "active physical X11 display not found".to_string())?;
+            Ok((display_name, physical_xauthority()))
+        }
+        _ => Err(format!("unknown display clipboard target: {display}")),
+    }
+}
+
+fn require_clipboard_command() -> Result<(), String> {
+    if command_available("xclip") {
+        Ok(())
+    } else {
+        Err("remote clipboard unavailable; install with: sudo apt install xclip".into())
+    }
+}
+
+fn clipboard_command(display: &str, xauthority: Option<&Path>) -> Command {
+    let mut command = Command::new("xclip");
+    command.args(["-selection", "clipboard"]);
+    command.env("DISPLAY", display);
+    if let Some(path) = xauthority {
+        command.env("XAUTHORITY", path);
+    }
+    command
+}
+
+fn clipboard_command_error(error: std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        "remote clipboard unavailable; install with: sudo apt install xclip".into()
+    } else {
+        format!("run xclip failed: {error}")
+    }
+}
+
+fn clipboard_failure(stderr: &[u8]) -> String {
+    let detail = String::from_utf8_lossy(stderr).trim().to_string();
+    if detail.is_empty() {
+        "remote clipboard operation failed".into()
+    } else {
+        format!("remote clipboard operation failed: {detail}")
+    }
+}
+
+fn physical_xauthority() -> Option<PathBuf> {
+    for variable in ["HARBOR_PHYSICAL_XAUTHORITY", "XAUTHORITY"] {
+        if let Some(path) = std::env::var_os(variable).map(PathBuf::from) {
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    let uid = unsafe { libc::geteuid() };
+    let mut candidates = vec![PathBuf::from(format!("/run/user/{uid}/gdm/Xauthority"))];
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(PathBuf::from(home).join(".Xauthority"));
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
 fn physical_display_name() -> Option<String> {
     // --- 阶段 1：优先采用用户或当前会话明确指定的真实显示器 ---
     for variable in ["HARBOR_PHYSICAL_DISPLAY", "DISPLAY"] {
@@ -347,65 +473,13 @@ const NOVNC_INDEX_HTML: &str = r##"<!doctype html>
 <style>
   html, body, #screen { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #1e1e1e; }
   #status { position: fixed; z-index: 2; top: 10px; left: 12px; color: #bbb; font: 13px sans-serif; }
-  #clipboard-tools { position: fixed; z-index: 3; top: 8px; right: 10px; display: flex; gap: 6px; }
-  .clipboard-button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; color: #d4d4d4; background: rgba(45, 45, 48, .92); border: 1px solid #4b4b4f; border-radius: 7px; cursor: pointer; }
-  .clipboard-button:hover { color: #fff; background: rgba(62, 62, 66, .96); }
-  .clipboard-button:disabled { color: #777; cursor: default; opacity: .65; }
-  .clipboard-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  #clipboard-message { position: fixed; z-index: 3; top: 48px; right: 10px; max-width: 320px; padding: 6px 9px; color: #ddd; background: rgba(30, 30, 30, .94); border: 1px solid #454545; border-radius: 6px; font: 12px sans-serif; }
 </style>
 <div id="status">Connecting…</div>
-<div id="clipboard-tools">
-  <button id="clipboard-send" class="clipboard-button" type="button" title="发送本机剪贴板到远端" disabled>
-    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"></rect><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"></path><path d="m9 14 3 3 3-3M12 9v8"></path></svg>
-  </button>
-  <button id="clipboard-copy" class="clipboard-button" type="button" title="复制远端剪贴板到本机" disabled>
-    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"></rect><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"></path><path d="m9 12 3-3 3 3M12 9v8"></path></svg>
-  </button>
-</div>
-<div id="clipboard-message" hidden></div>
 <div id="screen"></div>
 <script type="module">
   import RFB from './core/rfb.js?harbor-hidpi=2';
 
   const status = document.getElementById('status');
-  const sendButton = document.getElementById('clipboard-send');
-  const copyButton = document.getElementById('clipboard-copy');
-  const message = document.getElementById('clipboard-message');
-  let remoteClipboard = null;
-  let messageTimer = null;
-
-  function showMessage(text) {
-    message.textContent = text;
-    message.hidden = false;
-    window.clearTimeout(messageTimer);
-    messageTimer = window.setTimeout(() => { message.hidden = true; }, 2400);
-  }
-
-  async function readLocalClipboard() {
-    try {
-      return await navigator.clipboard.readText();
-    } catch (_) {
-      return window.prompt('浏览器未允许读取剪贴板，请在此粘贴要发送的文本：', '') ?? '';
-    }
-  }
-
-  async function writeLocalClipboard(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (_) {
-      const input = document.createElement('textarea');
-      input.value = text;
-      input.style.position = 'fixed';
-      input.style.opacity = '0';
-      document.body.appendChild(input);
-      input.select();
-      const copied = document.execCommand('copy');
-      input.remove();
-      return copied;
-    }
-  }
 
   const socketScheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
   const socketUrl = socketScheme + window.location.host + '/websockify';
@@ -416,36 +490,10 @@ const NOVNC_INDEX_HTML: &str = r##"<!doctype html>
   rfb.compressionLevel = 2;
   rfb.addEventListener('connect', () => {
     status.hidden = true;
-    sendButton.disabled = false;
   });
   rfb.addEventListener('disconnect', (event) => {
     status.hidden = false;
     status.textContent = event.detail.clean ? 'Disconnected' : 'Connection closed';
-    sendButton.disabled = true;
-    copyButton.disabled = true;
-  });
-  rfb.addEventListener('clipboard', (event) => {
-    remoteClipboard = event.detail.text;
-    copyButton.disabled = false;
-    showMessage('已收到远端剪贴板');
-  });
-
-  sendButton.addEventListener('click', async () => {
-    const text = await readLocalClipboard();
-    if (!text) {
-      showMessage('本机剪贴板为空');
-      return;
-    }
-    rfb.clipboardPasteFrom(text);
-    showMessage('已发送到远端剪贴板');
-  });
-
-  copyButton.addEventListener('click', async () => {
-    if (remoteClipboard === null) {
-      showMessage('尚未收到远端剪贴板');
-      return;
-    }
-    showMessage(await writeLocalClipboard(remoteClipboard) ? '已复制远端剪贴板' : '复制失败');
   });
 </script>
 "##;
@@ -1105,8 +1153,7 @@ mod tests {
         assert!(ENSURE_PHYSICAL_DISPLAY_SCRIPT.contains("cat \"${process_cmdline}\""));
         assert!(PHYSICAL_DISPLAY_SCRIPT.contains("DISPLAY=\"${display_name}\""));
         assert!(ENSURE_PHYSICAL_DISPLAY_SCRIPT.contains("9>&- </dev/null"));
-        assert!(NOVNC_INDEX_HTML.contains("rfb.clipboardPasteFrom(text)"));
-        assert!(NOVNC_INDEX_HTML.contains("addEventListener('clipboard'"));
+        assert!(!NOVNC_INDEX_HTML.contains("clipboardPasteFrom"));
         assert!(SHARED_DISPLAY_SCRIPT.contains("-AcceptCutText=1"));
         assert!(PHYSICAL_DISPLAY_SCRIPT.contains("-SendCutText=1"));
         for script in [PHYSICAL_DISPLAY_SCRIPT, ENSURE_PHYSICAL_DISPLAY_SCRIPT] {
@@ -1116,6 +1163,10 @@ mod tests {
                 .unwrap();
             assert!(status.success());
         }
+        assert_eq!(
+            clipboard_display("unknown").unwrap_err(),
+            "unknown display clipboard target: unknown"
+        );
     }
 
     #[test]

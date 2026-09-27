@@ -16,6 +16,8 @@ declare global {
     __HARBOR_PANEL__?: {
       title: string;
       url: string;
+      workspaceId?: string | null;
+      clipboardTarget?: "physical" | "virtual" | null;
     };
   }
 }

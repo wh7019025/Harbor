@@ -447,6 +447,33 @@ pub fn ensure_physical_display(settings: &Settings) -> Result<(), String> {
     Ok(())
 }
 
+pub fn read_display_clipboard(settings: &Settings, display: &str) -> Result<String, String> {
+    let body: Value = core_get(
+        settings,
+        &format!(
+            "/api/v1/displays/clipboard?display={}",
+            urlencoding_loose(display)
+        ),
+    )?;
+    Ok(body
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string())
+}
+
+pub fn write_display_clipboard(
+    settings: &Settings,
+    display: &str,
+    text: &str,
+) -> Result<(), String> {
+    core_post_ok(
+        settings,
+        "/api/v1/displays/clipboard",
+        json!({ "display": display, "text": text }),
+    )
+}
+
 pub fn ensure_terminal(
     settings: &Settings,
     workdir: &str,

@@ -217,6 +217,17 @@ struct TerminalAction {
     title: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ClipboardWriteAction {
+    display: String,
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClipboardQuery {
+    display: String,
+}
+
 pub fn bind_addr(localhost_only: bool) -> SocketAddr {
     if localhost_only {
         SocketAddr::from(([127, 0, 0, 1], WEB_API_PORT))
@@ -247,6 +258,10 @@ pub fn router(state: WebApiState) -> Router {
         .route(
             "/api/v1/displays/physical/ensure",
             post(ensure_physical_display),
+        )
+        .route(
+            "/api/v1/displays/clipboard",
+            get(read_display_clipboard).post(write_display_clipboard),
         )
         .route("/api/v1/terminal/ensure", post(ensure_terminal))
         .route("/api/v1/discovery/refresh", post(refresh_discovery))
@@ -488,6 +503,31 @@ async fn ensure_physical_display() -> Result<Json<Value>, ApiError> {
         .await
         .map_err(|error| ApiError::BadRequest(format!("physical display worker failed: {error}")))?
         .map_err(ApiError::BadRequest)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn read_display_clipboard(
+    Query(query): Query<ClipboardQuery>,
+) -> Result<Json<Value>, ApiError> {
+    tokio::task::spawn_blocking(move || crate::vnc_interface::read_clipboard(&query.display))
+        .await
+        .map_err(|error| ApiError::BadRequest(format!("clipboard worker failed: {error}")))?
+        .map(|text| Json(json!({ "text": text })))
+        .map_err(ApiError::BadRequest)
+}
+
+async fn write_display_clipboard(
+    payload: Result<Json<ClipboardWriteAction>, JsonRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let action = payload
+        .map_err(|error| ApiError::BadRequest(error.body_text()))?
+        .0;
+    tokio::task::spawn_blocking(move || {
+        crate::vnc_interface::write_clipboard(&action.display, &action.text)
+    })
+    .await
+    .map_err(|error| ApiError::BadRequest(format!("clipboard worker failed: {error}")))?
+    .map_err(ApiError::BadRequest)?;
     Ok(Json(json!({ "ok": true })))
 }
 

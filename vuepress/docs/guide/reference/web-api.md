@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # Web API
 
-Core 默认监听端口 `29385`，当前 API revision 为 **22**，基础路径为：
+Core 默认监听端口 `29385`，当前 API revision 为 **25**，基础路径为：
 
 ```text
 http://<host>:29385/api/v1
@@ -31,6 +31,8 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | `GET` | `/metrics/resources` | 获取内存、Swap 和根磁盘资源指标。 |
 | `GET` | `/services` | 列出 Core 管理的 VNC 与 ttyd 基础服务状态。 |
 | `POST` | `/displays/physical/ensure` | 启动或复用自动发现的已登录 X11 桌面抓取与 noVNC 通路。 |
+| `GET` | `/displays/clipboard?display=physical\|virtual` | 读取指定远端 X11 显示器的文本剪贴板。 |
+| `POST` | `/displays/clipboard` | 写入指定远端 X11 显示器的文本剪贴板。 |
 | `POST` | `/discovery/refresh` | 重新扫描搜索路径。 |
 | `POST` | `/terminal/ensure` | 确保 Core 托管的机器级 ttyd 已按指定 Workspace 启动。 |
 
@@ -45,6 +47,10 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 `POST /displays/physical/ensure` 可能执行依赖检查和进程启动，因此客户端应使用比普通
 状态请求更长的超时。成功后返回 `{ "ok": true }`，GUI 随后从 Snapshot 缓存读取状态；依赖缺失、没有活动 X11 桌面或
 固定端口 `23683` 被占用时返回明确错误。
+
+剪贴板写入请求为 `{ "display": "physical|virtual", "text": "..." }`，成功返回
+`{ "ok": true }`；读取返回 `{ "text": "..." }`。Core 使用远端 `xclip` 直接操作 X11
+剪贴板，不经过 VNC CutText，文本上限为 1 MiB。
 
 ## Task
 

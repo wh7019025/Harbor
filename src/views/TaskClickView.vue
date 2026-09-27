@@ -868,7 +868,11 @@ async function openMachineDisplay(kind: MachineDisplayKind) {
     if (!readyShortcut?.ready) {
       throw new Error(`${displayName}启动超时，请查看 Harbor 日志中的依赖或启动错误`);
     }
-    await openPanelWindow(kind === "physical" ? "Physical Display" : "Virtual Display", readyShortcut.url);
+    await openPanelWindow(
+      kind === "physical" ? "Physical Display" : "Virtual Display",
+      readyShortcut.url,
+      kind,
+    );
   } catch (err) {
     showFailure(failureMessage(err));
     await pollHarborLog();

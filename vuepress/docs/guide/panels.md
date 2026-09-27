@@ -36,10 +36,14 @@ command:
 同一个桌面中；停止其中一个 Task 不会关闭桌面或其他窗口。WebView 不受影响。完整配置见
 [远端虚拟显示示例](https://github.com/wh7019025/Harbor/tree/main/examples/vnc_interface)。
 
-运行 Task 的机器需要安装 TigerVNC、noVNC、websockify、Openbox 和 util-linux。远端
+运行 Task 的机器需要安装 TigerVNC、noVNC、websockify、Openbox、util-linux 和 `xclip`。远端
 Core 还会提供独立的真实桌面入口：显示器图标镜像自动发现的已登录 X11 桌面，立方体图标则打开
 启用 `remote_display_virtual` 的 Task 所在的共享虚拟桌面。真实桌面额外需要
 `tigervnc-scraping-server`，但不改变 Task 的运行位置。
+
+VNC 窗口右上角提供“发送本机剪贴板”和“复制远端剪贴板”按钮。剪贴板文本由 GUI 通过
+Core API 和远端 `xclip` 直接读写目标 X11 DISPLAY，不依赖 TigerVNC 的剪贴板协议，因此旧版
+TigerVNC 也能使用。缺少依赖时安装：`sudo apt install xclip`。单次文本限制为 1 MiB。
 
 ## WebView：程序提供 Web 页面
 

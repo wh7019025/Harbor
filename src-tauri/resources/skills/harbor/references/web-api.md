@@ -18,7 +18,7 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 
 ## 通用契约
 
-- 当前 `api_revision`：`24`。
+- 当前 `api_revision`：`25`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -47,6 +47,8 @@ Harbor GUI 只通过该 HTTP API 与 core 交互（含路径列举），并且�
 | GET | `/api/v1/metrics/resources` | - | 内存、Swap 与根磁盘资源指标 |
 | GET | `/api/v1/services` | - | Core 托管的 Virtual VNC、Physical VNC 与 ttyd 状态；只读，不可单独停止 |
 | POST | `/api/v1/displays/physical/ensure` | `{}` | `{ "ok": true }`；启动或复用自动发现的本机 X11 真实桌面通路 |
+| GET | `/api/v1/displays/clipboard?display=physical\|virtual` | - | `{ "text" }`；通过远端 `xclip` 读取目标 X11 剪贴板 |
+| POST | `/api/v1/displays/clipboard` | `{ "display", "text" }` | `{ "ok": true }`；通过远端 `xclip` 写入目标 X11 剪贴板，文本上限 1 MiB |
 | POST | `/api/v1/discovery/refresh` | `{}` | `ResearchResult`：重新扫描后的目录与 search paths |
 | POST | `/api/v1/workspaces/switch` | `{ "id" }` | `{ "ok": true, "workspace_id" }` |
 | POST | `/api/v1/terminal/ensure` | `{ "workdir", "title" }` | `{ "ready": true, "port": 29386 }`；仅 remote runtime 可用 |

@@ -141,6 +141,9 @@ remote_display_virtual: true
 两个远端桌面都通过 SSH Tunnel 访问，无需开放 noVNC 端口。依赖缺失时，Harbor 会在
 界面和日志中给出安装命令。
 
+桌面窗口的双向剪贴板由 Harbor Core 调用远端 `xclip` 完成，不依赖 VNC Server 是否支持
+剪贴板扩展。远端缺少该工具时运行 `sudo apt install xclip`。
+
 配置方式与依赖见[程序界面](./panels.md)，固定端口与监听范围见
 [端口使用](/development/ports/)。
 

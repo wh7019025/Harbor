@@ -23,7 +23,7 @@ harbor_core
 ├── Core services: VNC + ttyd
 ├── Runtime state
 ├── Log storage
-└── HTTP API v1 (revision 22)
+└── HTTP API v1 (revision 25)
 
 harbor_protocol
 ├── API constants

@@ -60,7 +60,13 @@ onBeforeUnmount(async () => {
       @fullscreen-change="syncFullscreen"
     />
     <main class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <PanelView v-if="panel" :title="panel.title" :url="panel.url" />
+      <PanelView
+        v-if="panel"
+        :title="panel.title"
+        :url="panel.url"
+        :workspace-id="panel.workspaceId"
+        :clipboard-target="panel.clipboardTarget"
+      />
       <TaskClickView v-else />
     </main>
   </div>
