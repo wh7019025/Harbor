@@ -36,6 +36,7 @@ const TTYD_RUNTIME_LOADER: &str = env!("HARBOR_TTYD_RUNTIME_LOADER");
 const BUILD_TTYD_RUNTIME_PATH: &str = env!("HARBOR_TTYD_RUNTIME_BUILD_PATH");
 const CORE_RUNTIME_NAME: &str = "harbor_core-runtime-linux-x86_64.tar.gz";
 const TTYD_RUNTIME_NAME: &str = "harbor_ttyd-runtime-linux-x86_64.tar.gz";
+const LINUX_SYSTEM_RESOURCE_DIR: &str = "/usr/lib/Harbor";
 
 static ARTIFACT_RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -140,30 +141,31 @@ fn packaged_runtime_bundle(
     expected_hash: &str,
 ) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|error| format!("current exe failed: {error}"))?;
-    let mut candidates = vec![
-        exe.parent()
-            .ok_or_else(|| "cannot resolve Harbor runtime directory".to_string())?
-            .join(file_name),
-        PathBuf::from("/usr/lib/harbor").join(file_name),
-    ];
+    let mut candidates = vec![exe
+        .parent()
+        .ok_or_else(|| "cannot resolve Harbor runtime directory".to_string())?
+        .join(file_name)];
     if let Some(resource_dir) = ARTIFACT_RESOURCE_DIR.get() {
         candidates.push(resource_dir.join(file_name));
     }
+    candidates.push(PathBuf::from(LINUX_SYSTEM_RESOURCE_DIR).join(file_name));
     candidates.push(PathBuf::from(build_path));
-    let mut rejected = Vec::new();
+    candidates.dedup();
+    let mut checked = Vec::new();
     for candidate in candidates {
         if !candidate.is_file() {
+            checked.push(format!("{}=missing", candidate.display()));
             continue;
         }
         let hash = sha256_file(&candidate)?;
         if hash == expected_hash {
             return Ok(candidate);
         }
-        rejected.push(format!("{}={hash}", candidate.display()));
+        checked.push(format!("{}={hash}", candidate.display()));
     }
     Err(format!(
-        "matching Linux runtime {file_name} not found; expected sha256 {expected_hash}; candidates: {}",
-        rejected.join(", ")
+        "matching Linux runtime {file_name} not found; expected sha256 {expected_hash}; checked: {}",
+        checked.join(", ")
     ))
 }
 
@@ -953,6 +955,11 @@ mod tests {
             sha256_file(Path::new(BUILD_TTYD_RUNTIME_PATH)).unwrap(),
             EXPECTED_TTYD_RUNTIME_SHA256
         );
+    }
+
+    #[test]
+    fn linux_package_resource_directory_matches_deb_layout() {
+        assert_eq!(LINUX_SYSTEM_RESOURCE_DIR, "/usr/lib/Harbor");
     }
 
     #[test]
