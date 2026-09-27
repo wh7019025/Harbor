@@ -20,8 +20,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::core_client::{
-    claim_access_url, fetch_access_url, fetch_health, fetch_health_url, local_core_url,
-    release_access, switch_workspace, CoreHealth,
+    claim_access_url, fetch_access_url, fetch_health, fetch_health_url, gui_client_id,
+    local_core_url, release_access, switch_workspace, CoreHealth,
 };
 
 const EXPECTED_CORE_SHA256: &str = env!("HARBOR_CORE_SHA256");
@@ -463,6 +463,23 @@ fi"#
     )
 }
 
+fn remote_core_start_script(exec: &str) -> String {
+    format!(
+        r#"core_log="$HOME/.harbor/log/harbor.log"
+start_line=$(( $(wc -l < "$core_log" 2>/dev/null || printf '0') + 1 ))
+setsid {exec} </dev/null >>"$core_log" 2>&1 &
+pid=$!
+printf '%s\n' "$pid" > "$HOME/.harbor/run/harbor_core.pid"
+sleep 0.5
+if ! kill -0 "$pid" 2>/dev/null; then
+  tail -n +"$start_line" "$core_log" >&2
+  echo "harbor_core exited immediately" >&2
+  exit 1
+fi
+"#,
+    )
+}
+
 #[cfg(target_os = "linux")]
 fn stop_local_core() {
     let health_pid = fetch_health_url(local_core_url().as_str())
@@ -491,6 +508,10 @@ fn spawn_local_core(workspace: &Workspace, mobile_enabled: bool) -> Result<(), S
         .arg(if mobile_enabled { "true" } else { "false" })
         .arg("--workspace")
         .arg(workspace.id.as_str())
+        .arg("--access-client-id")
+        .arg(gui_client_id())
+        .arg("--access-owner-version")
+        .arg(APP_VERSION)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -738,21 +759,14 @@ fi"#,
     let exec = remote_core_exec(
         loader,
         &format!(
-            "--localhost-only {localhost_only} --mobile-enabled {mobile_enabled} --remote-runtime --workspace {id}",
+            "--localhost-only {localhost_only} --mobile-enabled {mobile_enabled} --remote-runtime --workspace {id} --access-client-id {client_id} --access-owner-version {owner_version}",
             mobile_enabled = if settings.mobile_enabled { "true" } else { "false" },
             id = shell_single_quote(&workspace.id),
+            client_id = shell_single_quote(gui_client_id()),
+            owner_version = shell_single_quote(APP_VERSION),
         ),
     );
-    let start = format!(
-        r#"setsid {exec} </dev/null >>"$HOME/.harbor/log/harbor.log" 2>&1 &
-echo $! > "$HOME/.harbor/run/harbor_core.pid"
-sleep 0.3
-if ! kill -0 "$(cat "$HOME/.harbor/run/harbor_core.pid")" 2>/dev/null; then
-  echo "harbor_core exited immediately" >&2
-  exit 1
-fi
-"#,
-    );
+    let start = remote_core_start_script(exec.as_str());
     ssh_run(ssh, start.as_str())?;
     if let Err(error) = wait_health(
         remote_base(&workspace)?.as_str(),

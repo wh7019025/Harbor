@@ -223,7 +223,13 @@ const webPanelShortcuts = computed(() =>
 const virtualVncShortcut = computed(() => {
   if (!isRemoteWorkspace.value) return null;
   const url = sharedVncUrl(settings.value, snapshot.value?.vnc_port);
-  return url ? { url, ready: snapshot.value?.vnc_ready ?? false } : null;
+  return url
+    ? {
+        url,
+        ready: snapshot.value?.vnc_ready ?? false,
+        error: snapshot.value?.vnc_error ?? null,
+      }
+    : null;
 });
 const physicalVncShortcut = computed(() => {
   if (!isRemoteWorkspace.value) return null;
@@ -838,16 +844,16 @@ async function openMachineDisplay(kind: MachineDisplayKind) {
       await connectRemoteWorkspaceCore();
       remoteWorkspaceConnected.value = true;
       if (kind === "physical") {
-        const nextSnapshot = await ensurePhysicalDisplay();
-        snapshot.value = nextSnapshot;
-        syncTaskConfigSelections(nextSnapshot.tasks);
+        await ensurePhysicalDisplay();
       }
       for (let attempt = 0; attempt < 30; attempt += 1) {
         const nextSnapshot = await fetchTaskCard();
         snapshot.value = nextSnapshot;
         syncTaskConfigSelections(nextSnapshot.tasks);
-        if (kind === "physical" && nextSnapshot.physical_vnc_error) {
-          throw new Error(nextSnapshot.physical_vnc_error);
+        const displayError =
+          kind === "physical" ? nextSnapshot.physical_vnc_error : nextSnapshot.vnc_error;
+        if (displayError) {
+          throw new Error(displayError);
         }
         if (machineDisplayReady(nextSnapshot, kind)) break;
         await new Promise((resolve) => window.setTimeout(resolve, 500));
@@ -855,7 +861,7 @@ async function openMachineDisplay(kind: MachineDisplayKind) {
     }
 
     const readyShortcut = machineDisplayShortcut(kind);
-    const displayError = kind === "physical" ? physicalVncShortcut.value?.error : null;
+    const displayError = machineDisplayShortcut(kind)?.error ?? null;
     if (displayError) {
       throw new Error(displayError);
     }
@@ -1534,7 +1540,7 @@ onBeforeUnmount(() => {
           v-if="physicalVncShortcut"
           class="btn !px-2 !py-1"
           type="button"
-          :title="physicalVncShortcut.ready ? '打开真实桌面 :0' : physicalVncShortcut.error ?? '连接并打开真实桌面 :0'"
+          :title="physicalVncShortcut.ready ? '打开真实桌面' : physicalVncShortcut.error ?? '连接并打开真实桌面'"
           :disabled="isPending('physical-vnc')"
           @click="openMachineDisplay('physical')"
         >

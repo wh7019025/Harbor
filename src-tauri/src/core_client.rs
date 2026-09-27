@@ -436,14 +436,15 @@ pub fn snapshot(settings: &Settings) -> Result<TaskCardSnapshot, String> {
     core_get(settings, "/api/v1/snapshot")
 }
 
-pub fn ensure_physical_display(settings: &Settings) -> Result<TaskCardSnapshot, String> {
+pub fn ensure_physical_display(settings: &Settings) -> Result<(), String> {
     let path = "/api/v1/displays/physical/ensure";
     let url = format!("{}{path}", core_base_url(settings)?);
     let resp = http_agent(Duration::from_secs(15))
         .post(url.as_str())
         .send_json(json!({}))
         .map_err(map_ureq)?;
-    decode_json(path, resp)
+    let _: Value = decode_json(path, resp)?;
+    Ok(())
 }
 
 pub fn ensure_terminal(

@@ -30,7 +30,7 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | `GET` | `/metrics/performance` | 获取 CPU、网络和 GPU 性能指标。 |
 | `GET` | `/metrics/resources` | 获取内存、Swap 和根磁盘资源指标。 |
 | `GET` | `/services` | 列出 Core 管理的 VNC 与 ttyd 基础服务状态。 |
-| `POST` | `/displays/physical/ensure` | 启动或复用真实 `DISPLAY=:0` 的抓取与 noVNC 通路。 |
+| `POST` | `/displays/physical/ensure` | 启动或复用自动发现的已登录 X11 桌面抓取与 noVNC 通路。 |
 | `POST` | `/discovery/refresh` | 重新扫描搜索路径。 |
 | `POST` | `/terminal/ensure` | 确保 Core 托管的机器级 ttyd 已按指定 Workspace 启动。 |
 
@@ -43,7 +43,7 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 指标由 Core 在请求时采集，因此远端 Workspace 显示的是远端机器，而不是运行 GUI 的机器。GUI 分别按照 `performance_metrics_interval_ms` 和 `resource_metrics_interval_ms` 请求性能指标与资源指标。
 
 `POST /displays/physical/ensure` 可能执行依赖检查和进程启动，因此客户端应使用比普通
-状态请求更长的超时。成功后返回更新后的 Snapshot；依赖缺失、没有活动 X11 `:0` 或
+状态请求更长的超时。成功后返回 `{ "ok": true }`，GUI 随后从 Snapshot 缓存读取状态；依赖缺失、没有活动 X11 桌面或
 固定端口 `23683` 被占用时返回明确错误。
 
 ## Task

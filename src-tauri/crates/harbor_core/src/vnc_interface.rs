@@ -10,7 +10,7 @@ use crate::taskcard::TaskCommand;
 
 pub use harbor_protocol::web_api::{PHYSICAL_VNC_PORT, VIRTUAL_VNC_PORT as VNC_PORT};
 const DISPLAY_NUMBER: u16 = 82;
-const PHYSICAL_DISPLAY: &str = ":0";
+const X11_SOCKET_DIR: &str = "/tmp/.X11-unix";
 
 fn runtime_dir() -> PathBuf {
     let runtime_base = std::env::var_os("XDG_RUNTIME_DIR")
@@ -46,8 +46,8 @@ pub fn physical_error() -> Option<String> {
                 .into(),
         );
     }
-    if !Path::new("/tmp/.X11-unix/X0").exists() {
-        return Some("真实桌面不可用：未检测到活动的 X11 DISPLAY=:0".into());
+    if physical_display_name().is_none() {
+        return Some("真实桌面不可用：未检测到活动的本机 X11 DISPLAY".into());
     }
     let log_path = physical_runtime_dir().join("infrastructure.log");
     std::fs::read_to_string(log_path)
@@ -62,7 +62,7 @@ pub fn physical_error() -> Option<String> {
         .map(|line| format!("真实桌面启动失败：{line}"))
 }
 
-fn shared_error() -> Option<String> {
+pub fn shared_error() -> Option<String> {
     if is_ready() {
         return None;
     }
@@ -157,6 +157,7 @@ pub fn ensure_shared_display() -> Result<(), String> {
         "harbor-vnc-server.sh",
         SHARED_DISPLAY_SCRIPT,
     )?;
+    write_novnc_index(runtime_dir.as_path(), "Harbor Display", true)?;
     let output = Command::new("bash")
         .arg(ensure_script)
         .arg(VNC_PORT.to_string())
@@ -181,6 +182,9 @@ pub fn ensure_shared_display() -> Result<(), String> {
 
 pub fn ensure_physical_display() -> Result<(), String> {
     validate_physical_dependencies()?;
+    let display_name = physical_display_name().ok_or_else(|| {
+        "physical display unavailable; active local X11 DISPLAY not found".to_string()
+    })?;
     let runtime_dir = physical_runtime_dir();
     let (ensure_script, server_script) = write_runtime_scripts(
         runtime_dir.as_path(),
@@ -189,10 +193,11 @@ pub fn ensure_physical_display() -> Result<(), String> {
         "harbor-vnc-physical-server.sh",
         PHYSICAL_DISPLAY_SCRIPT,
     )?;
+    write_novnc_index(runtime_dir.as_path(), "Harbor Physical Display", false)?;
     let output = Command::new("bash")
         .arg(ensure_script)
         .arg(PHYSICAL_VNC_PORT.to_string())
-        .arg(PHYSICAL_DISPLAY)
+        .arg(display_name)
         .arg(server_script)
         .output()
         .map_err(|error| format!("start physical Harbor VNC display failed: {error}"))?;
@@ -208,6 +213,56 @@ pub fn ensure_physical_display() -> Result<(), String> {
     } else {
         stderr
     })
+}
+
+fn physical_display_name() -> Option<String> {
+    // --- 阶段 1：优先采用用户或当前会话明确指定的真实显示器 ---
+    for variable in ["HARBOR_PHYSICAL_DISPLAY", "DISPLAY"] {
+        let Some(display_name) = std::env::var_os(variable) else {
+            continue;
+        };
+        let Some(display_number) = local_display_number(display_name.to_string_lossy().as_ref())
+        else {
+            continue;
+        };
+        if display_number != DISPLAY_NUMBER && x11_socket_path(display_number).exists() {
+            return Some(format!(":{display_number}"));
+        }
+    }
+
+    // --- 阶段 2：Core 常由 SSH 启动，没有 DISPLAY；从活动 X11 socket 中发现 ---
+    let mut display_numbers = fs::read_dir(X11_SOCKET_DIR)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .strip_prefix('X')?
+                .parse()
+                .ok()
+        })
+        .filter(|display_number| *display_number != DISPLAY_NUMBER)
+        .collect::<Vec<u16>>();
+    display_numbers.sort_unstable();
+    display_numbers
+        .into_iter()
+        .next()
+        .map(|display_number| format!(":{display_number}"))
+}
+
+fn local_display_number(display_name: &str) -> Option<u16> {
+    display_name
+        .trim()
+        .strip_prefix(':')?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn x11_socket_path(display_number: u16) -> PathBuf {
+    Path::new(X11_SOCKET_DIR).join(format!("X{display_number}"))
 }
 
 pub fn shutdown_displays() {
@@ -277,6 +332,124 @@ fn write_runtime_scripts(
     Ok((ensure_path, server_path))
 }
 
+fn write_novnc_index(runtime_dir: &Path, title: &str, resize_session: bool) -> Result<(), String> {
+    let content = NOVNC_INDEX_HTML.replace("__TITLE__", title).replace(
+        "__RESIZE_SESSION__",
+        if resize_session { "true" } else { "false" },
+    );
+    let path = runtime_dir.join("harbor-index.html");
+    fs::write(&path, content).map_err(|error| format!("write {} failed: {error}", path.display()))
+}
+
+const NOVNC_INDEX_HTML: &str = r##"<!doctype html>
+<meta charset="utf-8">
+<title>__TITLE__</title>
+<style>
+  html, body, #screen { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #1e1e1e; }
+  #status { position: fixed; z-index: 2; top: 10px; left: 12px; color: #bbb; font: 13px sans-serif; }
+  #clipboard-tools { position: fixed; z-index: 3; top: 8px; right: 10px; display: flex; gap: 6px; }
+  .clipboard-button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; color: #d4d4d4; background: rgba(45, 45, 48, .92); border: 1px solid #4b4b4f; border-radius: 7px; cursor: pointer; }
+  .clipboard-button:hover { color: #fff; background: rgba(62, 62, 66, .96); }
+  .clipboard-button:disabled { color: #777; cursor: default; opacity: .65; }
+  .clipboard-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #clipboard-message { position: fixed; z-index: 3; top: 48px; right: 10px; max-width: 320px; padding: 6px 9px; color: #ddd; background: rgba(30, 30, 30, .94); border: 1px solid #454545; border-radius: 6px; font: 12px sans-serif; }
+</style>
+<div id="status">Connecting…</div>
+<div id="clipboard-tools">
+  <button id="clipboard-send" class="clipboard-button" type="button" title="发送本机剪贴板到远端" disabled>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"></rect><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"></path><path d="m9 14 3 3 3-3M12 9v8"></path></svg>
+  </button>
+  <button id="clipboard-copy" class="clipboard-button" type="button" title="复制远端剪贴板到本机" disabled>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"></rect><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"></path><path d="m9 12 3-3 3 3M12 9v8"></path></svg>
+  </button>
+</div>
+<div id="clipboard-message" hidden></div>
+<div id="screen"></div>
+<script type="module">
+  import RFB from './core/rfb.js?harbor-hidpi=2';
+
+  const status = document.getElementById('status');
+  const sendButton = document.getElementById('clipboard-send');
+  const copyButton = document.getElementById('clipboard-copy');
+  const message = document.getElementById('clipboard-message');
+  let remoteClipboard = null;
+  let messageTimer = null;
+
+  function showMessage(text) {
+    message.textContent = text;
+    message.hidden = false;
+    window.clearTimeout(messageTimer);
+    messageTimer = window.setTimeout(() => { message.hidden = true; }, 2400);
+  }
+
+  async function readLocalClipboard() {
+    try {
+      return await navigator.clipboard.readText();
+    } catch (_) {
+      return window.prompt('浏览器未允许读取剪贴板，请在此粘贴要发送的文本：', '') ?? '';
+    }
+  }
+
+  async function writeLocalClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      const input = document.createElement('textarea');
+      input.value = text;
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      const copied = document.execCommand('copy');
+      input.remove();
+      return copied;
+    }
+  }
+
+  const socketScheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const socketUrl = socketScheme + window.location.host + '/websockify';
+  const rfb = new RFB(document.getElementById('screen'), socketUrl, { shared: true });
+  rfb.scaleViewport = true;
+  rfb.resizeSession = __RESIZE_SESSION__;
+  rfb.qualityLevel = 9;
+  rfb.compressionLevel = 2;
+  rfb.addEventListener('connect', () => {
+    status.hidden = true;
+    sendButton.disabled = false;
+  });
+  rfb.addEventListener('disconnect', (event) => {
+    status.hidden = false;
+    status.textContent = event.detail.clean ? 'Disconnected' : 'Connection closed';
+    sendButton.disabled = true;
+    copyButton.disabled = true;
+  });
+  rfb.addEventListener('clipboard', (event) => {
+    remoteClipboard = event.detail.text;
+    copyButton.disabled = false;
+    showMessage('已收到远端剪贴板');
+  });
+
+  sendButton.addEventListener('click', async () => {
+    const text = await readLocalClipboard();
+    if (!text) {
+      showMessage('本机剪贴板为空');
+      return;
+    }
+    rfb.clipboardPasteFrom(text);
+    showMessage('已发送到远端剪贴板');
+  });
+
+  copyButton.addEventListener('click', async () => {
+    if (remoteClipboard === null) {
+      showMessage('尚未收到远端剪贴板');
+      return;
+    }
+    showMessage(await writeLocalClipboard(remoteClipboard) ? '已复制远端剪贴板' : '复制失败');
+  });
+</script>
+"##;
+
 const SHARED_DISPLAY_SCRIPT: &str = r##"
 set -Eeuo pipefail
 
@@ -313,34 +486,7 @@ cp -a /usr/share/novnc/. "${web_root}/"
 sed -i 's/this\._display\.scale = 1\.0;/this._display.scale = this._resizeSession ? 1 \/ Math.min(window.devicePixelRatio || 1, 2) : 1.0;/' "${web_root}/core/rfb.js"
 sed -i 's/return { w: r\.width, h: r\.height };/const pixelRatio = this._resizeSession ? Math.min(window.devicePixelRatio || 1, 2) : 1;\n        return { w: r.width * pixelRatio, h: r.height * pixelRatio };/' "${web_root}/core/rfb.js"
 printf '{"version":"system package"}\n' >"${web_root}/package.json"
-cat >"${web_root}/index.html" <<'EOF'
-<!doctype html>
-<meta charset="utf-8">
-<title>Harbor Display</title>
-<style>
-  html, body, #screen { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #1e1e1e; }
-  #status { position: fixed; z-index: 1; top: 10px; left: 12px; color: #bbb; font: 13px sans-serif; }
-</style>
-<div id="status">Connecting…</div>
-<div id="screen"></div>
-<script type="module">
-  import RFB from './core/rfb.js?harbor-hidpi=2';
-
-  const status = document.getElementById('status');
-  const socketScheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-  const socketUrl = socketScheme + window.location.host + '/websockify';
-  const rfb = new RFB(document.getElementById('screen'), socketUrl, { shared: true });
-  rfb.scaleViewport = true;
-  rfb.resizeSession = true;
-  rfb.qualityLevel = 9;
-  rfb.compressionLevel = 2;
-  rfb.addEventListener('connect', () => { status.hidden = true; });
-  rfb.addEventListener('disconnect', (event) => {
-    status.hidden = false;
-    status.textContent = event.detail.clean ? 'Disconnected' : 'Connection closed';
-  });
-</script>
-EOF
+cp "${runtime_dir}/harbor-index.html" "${web_root}/index.html"
 
 # --- 阶段 3：启动机器级共享虚拟桌面 ---
 export DISPLAY=":${display_number}"
@@ -357,6 +503,8 @@ setsid Xtigervnc "${DISPLAY}" \
   -rfbunixpath "${vnc_socket}" \
   -rfbunixmode 384 \
   -SecurityTypes None \
+  -AcceptCutText=1 \
+  -SendCutText=1 \
   -AcceptSetDesktopSize=1 \
   -desktop "Harbor" \
   -nolisten tcp >>"${infrastructure_log}" 2>&1 &
@@ -599,44 +747,22 @@ fi
 rm -rf "${web_root}"
 mkdir -p "${web_root}"
 cp -a /usr/share/novnc/. "${web_root}/"
-cat >"${web_root}/index.html" <<'EOF'
-<!doctype html>
-<meta charset="utf-8">
-<title>Harbor Physical Display</title>
-<style>
-  html, body, #screen { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #1e1e1e; }
-  #status { position: fixed; z-index: 1; top: 10px; left: 12px; color: #bbb; font: 13px sans-serif; }
-</style>
-<div id="status">Connecting…</div>
-<div id="screen"></div>
-<script type="module">
-  import RFB from './core/rfb.js';
+cp "${runtime_dir}/harbor-index.html" "${web_root}/index.html"
 
-  const status = document.getElementById('status');
-  const socketScheme = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-  const socketUrl = socketScheme + window.location.host + '/websockify';
-  const rfb = new RFB(document.getElementById('screen'), socketUrl, { shared: true });
-  rfb.scaleViewport = true;
-  rfb.resizeSession = false;
-  rfb.qualityLevel = 9;
-  rfb.compressionLevel = 2;
-  rfb.addEventListener('connect', () => { status.hidden = true; });
-  rfb.addEventListener('disconnect', (event) => {
-    status.hidden = false;
-    status.textContent = event.detail.clean ? 'Disconnected' : 'Connection closed';
-  });
-</script>
-EOF
-
-# --- 阶段 3：抓取 DISPLAY=:0 并发布 noVNC ---
+# --- 阶段 3：抓取已发现的真实 DISPLAY 并发布 noVNC ---
 export DISPLAY="${display_name}"
 export XAUTHORITY="${xauthority}"
+clipboard_args=()
+if X0tigervnc -help 2>&1 | grep -qi 'AcceptCutText'; then
+  clipboard_args+=("-AcceptCutText=1" "-SendCutText=1")
+fi
 setsid X0tigervnc \
   -display "${display_name}" \
   -rfbport 0 \
   -rfbunixpath "${vnc_socket}" \
   -rfbunixmode 384 \
   -SecurityTypes None \
+  "${clipboard_args[@]}" \
   -AlwaysShared=1 \
   -AcceptPointerEvents=1 \
   -AcceptKeyEvents=1 >>"${infrastructure_log}" 2>&1 &
@@ -719,7 +845,7 @@ else
     process_pid="${process_cmdline#/proc/}"
     process_pid="${process_pid%/cmdline}"
     [[ "${process_pid}" == "$$" || "${process_pid}" == "${PPID}" ]] && continue
-    process_args="$(tr '\0' ' ' <"${process_cmdline}" 2>/dev/null || true)"
+    process_args="$(cat "${process_cmdline}" 2>/dev/null | tr '\0' ' ' || true)"
     if [[ "${process_args}" == *"${runtime_dir}"* ]] \
       && [[ "${process_args}" == *X0tigervnc* \
         || "${process_args}" == *x0vncserver* \
@@ -952,7 +1078,7 @@ mod tests {
         assert!(remote_args.iter().any(|arg| arg == "23682"));
         assert_eq!(remote_args.last().map(|arg| arg.as_ref()), Some("--flag"));
         assert!(ENSURE_DISPLAY_SCRIPT.contains("harbor-vnc-server"));
-        assert!(SHARED_DISPLAY_SCRIPT.contains("new RFB"));
+        assert!(NOVNC_INDEX_HTML.contains("new RFB"));
         assert!(SHARED_DISPLAY_SCRIPT.contains("HARBOR_VNC_DESKTOP_SESSION"));
         assert!(SHARED_DISPLAY_SCRIPT.contains("ubuntu.session"));
         assert!(SHARED_DISPLAY_SCRIPT.contains("XDG_CURRENT_DESKTOP=ubuntu:GNOME"));
@@ -969,11 +1095,20 @@ mod tests {
     #[test]
     fn physical_display_uses_distinct_port_and_valid_shell_scripts() {
         assert_eq!(PHYSICAL_VNC_PORT, 23683);
+        assert_eq!(local_display_number(":1"), Some(1));
+        assert_eq!(local_display_number(":1.0"), Some(1));
+        assert_eq!(local_display_number("localhost:1"), None);
+        assert_ne!(DISPLAY_NUMBER, 1);
         assert!(PHYSICAL_DISPLAY_SCRIPT.contains("setsid X0tigervnc"));
         assert!(PHYSICAL_DISPLAY_SCRIPT.contains("127.0.0.1:${panel_port}"));
         assert!(ENSURE_PHYSICAL_DISPLAY_SCRIPT.contains("stale_pids"));
+        assert!(ENSURE_PHYSICAL_DISPLAY_SCRIPT.contains("cat \"${process_cmdline}\""));
         assert!(PHYSICAL_DISPLAY_SCRIPT.contains("DISPLAY=\"${display_name}\""));
         assert!(ENSURE_PHYSICAL_DISPLAY_SCRIPT.contains("9>&- </dev/null"));
+        assert!(NOVNC_INDEX_HTML.contains("rfb.clipboardPasteFrom(text)"));
+        assert!(NOVNC_INDEX_HTML.contains("addEventListener('clipboard'"));
+        assert!(SHARED_DISPLAY_SCRIPT.contains("-AcceptCutText=1"));
+        assert!(PHYSICAL_DISPLAY_SCRIPT.contains("-SendCutText=1"));
         for script in [PHYSICAL_DISPLAY_SCRIPT, ENSURE_PHYSICAL_DISPLAY_SCRIPT] {
             let status = Command::new("bash")
                 .args(["-n", "-c", script])

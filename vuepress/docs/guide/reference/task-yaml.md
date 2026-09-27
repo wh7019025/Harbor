@@ -124,7 +124,7 @@ command:
 
 不要在这类 Task 的 `env` 或启动脚本中手写 `DISPLAY`、`XAUTHORITY`、
 `WAYLAND_DISPLAY`、`QT_QPA_PLATFORM` 或 `GDK_BACKEND`。远端显示环境由 Harbor
-管理，本地则继承当前图形会话；固定 `DISPLAY=:0` 会绕过 VNC。
+管理，本地则继承当前图形会话；手工固定 `DISPLAY` 会绕过 VNC。
 
 停止一个 Task 只关闭该程序，不会关闭共享桌面，也不会影响桌面中的其他 Task。
 TigerVNC 不监听 TCP，只使用 Harbor 运行时目录中的 Unix Socket。

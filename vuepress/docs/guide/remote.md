@@ -135,7 +135,7 @@ remote_display_virtual: true
 远端顶部提供两个机器级入口：
 
 - **虚拟桌面**：Harbor 创建的共享桌面。启用上述字段的 Task 会在这里打开窗口。
-- **真实桌面**：镜像远端已经登录的 X11 `DISPLAY=:0`，不改变 Task 的启动位置。
+- **真实桌面**：自动发现并镜像远端已经登录的 X11 桌面，不改变 Task 的启动位置。
 
 本地 Workspace 会忽略 `remote_display_virtual`，仍在当前图形会话中直接打开窗口。
 两个远端桌面都通过 SSH Tunnel 访问，无需开放 noVNC 端口。依赖缺失时，Harbor 会在

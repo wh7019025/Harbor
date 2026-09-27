@@ -83,6 +83,8 @@ pub struct CoreArgs {
     pub mobile_enabled: Option<bool>,
     pub remote_runtime: bool,
     pub workspace_id: Option<String>,
+    pub access_client_id: Option<String>,
+    pub access_owner_version: Option<String>,
 }
 
 impl CoreArgs {
@@ -91,6 +93,8 @@ impl CoreArgs {
         let mut mobile_enabled = None;
         let mut remote_runtime = false;
         let mut workspace_id = None;
+        let mut access_client_id = None;
+        let mut access_owner_version = None;
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -119,6 +123,18 @@ impl CoreArgs {
                         .ok_or_else(|| "--workspace requires an id".to_string())?;
                     workspace_id = Some(value);
                 }
+                "--access-client-id" => {
+                    access_client_id = Some(
+                        args.next()
+                            .ok_or_else(|| "--access-client-id requires a value".to_string())?,
+                    );
+                }
+                "--access-owner-version" => {
+                    access_owner_version =
+                        Some(args.next().ok_or_else(|| {
+                            "--access-owner-version requires a value".to_string()
+                        })?);
+                }
                 other => return Err(format!("unknown argument: {other}")),
             }
         }
@@ -127,6 +143,8 @@ impl CoreArgs {
             mobile_enabled,
             remote_runtime,
             workspace_id,
+            access_client_id,
+            access_owner_version,
         })
     }
 }
@@ -249,6 +267,11 @@ pub async fn run_async(args: CoreArgs) -> Result<(), String> {
         mobile_listener.is_some(),
         mobile_error,
     );
+    if let (Some(client_id), Some(owner_version)) =
+        (args.access_client_id, args.access_owner_version)
+    {
+        *state.access.lock() = web_api::CoreAccessLease::claimed(client_id, owner_version);
+    }
     let shutdown_taskcard = state.taskcard.clone();
     let shutdown_terminal = state.terminal.clone();
     if let Some(listener) = mobile_listener {

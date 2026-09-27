@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -12,28 +13,27 @@ use crate::{core_client, core_process, ssh_tunnel};
 const START_TIMEOUT: Duration = Duration::from_secs(8);
 
 pub struct WorkspaceTerminal {
-    workspace_id: String,
     local_port: u16,
     child: Child,
 }
 
 pub fn open(
     settings: &Settings,
-    current: &mut Option<WorkspaceTerminal>,
+    terminals: &mut HashMap<String, WorkspaceTerminal>,
 ) -> Result<String, String> {
     let workspace = settings.current()?;
     // --- 阶段 1：复用当前 Workspace 的健康终端 ---
-    if let Some(terminal) = current.as_mut() {
+    if let Some(terminal) = terminals.get_mut(workspace.id.as_str()) {
         let running = terminal
             .child
             .try_wait()
             .map_err(|error| format!("check workspace terminal failed: {error}"))?
             .is_none();
-        if running && terminal.workspace_id == workspace.id {
+        if running {
             return Ok(terminal.url());
         }
     }
-    stop(current);
+    stop(terminals, workspace.id.as_str());
 
     // --- 阶段 2：部署 ttyd，并由远端 Core 确保机器级服务可用 ---
     if workspace.mode != WorkspaceMode::Remote {
@@ -62,11 +62,7 @@ pub fn open(
         .map_err(|error| format!("create {} failed: {error}", log_dir.display()))?;
     let log_path = log_dir.join("workspace-terminal.log");
     let child = ssh_tunnel::spawn_forward_only(ssh, local_port, terminal.port, log_path.as_path())?;
-    let mut terminal = WorkspaceTerminal {
-        workspace_id: workspace.id.clone(),
-        local_port,
-        child,
-    };
+    let mut terminal = WorkspaceTerminal { local_port, child };
 
     // --- 阶段 4：等待 ttyd 页面真正可用 ---
     if let Err(error) = wait_ready(&mut terminal, &log_path) {
@@ -75,12 +71,19 @@ pub fn open(
         return Err(error);
     }
     let url = terminal.url();
-    *current = Some(terminal);
+    terminals.insert(workspace.id.clone(), terminal);
     Ok(url)
 }
 
-pub fn stop(current: &mut Option<WorkspaceTerminal>) {
-    if let Some(mut terminal) = current.take() {
+pub fn stop(terminals: &mut HashMap<String, WorkspaceTerminal>, workspace_id: &str) {
+    if let Some(mut terminal) = terminals.remove(workspace_id) {
+        let _ = terminal.child.kill();
+        let _ = terminal.child.wait();
+    }
+}
+
+pub fn stop_all(terminals: &mut HashMap<String, WorkspaceTerminal>) {
+    for (_, mut terminal) in terminals.drain() {
         let _ = terminal.child.kill();
         let _ = terminal.child.wait();
     }

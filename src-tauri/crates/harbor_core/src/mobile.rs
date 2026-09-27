@@ -126,6 +126,7 @@ mod tests {
             default_route_ip: "192.168.1.2".into(),
             vnc_port: 0,
             vnc_ready: false,
+            vnc_error: None,
             physical_vnc_port: 0,
             physical_vnc_ready: false,
             physical_vnc_error: None,

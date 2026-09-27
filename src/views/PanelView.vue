@@ -12,6 +12,7 @@ defineProps<{
       class="block min-h-0 w-full flex-1 border-0 bg-[var(--bg-0)]"
       :src="url"
       :title="title"
+      allow="clipboard-read; clipboard-write"
     />
     <p v-else class="px-3 py-2 text-sm text-[#f48771]">缺少面板地址</p>
   </div>

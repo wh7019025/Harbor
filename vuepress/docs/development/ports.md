@@ -46,7 +46,7 @@ Harbor 将机器级服务固定在少量保留端口上，把用户程序端口�
 
 ### `23683` · 真实桌面
 
-远端 `DISPLAY=:0` 的 noVNC HTTP/WebSocket 入口。
+远端已登录 X11 真实桌面的 noVNC HTTP/WebSocket 入口。Core 会自动发现实际的 `DISPLAY`。
 
 - 与虚拟桌面使用不同端口，但采用相同的回环监听与 SSH Tunnel 模式。
 - 仅用于查看和操作已经存在的真实桌面，不决定 Task 在哪个 Display 中启动。

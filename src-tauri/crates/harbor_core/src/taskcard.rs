@@ -395,6 +395,7 @@ impl TaskCardService {
             default_route_ip: default_route_ip(),
             vnc_port: crate::vnc_interface::VNC_PORT,
             vnc_ready: crate::vnc_interface::is_ready(),
+            vnc_error: crate::vnc_interface::shared_error(),
             physical_vnc_port: crate::vnc_interface::PHYSICAL_VNC_PORT,
             physical_vnc_ready: crate::vnc_interface::is_physical_ready(),
             physical_vnc_error: crate::vnc_interface::physical_error(),

@@ -62,6 +62,7 @@ export interface TaskCardSnapshot {
   default_route_ip: string;
   vnc_port: number;
   vnc_ready: boolean;
+  vnc_error: string | null;
   physical_vnc_port: number;
   physical_vnc_ready: boolean;
   physical_vnc_error: string | null;
@@ -125,7 +126,7 @@ export function fetchTaskCard() {
 }
 
 export function ensurePhysicalDisplay() {
-  return invoke<TaskCardSnapshot>("ensure_physical_display");
+  return invoke<void>("ensure_physical_display");
 }
 
 export function researchTaskCard() {

@@ -92,6 +92,21 @@ pub fn stop_all(tunnels: &mut HashMap<String, PanelTunnel>) {
     }
 }
 
+pub fn stop_workspace(
+    tunnels: &mut HashMap<String, PanelTunnel>,
+    workspace_id: &str,
+) -> Vec<String> {
+    let labels = tunnels
+        .iter()
+        .filter(|(_, tunnel)| tunnel.workspace_id == workspace_id)
+        .map(|(label, _)| label.clone())
+        .collect::<Vec<_>>();
+    for label in &labels {
+        stop(tunnels, label);
+    }
+    labels
+}
+
 fn url_port(url: &str) -> Result<u16, String> {
     let (_, authority, _) = url_parts(url)?;
     authority

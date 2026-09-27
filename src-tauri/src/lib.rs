@@ -34,7 +34,7 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 struct AppState {
     settings: Mutex<Settings>,
     panel_tunnels: Mutex<HashMap<String, panel_tunnel::PanelTunnel>>,
-    workspace_terminal: Mutex<Option<workspace_terminal::WorkspaceTerminal>>,
+    workspace_terminals: Mutex<HashMap<String, workspace_terminal::WorkspaceTerminal>>,
     remote_core_connections: Mutex<HashSet<String>>,
 }
 
@@ -91,14 +91,36 @@ fn release_all_core_access(state: &AppState) {
     }
 }
 
-fn close_workspace_terminal(app: &tauri::AppHandle, state: &AppState) {
-    workspace_terminal::stop(&mut state.workspace_terminal.lock());
-    if let Some(window) = app.get_webview_window("workspace-terminal") {
+fn workspace_terminal_window_label(workspace_id: &str) -> String {
+    format!("workspace-terminal-{workspace_id}")
+}
+
+fn close_workspace_terminal(app: &tauri::AppHandle, state: &AppState, workspace_id: &str) {
+    workspace_terminal::stop(&mut state.workspace_terminals.lock(), workspace_id);
+    if let Some(window) = app.get_webview_window(&workspace_terminal_window_label(workspace_id)) {
         let _ = window.close();
     }
 }
 
-fn close_panel_tunnels(app: &tauri::AppHandle, state: &AppState) {
+fn close_all_workspace_terminals(app: &tauri::AppHandle, state: &AppState) {
+    workspace_terminal::stop_all(&mut state.workspace_terminals.lock());
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("workspace-terminal-") {
+            let _ = window.close();
+        }
+    }
+}
+
+fn close_workspace_panel_tunnels(app: &tauri::AppHandle, state: &AppState, workspace_id: &str) {
+    let labels = panel_tunnel::stop_workspace(&mut state.panel_tunnels.lock(), workspace_id);
+    for label in labels {
+        if let Some(window) = app.get_webview_window(label.as_str()) {
+            let _ = window.close();
+        }
+    }
+}
+
+fn close_all_panel_tunnels(app: &tauri::AppHandle, state: &AppState) {
     panel_tunnel::stop_all(&mut state.panel_tunnels.lock());
     for (label, window) in app.webview_windows() {
         if label.starts_with("panel-") {
@@ -202,11 +224,7 @@ async fn update_settings(
 }
 
 #[tauri::command]
-async fn switch_workspace(
-    app: tauri::AppHandle,
-    state: State<'_, Arc<AppState>>,
-    id: String,
-) -> Result<Settings, String> {
+async fn switch_workspace(state: State<'_, Arc<AppState>>, id: String) -> Result<Settings, String> {
     let mut settings = state.settings.lock().clone();
     if settings.current_workspace == id {
         return Ok(settings);
@@ -218,7 +236,6 @@ async fn switch_workspace(
     {
         return Err(format!("workspace not found: {id}"));
     }
-    close_workspace_terminal(&app, state.inner());
     settings.current_workspace = id;
     settings.normalize();
     persist_settings(state.inner(), settings.clone())?;
@@ -295,8 +312,8 @@ fn update_workspace(
             core_process::release_core(&current);
         }
     }
-    close_workspace_terminal(&app, state.inner());
-    close_panel_tunnels(&app, state.inner());
+    close_workspace_terminal(&app, state.inner(), id.as_str());
+    close_workspace_panel_tunnels(&app, state.inner(), id.as_str());
     let mut settings = state.settings.lock().clone();
     let workspace = settings
         .workspaces
@@ -335,9 +352,9 @@ fn delete_workspace(
         return Err(format!("workspace not found: {id}"));
     }
     release_remote_workspace(state.inner(), &settings, id.as_str());
+    close_workspace_terminal(&app, state.inner(), id.as_str());
+    close_workspace_panel_tunnels(&app, state.inner(), id.as_str());
     if settings.current_workspace == id {
-        close_workspace_terminal(&app, state.inner());
-        close_panel_tunnels(&app, state.inner());
         settings.current_workspace = settings
             .workspaces
             .iter()
@@ -437,8 +454,8 @@ fn disconnect_remote_workspace_core(
         return Err("当前 Workspace 不是远端 Workspace".into());
     }
     release_remote_workspace(state.inner(), &settings, workspace.id.as_str());
-    close_workspace_terminal(&app, state.inner());
-    close_panel_tunnels(&app, state.inner());
+    close_workspace_terminal(&app, state.inner(), workspace.id.as_str());
+    close_workspace_panel_tunnels(&app, state.inner(), workspace.id.as_str());
     harbor_support::app_log::gui(&format!("remote workspace disconnected: {}", workspace.id));
     Ok(())
 }
@@ -497,8 +514,8 @@ async fn shutdown_harbor_core_and_exit(
 
     // --- 阶段 2：关闭 GUI 附属进程与窗口 ---
     release_all_core_access(state.inner());
-    close_workspace_terminal(&app, state.inner());
-    close_panel_tunnels(&app, state.inner());
+    close_all_workspace_terminals(&app, state.inner());
+    close_all_panel_tunnels(&app, state.inner());
     app.exit(0);
     Ok(())
 }
@@ -533,9 +550,9 @@ fn get_mini_metrics(state: State<'_, Arc<AppState>>) -> Result<MiniMetrics, Stri
     })
 }
 
-fn panel_window_label(title: &str, url: &str) -> String {
+fn panel_window_label(workspace_id: &str, title: &str, url: &str) -> String {
     let mut digest = 2166136261u32;
-    for byte in title.bytes().chain(url.bytes()) {
+    for byte in workspace_id.bytes().chain(title.bytes()).chain(url.bytes()) {
         digest ^= u32::from(byte);
         digest = digest.wrapping_mul(16777619);
     }
@@ -549,12 +566,12 @@ async fn open_panel_window(
     title: String,
     url: String,
 ) -> Result<(), String> {
-    let label = panel_window_label(title.as_str(), url.as_str());
+    let workspace = current_settings(state.inner()).current()?.clone();
+    let label = panel_window_label(workspace.id.as_str(), title.as_str(), url.as_str());
     if let Some(existing) = app.get_webview_window(label.as_str()) {
         existing.set_focus().map_err(|error| error.to_string())?;
         return Ok(());
     }
-    let workspace = current_settings(state.inner()).current()?.clone();
     let app_state = state.inner().clone();
     let tunnel_label = label.clone();
     let panel_url = tauri::async_runtime::spawn_blocking(move || {
@@ -622,8 +639,8 @@ async fn open_workspace_terminal(
     let app_state = state.inner().clone();
     let workspace_id = workspace.id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let mut terminal = app_state.workspace_terminal.lock();
-        workspace_terminal::open(&settings, &mut terminal)
+        let mut terminals = app_state.workspace_terminals.lock();
+        workspace_terminal::open(&settings, &mut terminals)
     })
     .await
     .map_err(|error| format!("workspace terminal worker failed: {error}"))?;
@@ -639,7 +656,8 @@ async fn open_workspace_terminal(
             return Err(error);
         }
     };
-    match open_panel_window_with_label(&app, title.as_str(), url.as_str(), "workspace-terminal") {
+    let window_label = workspace_terminal_window_label(workspace_id.as_str());
+    match open_panel_window_with_label(&app, title.as_str(), url.as_str(), window_label.as_str()) {
         Ok(()) => Ok(()),
         Err(error) => {
             harbor_support::app_log::gui(&format!(
@@ -659,9 +677,7 @@ async fn taskcard_snapshot(state: State<'_, Arc<AppState>>) -> Result<TaskCardSn
 }
 
 #[tauri::command]
-async fn ensure_physical_display(
-    state: State<'_, Arc<AppState>>,
-) -> Result<TaskCardSnapshot, String> {
+async fn ensure_physical_display(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let app_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_core(&app_state, core_client::ensure_physical_display)
@@ -1071,7 +1087,7 @@ pub fn run() {
     let state = Arc::new(AppState {
         settings: Mutex::new(settings),
         panel_tunnels: Mutex::new(HashMap::new()),
-        workspace_terminal: Mutex::new(None),
+        workspace_terminals: Mutex::new(HashMap::new()),
         remote_core_connections: Mutex::new(HashSet::new()),
     });
 
@@ -1149,8 +1165,14 @@ pub fn run() {
             if window.label() == "task-click" && matches!(event, WindowEvent::CloseRequested { .. })
             {
                 let state = window.state::<Arc<AppState>>();
-                workspace_terminal::stop(&mut state.workspace_terminal.lock());
+                workspace_terminal::stop_all(&mut state.workspace_terminals.lock());
                 panel_tunnel::stop_all(&mut state.panel_tunnels.lock());
+            }
+            if let Some(workspace_id) = window.label().strip_prefix("workspace-terminal-") {
+                if matches!(event, WindowEvent::Destroyed) {
+                    let state = window.state::<Arc<AppState>>();
+                    workspace_terminal::stop(&mut state.workspace_terminals.lock(), workspace_id);
+                }
             }
             if window.label().starts_with("panel-") && matches!(event, WindowEvent::Destroyed) {
                 let state = window.state::<Arc<AppState>>();

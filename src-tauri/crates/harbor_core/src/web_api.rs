@@ -136,6 +136,16 @@ impl WebApiState {
     }
 }
 
+impl CoreAccessLease {
+    pub fn claimed(client_id: String, gui_version: String) -> Self {
+        Self {
+            client_id: Some(client_id),
+            gui_version: Some(gui_version),
+            refreshed_at: Some(Instant::now()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct WebApiStatus {
     pub localhost_only: bool,
@@ -473,14 +483,12 @@ async fn list_core_services(State(state): State<WebApiState>) -> Json<Value> {
     Json(json!({ "services": services }))
 }
 
-async fn ensure_physical_display(
-    State(state): State<WebApiState>,
-) -> Result<Json<Value>, ApiError> {
+async fn ensure_physical_display() -> Result<Json<Value>, ApiError> {
     tokio::task::spawn_blocking(crate::vnc_interface::ensure_physical_display)
         .await
         .map_err(|error| ApiError::BadRequest(format!("physical display worker failed: {error}")))?
         .map_err(ApiError::BadRequest)?;
-    Ok(Json(json!(snapshot(&state))))
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn ensure_terminal(

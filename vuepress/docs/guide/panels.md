@@ -37,7 +37,7 @@ command:
 [远端虚拟显示示例](https://github.com/wh7019025/Harbor/tree/main/examples/vnc_interface)。
 
 运行 Task 的机器需要安装 TigerVNC、noVNC、websockify、Openbox 和 util-linux。远端
-Core 还会提供独立的真实桌面入口：显示器图标镜像 `DISPLAY=:0`，立方体图标则打开
+Core 还会提供独立的真实桌面入口：显示器图标镜像自动发现的已登录 X11 桌面，立方体图标则打开
 启用 `remote_display_virtual` 的 Task 所在的共享虚拟桌面。真实桌面额外需要
 `tigervnc-scraping-server`，但不改变 Task 的运行位置。
 

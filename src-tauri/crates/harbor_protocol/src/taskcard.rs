@@ -99,6 +99,8 @@ pub struct TaskCardSnapshot {
     pub vnc_port: u16,
     #[serde(default)]
     pub vnc_ready: bool,
+    #[serde(default)]
+    pub vnc_error: Option<String>,
     #[serde(default = "physical_vnc_port")]
     pub physical_vnc_port: u16,
     #[serde(default)]
