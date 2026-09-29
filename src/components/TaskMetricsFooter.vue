@@ -24,6 +24,9 @@ let performanceTimer: number | undefined;
 let resourceTimer: number | undefined;
 let coreTimer: number | undefined;
 let pollingCore = false;
+let pollingSystemMetrics = false;
+let pollingPerformanceMetrics = false;
+let pollingResourceMetrics = false;
 
 const valueWidth: Record<string, string> = {
   CPU: "3.25rem",
@@ -106,16 +109,64 @@ async function pollCoreStatus() {
   if (pollingCore) return;
   pollingCore = true;
   try {
+    const previousSource = metricSourceKey(coreStatus.value);
     const [status, progress] = await Promise.all([
       getHarborCoreStatus(),
       getHarborCopyProgress(),
     ]);
     coreStatus.value = status;
     deployProgress.value = progress;
+    if (previousSource && previousSource !== metricSourceKey(status)) metrics.value = null;
+    if (status.connected && !metrics.value) void pollSystemMetrics();
   } catch {
     coreStatus.value = null;
   } finally {
     pollingCore = false;
+  }
+}
+
+function metricSourceKey(status: HarborCoreStatus | null) {
+  if (!status) return "";
+  return `${status.mode}:${status.workspace_id ?? ""}:${status.listen_url}`;
+}
+
+async function pollSystemMetrics() {
+  if (pollingSystemMetrics) return;
+  pollingSystemMetrics = true;
+  try {
+    metrics.value = await getSystemMetrics();
+  } catch {
+    // Retry after the selected Core becomes connected.
+  } finally {
+    pollingSystemMetrics = false;
+  }
+}
+
+async function pollPerformanceMetrics() {
+  if (pollingPerformanceMetrics) return;
+  if (!metrics.value) {
+    if (coreStatus.value?.connected) await pollSystemMetrics();
+    return;
+  }
+  pollingPerformanceMetrics = true;
+  try {
+    mergePerformanceMetrics(await getPerformanceMetrics());
+  } catch {
+    // Keep the last complete sample during transient connection failures.
+  } finally {
+    pollingPerformanceMetrics = false;
+  }
+}
+
+async function pollResourceMetrics() {
+  if (pollingResourceMetrics || !metrics.value) return;
+  pollingResourceMetrics = true;
+  try {
+    mergeResourceMetrics(await getResourceMetrics());
+  } catch {
+    // Keep the last complete sample during transient connection failures.
+  } finally {
+    pollingResourceMetrics = false;
   }
 }
 
@@ -145,26 +196,17 @@ function mergeResourceMetrics(next: ResourceMetrics) {
 }
 
 onMounted(async () => {
+  // --- 阶段 1：读取轮询配置并探测当前 Core ---
   const settings = await getSettings().catch(() => null);
   void pollCoreStatus();
-  try {
-    metrics.value = await getSystemMetrics();
-  } catch {
-    // Keep placeholder values when metrics are unavailable.
-  }
-  performanceTimer = window.setInterval(async () => {
-    try {
-      mergePerformanceMetrics(await getPerformanceMetrics());
-    } catch {
-      // Keep last values when sample fails.
-    }
+  await pollSystemMetrics();
+
+  // --- 阶段 2：持续更新性能与资源指标，断线重连后自动恢复 ---
+  performanceTimer = window.setInterval(() => {
+    void pollPerformanceMetrics();
   }, settings?.performance_metrics_interval_ms ?? 1000);
-  resourceTimer = window.setInterval(async () => {
-    try {
-      mergeResourceMetrics(await getResourceMetrics());
-    } catch {
-      // Keep last values when sample fails.
-    }
+  resourceTimer = window.setInterval(() => {
+    void pollResourceMetrics();
   }, settings?.resource_metrics_interval_ms ?? 10000);
   coreTimer = window.setInterval(() => {
     void pollCoreStatus();

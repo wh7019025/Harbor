@@ -522,6 +522,7 @@ impl TaskCardService {
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
         command.envs(merged_task_env(task, config, env_override));
+        remove_desktop_activation_env(&mut command);
         unsafe {
             command.pre_exec(|| {
                 if libc::setpgid(0, 0) == 0 {
@@ -1606,6 +1607,18 @@ fn desktop_session_env() -> HashMap<String, String> {
     parse_desktop_session_env(String::from_utf8_lossy(&output.stdout).as_ref())
 }
 
+fn remove_desktop_activation_env(command: &mut Command) {
+    // --- 阶段 1：保留 DISPLAY 等持久桌面会话变量 ---
+    // --- 阶段 2：移除仅属于 Harbor 启动过程的一次性窗口激活令牌 ---
+    for key in [
+        "DESKTOP_STARTUP_ID",
+        "XDG_ACTIVATION_TOKEN",
+        "GDK_ACTIVATION_TOKEN",
+    ] {
+        command.env_remove(key);
+    }
+}
+
 fn parse_desktop_session_env(content: &str) -> HashMap<String, String> {
     const KEYS: [&str; 5] = [
         "DISPLAY",
@@ -2587,7 +2600,11 @@ mod tests {
     use super::*;
 
     fn unique_temp(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("{name}-{}-{}", std::process::id(), now_ms()));
+        let root = std::env::temp_dir().join(format!(
+            "{name}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
         if root.exists() {
             fs::remove_dir_all(&root).unwrap();
         }
@@ -2602,7 +2619,23 @@ mod tests {
 
     fn service_with_project(root: &Path, project: &Path) -> TaskCardService {
         fs::create_dir_all(project).unwrap();
-        TaskCardService::new(root.to_path_buf(), vec![project.to_path_buf()]).unwrap()
+        test_service_after_lock_release(root, vec![project.to_path_buf()])
+    }
+
+    fn test_service_after_lock_release(root: &Path, search_paths: Vec<PathBuf>) -> TaskCardService {
+        // --- 阶段 1：等待并行测试派生的子进程完成 exec 并关闭继承锁 ---
+        for _ in 0..50 {
+            match TaskCardService::new(root.to_path_buf(), search_paths.clone()) {
+                Ok(service) => return service,
+                Err(error) if error.contains("another Harbor instance") => {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("create test TaskCard service failed: {error}"),
+            }
+        }
+
+        // --- 阶段 2：超过短暂 fork/exec 窗口后保留真实锁错误 ---
+        TaskCardService::new(root.to_path_buf(), search_paths).unwrap()
     }
 
     #[test]
@@ -2677,6 +2710,31 @@ command:
             Some("/run/user/1000/gdm/Xauthority")
         );
         assert!(!env.contains_key("IGNORED"));
+    }
+
+    #[test]
+    fn task_command_removes_parent_window_activation_tokens() {
+        let mut command = Command::new("echo");
+        command.env("DISPLAY", ":1");
+        command.env("DESKTOP_STARTUP_ID", "harbor-startup");
+        command.env("XDG_ACTIVATION_TOKEN", "harbor-token");
+        command.env("GDK_ACTIVATION_TOKEN", "harbor-gdk-token");
+
+        remove_desktop_activation_env(&mut command);
+
+        let env = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(env.get("DISPLAY"), Some(&Some(":1".into())));
+        assert_eq!(env.get("DESKTOP_STARTUP_ID"), Some(&None));
+        assert_eq!(env.get("XDG_ACTIVATION_TOKEN"), Some(&None));
+        assert_eq!(env.get("GDK_ACTIVATION_TOKEN"), Some(&None));
     }
 
     #[test]
@@ -3782,7 +3840,7 @@ command:
         let second = TaskCardService::new(root.clone(), Vec::new());
         assert!(second.is_err());
         drop(first);
-        TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        test_service_after_lock_release(&root, Vec::new());
         fs::remove_dir_all(root).unwrap();
     }
 

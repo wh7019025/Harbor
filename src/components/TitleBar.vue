@@ -20,14 +20,32 @@ const emit = defineEmits<{
 const appWindow = getCurrentWindow();
 const isFullscreen = ref(false);
 let unlistenResized: (() => void) | null = null;
+let dragOrigin: { x: number; y: number } | null = null;
+let dragStarted = false;
 
 async function syncFullscreen() {
   isFullscreen.value = await appWindow.isFullscreen();
   emit("fullscreenChange", isFullscreen.value);
 }
 
-async function drag() {
-  await appWindow.startDragging();
+function beginDrag(event: MouseEvent) {
+  if (event.button !== 0 || isFullscreen.value) return;
+  dragOrigin = { x: event.screenX, y: event.screenY };
+  dragStarted = false;
+}
+
+function continueDrag(event: MouseEvent) {
+  if (!dragOrigin || dragStarted || event.buttons !== 1) return;
+  const distance = Math.hypot(event.screenX - dragOrigin.x, event.screenY - dragOrigin.y);
+  if (distance < 4) return;
+  dragStarted = true;
+  dragOrigin = null;
+  void appWindow.startDragging().catch(endDrag);
+}
+
+function endDrag() {
+  dragOrigin = null;
+  dragStarted = false;
 }
 
 async function minimize() {
@@ -51,6 +69,9 @@ async function close() {
 }
 
 onMounted(async () => {
+  window.addEventListener("mousemove", continueDrag);
+  window.addEventListener("mouseup", endDrag);
+  window.addEventListener("blur", endDrag);
   await syncFullscreen();
   unlistenResized = await appWindow.onResized(() => {
     void syncFullscreen();
@@ -58,6 +79,9 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("mousemove", continueDrag);
+  window.removeEventListener("mouseup", endDrag);
+  window.removeEventListener("blur", endDrag);
   unlistenResized?.();
 });
 </script>
@@ -65,7 +89,7 @@ onBeforeUnmount(() => {
 <template>
   <header
     class="titlebar flex h-10 shrink-0 select-none items-center border-b border-[var(--line-soft)] bg-[var(--bg-1)]"
-    @mousedown="drag"
+    @mousedown="beginDrag"
   >
     <div class="flex min-w-0 flex-1 items-center gap-2 px-3.5">
       <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />

@@ -1479,6 +1479,7 @@ impl ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{Workspace, WorkspaceMode};
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use std::fs;
@@ -1560,8 +1561,20 @@ command:
         )
         .unwrap();
         let service = TaskCardService::new(root.clone(), vec![project]).unwrap();
+        let settings = Settings {
+            current_workspace: "default".into(),
+            workspaces: vec![Workspace {
+                id: "default".into(),
+                name: "default".into(),
+                mode: WorkspaceMode::Local,
+                ssh: None,
+                localhost_only: None,
+                search_paths: Vec::new(),
+            }],
+            ..Settings::default()
+        };
         (
-            WebApiState::new(service, Settings::default(), true, false, false, None),
+            WebApiState::new(service, settings, true, false, false, None),
             root,
         )
     }

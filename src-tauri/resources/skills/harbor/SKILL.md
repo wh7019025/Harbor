@@ -15,7 +15,7 @@ Use Harbor to turn repeatable commands into project-owned Task and Group workflo
 4. Stop a running Task before changing its definition.
 5. Preserve unspecified commands, fields, environment variables, and configuration.
 6. Validate YAML paths, Task references, UUID uniqueness, interface mode, and the Harbor version rule.
-7. For runtime work, call the HTTP API directly instead of instructing the user to click the GUI.
+7. For runtime work, obtain network access permission and call the HTTP API directly instead of instructing the user to click the GUI. Sandboxed commands normally cannot reach `harbor_core`, including `127.0.0.1:29385` and LAN addresses.
 8. Report the files changed and runtime actions performed.
 
 ## Choose the Configuration Type
@@ -47,6 +47,7 @@ Use Harbor to turn repeatable commands into project-owned Task and Group workflo
 
 ## Operational Rules
 
+- Accessing `harbor_core` requires network permission. When running inside a sandbox, request approval to execute the HTTP request with network access outside the sandbox; do not treat `connection refused`, timeout, or other sandboxed request failures as proof that Core is offline until the request has been retried with the required permission.
 - Recognize copied Harbor Tags in these forms: `Harbor:local:<prefix_path>:<task_id>` and `Harbor:remote@<ssh_target>:<prefix_path>:<task_id>`. The scope identifies where the Task configuration and runtime belong; do not silently operate a remote Tag through a local workspace.
 - Treat `(prefix_path, id)` as the configuration lookup key and `uuid` as the global runtime identity.
 - Allow the core to generate a missing UUID; never copy a UUID from another Task or Group.
