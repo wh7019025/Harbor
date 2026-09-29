@@ -25,8 +25,8 @@ const emit = defineEmits<{
 }>();
 
 const form = ref<Settings>({
-  current_workspace: "default",
-  workspaces: [{ id: "default", name: "default", mode: "local", search_paths: [] }],
+  current_workspace: "",
+  workspaces: [],
   mobile_enabled: false,
   performance_metrics_interval_ms: 1000,
   resource_metrics_interval_ms: 10000,

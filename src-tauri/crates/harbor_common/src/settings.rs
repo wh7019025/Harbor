@@ -80,9 +80,9 @@ impl Workspace {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
-    #[serde(default = "default_workspace_id")]
+    #[serde(default)]
     pub current_workspace: String,
-    #[serde(default = "default_workspaces")]
+    #[serde(default)]
     pub workspaces: Vec<Workspace>,
     #[serde(default)]
     pub mobile_enabled: bool,
@@ -104,25 +104,6 @@ fn default_performance_metrics_interval_ms() -> u64 {
 
 fn default_resource_metrics_interval_ms() -> u64 {
     10000
-}
-
-fn default_workspace_id() -> String {
-    "default".to_string()
-}
-
-fn default_workspaces() -> Vec<Workspace> {
-    vec![default_workspace()]
-}
-
-pub fn default_workspace() -> Workspace {
-    Workspace {
-        id: default_workspace_id(),
-        name: "default".to_string(),
-        mode: WorkspaceMode::Local,
-        ssh: None,
-        localhost_only: Some(true),
-        search_paths: Vec::new(),
-    }
 }
 
 pub fn normalize_workspace_ssh(
@@ -493,8 +474,8 @@ pub fn remove_current_search_path(settings: &mut Settings, path: &str) -> Result
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            current_workspace: default_workspace_id(),
-            workspaces: default_workspaces(),
+            current_workspace: String::new(),
+            workspaces: Vec::new(),
             mobile_enabled: false,
             performance_metrics_interval_ms: default_performance_metrics_interval_ms(),
             resource_metrics_interval_ms: default_resource_metrics_interval_ms(),
@@ -505,7 +486,8 @@ impl Default for Settings {
 impl Settings {
     pub fn normalize(&mut self) {
         if self.workspaces.is_empty() {
-            self.workspaces = default_workspaces();
+            self.current_workspace.clear();
+            return;
         }
         if !self
             .workspaces
@@ -526,7 +508,13 @@ impl Settings {
         self.workspaces
             .iter()
             .find(|workspace| workspace.id == self.current_workspace)
-            .ok_or_else(|| format!("workspace not found: {}", self.current_workspace))
+            .ok_or_else(|| {
+                if self.workspaces.is_empty() {
+                    "workspace is not configured".to_string()
+                } else {
+                    format!("workspace not found: {}", self.current_workspace)
+                }
+            })
     }
 
     pub fn current_mut(&mut self) -> Result<&mut Workspace, String> {
@@ -895,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn local_workspace_localhost_only_defaults_true() {
+    fn settings_default_without_workspace() {
         let settings: Settings = serde_json::from_str(
             r#"{
                 "performance_metrics_interval_ms": 1000,
@@ -903,9 +891,9 @@ mod tests {
             }"#,
         )
         .unwrap();
-        assert!(settings.current().unwrap().localhost_only());
-        assert_eq!(settings.current_workspace, "default");
-        assert_eq!(settings.workspaces.len(), 1);
+        assert!(settings.current().is_err());
+        assert!(settings.current_workspace.is_empty());
+        assert!(settings.workspaces.is_empty());
     }
 
     #[test]
@@ -1121,12 +1109,11 @@ mod tests {
             }"#,
         )
         .unwrap();
-        assert_eq!(settings.current_workspace, "default");
-        assert_eq!(settings.workspaces, default_workspaces());
-        assert!(settings.current().unwrap().search_paths.is_empty());
+        assert!(settings.current_workspace.is_empty());
+        assert!(settings.workspaces.is_empty());
+        assert!(settings.current().is_err());
         assert_eq!(settings.performance_metrics_interval_ms, 500);
         assert_eq!(settings.resource_metrics_interval_ms, 2000);
-        assert!(settings.current().unwrap().localhost_only());
     }
 
     #[test]

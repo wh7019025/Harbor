@@ -36,7 +36,9 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 | `workspaces[].search_paths` | string[] | 该 workspace 搜索项目配置的起点目录。路径相对于 **harbor_core 所在机器** |
 | `mobile_enabled` | bool | 是否在 `0.0.0.0:29387` 开启只读 Mobile 网页面板入口；默认 `false` |
 
-文件不存在时，Harbor 使用内置默认值：一个 `id/name = default` 的 workspace，其 `search_paths` 为空。
+文件不存在时，Harbor 从空 Workspace 列表开始，并在 GUI 中要求用户先创建 Workspace。
+Linux 支持 local 与 remote；Windows 和 macOS 只支持 remote，不会在本机启动
+`harbor_core`。Agent 遇到空列表时应告知用户先创建 Workspace，不能自行伪造 `default`。
 
 任务日志保存在 **core 所在机器**。本地运行按 Workspace 使用 `~/.harbor/workspace/<id>/log/`；远端机器不拥有本地 Workspace 定义，因此统一使用机器级 `~/.harbor/remote/log/`。全机任务占用与进程注册保存在 `~/.harbor/runtime/run/`，按 UUID 跨 workspace 共享。Task / Group YAML **不**放在这些目录，只来自当前 Workspace 的 `search_paths`。远端 Workspace 定义由 GUI 在连接时传入，只驻留于远端 Core 内存，不写入远端 `settings.json`。
 
@@ -66,7 +68,7 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 
 ### 阶段一：读取与检查
 
-1. 读取现有 `~/.harbor/settings.json`；文件不存在时以 Harbor 默认值为基础创建。
+1. 读取现有 `~/.harbor/settings.json`；文件不存在或 Workspace 列表为空时，停止修改并提示用户先创建 Workspace。
 2. 找到 `current_workspace` 对应的 workspace 项。
 3. 确认当前项目的绝对路径和 `harbor_taskcfg` 位置。
 4. 检查该 workspace 的 `search_paths` 是否已经覆盖该项目，并确认 `harbor_taskcfg` 位于向下 4 层以内。

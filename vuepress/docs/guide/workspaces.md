@@ -9,6 +9,12 @@ Workspace 决定两件事：**连接哪台机器，以及在这台机器上查�
 
 你可以为日常开发、机器人本体或不同项目分别创建 Workspace。切换时，Harbor 会显示对应机器上的任务和日志，不需要重新配置项目。
 
+Harbor 首次启动时不会自动创建 Workspace，而是直接打开创建窗口：
+
+- Linux 可以创建本地或远端 Workspace。
+- Windows 与 macOS 只提供远端模式，任务实际运行在远端 Linux 主机的 `harbor_core` 中。
+- 已有 Workspace 的用户升级后会保留原配置，不会重新进入首次创建流程。
+
 ## 什么时候需要 Workspace
 
 ### 区分不同项目
@@ -78,7 +84,8 @@ Workspace 决定两件事：**连接哪台机器，以及在这台机器上查�
 
 ### 本地 Workspace
 
-适合开发、调试和运行本机程序。Harbor 默认只允许本机访问 Core。
+适合在 Linux 上开发、调试和运行本机程序。Harbor 默认只允许本机访问 Core。Windows
+与 macOS 不提供本地运行模式，也不会尝试在本机启动 `harbor_core`。
 
 ### 远端 Workspace
 

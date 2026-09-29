@@ -98,7 +98,7 @@ impl HarborCoreStatus {
             error: Some(error),
             mode: workspace
                 .map(|item| format!("{:?}", item.mode).to_lowercase())
-                .unwrap_or_else(|| "local".into()),
+                .unwrap_or_else(|| "unconfigured".into()),
             access_occupied: false,
             access_owner_version: None,
         }

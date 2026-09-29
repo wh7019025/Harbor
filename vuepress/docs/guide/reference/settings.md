@@ -28,12 +28,17 @@ Harbor 的用户数据统一位于：
 
 ## Workspace 设置
 
+全新安装的 `workspaces` 为空，Harbor 首次打开时要求用户创建 Workspace，不会自动生成
+名为 `default` 的本地配置。已有 `settings.json` 中的 Workspace 会原样保留。
+
 每个 Workspace 至少包含：
 
 - 唯一 id 和显示名称。
 - 本地或远端连接类型。
 - 一个或多个 `search_paths`。
 - 远端模式下的 SSH host、port 与 user。
+
+本地 Workspace 仅支持 Linux。Windows 与 macOS GUI 只允许创建远端 Workspace。
 
 Workspace 配置只由运行 GUI 的电脑维护。远端 Core 接收当前 Workspace 的名称与
 `search_paths` 作为运行时视图，不会把它当成另一份用户配置源。远端的

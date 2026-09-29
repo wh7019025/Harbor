@@ -53,6 +53,10 @@ export function getSettings() {
   return invoke<Settings>("get_settings");
 }
 
+export function getLocalWorkspaceSupported() {
+  return invoke<boolean>("local_workspace_supported");
+}
+
 export function updateSettings(next: Settings) {
   return invoke<Settings>("update_settings", { next });
 }

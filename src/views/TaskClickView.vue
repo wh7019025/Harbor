@@ -83,6 +83,7 @@ import {
   deleteWorkspace,
   disconnectRemoteWorkspaceCore,
   getHarborCopyProgress,
+  getLocalWorkspaceSupported,
   getSettings,
   isRemoteWorkspaceConnected,
   openWorkspaceTerminal,
@@ -98,6 +99,7 @@ import {
 
 const snapshot = ref<TaskCardSnapshot | null>(null);
 const settings = ref<HarborSettings | null>(null);
+const localWorkspaceSupported = ref<boolean | null>(null);
 const logs = ref<TaskLogSummary[]>([]);
 const loading = ref(true);
 const refreshing = ref(false);
@@ -253,15 +255,20 @@ const listedLogs = computed(() =>
 );
 const searchPaths = computed(() => snapshot.value?.search_paths ?? currentWorkspace()?.search_paths ?? []);
 const workspaceOptions = computed(() =>
-  (settings.value?.workspaces ?? []).map((workspace) => ({
-    value: workspace.id,
-    label: workspace.mode === "remote" ? `${workspace.name} · remote` : workspace.name,
-  })),
+  (settings.value?.workspaces ?? [])
+    .filter((workspace) => localWorkspaceSupported.value !== false || workspace.mode === "remote")
+    .map((workspace) => ({
+      value: workspace.id,
+      label: workspace.mode === "remote" ? `${workspace.name} · remote` : workspace.name,
+    })),
 );
 const currentWorkspaceId = computed(() => settings.value?.current_workspace ?? "");
+const workspaceRequired = computed(
+  () => settings.value !== null && settings.value.workspaces.length === 0,
+);
 const workspaceFormValid = computed(() => {
   if (!workspaceName.value.trim()) return false;
-  if (workspaceMode.value !== "remote") return true;
+  if (workspaceMode.value !== "remote") return localWorkspaceSupported.value !== false;
   if (!workspaceSsh.value.host.trim()) return false;
   if (workspaceSsh.value.auth === "sshpass" && !workspaceSsh.value.password) return false;
   return true;
@@ -543,7 +550,14 @@ function isPollingRequestError(message: string) {
 }
 
 async function refreshSettings() {
-  settings.value = await getSettings();
+  const [nextSettings, nextLocalWorkspaceSupported] = await Promise.all([
+    getSettings(),
+    localWorkspaceSupported.value === null
+      ? getLocalWorkspaceSupported()
+      : Promise.resolve(localWorkspaceSupported.value),
+  ]);
+  settings.value = nextSettings;
+  localWorkspaceSupported.value = nextLocalWorkspaceSupported;
 }
 
 async function refreshRemoteConnectionState() {
@@ -556,6 +570,25 @@ async function load(options: { preserveError?: boolean; scan?: boolean } = {}) {
   refreshing.value = true;
   try {
     await refreshSettings();
+    const workspace = currentWorkspace();
+    if (!workspace) {
+      snapshot.value = null;
+      logs.value = [];
+      selectedLog.value = null;
+      remoteWorkspaceConnected.value = false;
+      if (!workspacePrompt.value) openCreateWorkspace();
+      if (!options.preserveError) error.value = "";
+      return;
+    }
+    if (workspace.mode === "local" && localWorkspaceSupported.value === false) {
+      snapshot.value = null;
+      logs.value = [];
+      selectedLog.value = null;
+      remoteWorkspaceConnected.value = false;
+      if (!workspacePrompt.value) openEditWorkspace();
+      error.value = "当前平台不支持本地 Workspace，请将其改为 remote";
+      return;
+    }
     await refreshRemoteConnectionState();
     if (isRemoteWorkspace.value && !remoteWorkspaceConnected.value) {
       snapshot.value = null;
@@ -1206,7 +1239,8 @@ async function applyWorkspaceSwitch(id: string) {
 
 function fillWorkspaceForm(workspace?: { name: string; mode?: WorkspaceMode; ssh?: WorkspaceSsh | null }) {
   workspaceName.value = workspace?.name ?? "";
-  workspaceMode.value = workspace?.mode === "remote" ? "remote" : "local";
+  workspaceMode.value =
+    workspace?.mode === "remote" || localWorkspaceSupported.value === false ? "remote" : "local";
   workspaceSsh.value = {
     ...emptyWorkspaceSsh(),
     ...(workspace?.ssh ?? {}),
@@ -1240,6 +1274,7 @@ function openDeleteWorkspace() {
 }
 
 function closeWorkspacePrompt() {
+  if (workspaceRequired.value) return;
   workspacePrompt.value = null;
   fillWorkspaceForm();
 }
@@ -1288,7 +1323,7 @@ async function confirmWorkspacePrompt() {
       settings.value = next;
       createdId = next.workspaces.find((workspace) => !previousWorkspaceIds.has(workspace.id))?.id ?? "";
     });
-    if (createdId) requestWorkspaceSwitch(createdId);
+    if (createdId) await applyWorkspaceSwitch(createdId);
     return;
   }
   if (prompt.kind === "edit") {
@@ -2387,6 +2422,9 @@ onBeforeUnmount(() => {
             将删除该 workspace 的搜索路径和连接配置。任务按 UUID 在 core 中继续运行，日志也会保留。
           </p>
           <div v-else class="flex flex-col gap-3">
+            <p v-if="workspaceRequired" class="text-[12px] leading-relaxed text-[var(--muted)]">
+              首次使用 Harbor，请先创建一个 Workspace。它用于保存任务搜索路径与运行位置。
+            </p>
             <label class="block">
               <span class="kicker">name</span>
               <input
@@ -2403,6 +2441,8 @@ onBeforeUnmount(() => {
                   class="btn flex-1 !py-1"
                   :class="workspaceMode === 'local' ? 'btn-accent' : ''"
                   type="button"
+                  :disabled="localWorkspaceSupported === false"
+                  :title="localWorkspaceSupported === false ? '本地 Workspace 仅支持 Linux' : '在本机运行任务'"
                   @click="workspaceMode = 'local'"
                 >
                   local
@@ -2416,6 +2456,12 @@ onBeforeUnmount(() => {
                   remote
                 </button>
               </div>
+              <p
+                v-if="localWorkspaceSupported === false"
+                class="readout mt-2 text-[11px] text-[var(--faint)]"
+              >
+                当前平台仅支持 remote；harbor_core 运行在远端 Linux 主机。
+              </p>
             </div>
             <template v-if="workspaceMode === 'remote'">
               <label class="block">
@@ -2511,7 +2557,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="flex justify-end gap-2 border-t border-[var(--line-soft)] px-3 py-2">
-          <button class="btn" type="button" @click="closeWorkspacePrompt">cancel</button>
+          <button v-if="!workspaceRequired" class="btn" type="button" @click="closeWorkspacePrompt">cancel</button>
           <button
             class="btn"
             :class="workspacePrompt.kind === 'delete' ? 'btn-danger' : 'btn-accent'"

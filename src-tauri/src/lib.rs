@@ -38,6 +38,19 @@ struct AppState {
     remote_core_connections: Mutex<HashSet<String>>,
 }
 
+fn local_workspace_supported_for_platform() -> bool {
+    cfg!(target_os = "linux")
+}
+
+fn validate_workspace_mode_for_platform(mode: &WorkspaceMode) -> Result<(), String> {
+    if *mode == WorkspaceMode::Local && !local_workspace_supported_for_platform() {
+        return Err(
+            "local workspaces require Linux; create a remote workspace on this platform".into(),
+        );
+    }
+    Ok(())
+}
+
 fn persist_settings(state: &Arc<AppState>, settings: Settings) -> Result<Settings, String> {
     save_settings(&settings)?;
     *state.settings.lock() = settings.clone();
@@ -201,6 +214,11 @@ fn get_settings(state: State<'_, Arc<AppState>>) -> Settings {
 }
 
 #[tauri::command]
+fn local_workspace_supported() -> bool {
+    local_workspace_supported_for_platform()
+}
+
+#[tauri::command]
 async fn update_settings(
     state: State<'_, Arc<AppState>>,
     next: Settings,
@@ -244,13 +262,12 @@ async fn switch_workspace(state: State<'_, Arc<AppState>>, id: String) -> Result
     if settings.current_workspace == id {
         return Ok(settings);
     }
-    if !settings
+    let target = settings
         .workspaces
         .iter()
-        .any(|workspace| workspace.id == id)
-    {
-        return Err(format!("workspace not found: {id}"));
-    }
+        .find(|workspace| workspace.id == id)
+        .ok_or_else(|| format!("workspace not found: {id}"))?;
+    validate_workspace_mode_for_platform(&target.mode)?;
     settings.current_workspace = id;
     settings.normalize();
     persist_settings(state.inner(), settings.clone())?;
@@ -290,17 +307,22 @@ fn create_workspace(
         return Err("workspace name cannot be empty".into());
     }
     let mode = mode.unwrap_or_default();
+    validate_workspace_mode_for_platform(&mode)?;
     let ssh = normalize_workspace_ssh(&mode, ssh)?;
     let mut settings = state.settings.lock().clone();
     let id = unique_workspace_id(&settings, name.as_str())?;
+    let first_workspace = settings.workspaces.is_empty();
     settings.workspaces.push(Workspace {
-        id,
+        id: id.clone(),
         name,
         mode: mode.clone(),
         ssh,
         localhost_only: Some(mode != WorkspaceMode::Remote),
         search_paths: Vec::new(),
     });
+    if first_workspace {
+        settings.current_workspace = id;
+    }
     persist_settings(state.inner(), settings)
 }
 
@@ -318,6 +340,7 @@ fn update_workspace(
         return Err("workspace name cannot be empty".into());
     }
     let mode = mode.unwrap_or_default();
+    validate_workspace_mode_for_platform(&mode)?;
     let ssh = normalize_workspace_ssh(&mode, ssh)?;
     if state.settings.lock().current_workspace == id {
         let current = current_settings(state.inner());
@@ -394,7 +417,9 @@ async fn get_harbor_core_status(
     let app_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut status = core_client::core_status(&settings);
-        let workspace = settings.current()?;
+        let Ok(workspace) = settings.current() else {
+            return Ok(status);
+        };
         let should_heartbeat = workspace.mode == WorkspaceMode::Local
             || remote_workspace_connected(&app_state, workspace.id.as_str());
         if status.compatible && should_heartbeat {
@@ -1146,15 +1171,28 @@ pub fn run() {
         harbor_support::app_log::gui(&format!("sync Harbor Skill failed: {error}"));
     }
     let settings = load_settings();
-    if settings
-        .current()
-        .is_ok_and(|workspace| workspace.mode == WorkspaceMode::Local)
-    {
-        if let Err(error) = core_process::ensure_core(&settings) {
-            harbor_support::app_log::gui(&format!("ensure harbor_core failed: {error}"));
+    match settings.current() {
+        Ok(workspace)
+            if workspace.mode == WorkspaceMode::Local
+                && local_workspace_supported_for_platform() =>
+        {
+            if let Err(error) = core_process::ensure_core(&settings) {
+                harbor_support::app_log::gui(&format!("ensure harbor_core failed: {error}"));
+            }
         }
-    } else {
-        harbor_support::app_log::gui("remote workspace restored; waiting for manual connection");
+        Ok(workspace) if workspace.mode == WorkspaceMode::Local => {
+            harbor_support::app_log::gui(
+                "local workspace restored on a platform without local Core support",
+            );
+        }
+        Ok(_) => {
+            harbor_support::app_log::gui(
+                "remote workspace restored; waiting for manual connection",
+            );
+        }
+        Err(_) => {
+            harbor_support::app_log::gui("no workspace configured; waiting for first-run setup");
+        }
     }
     let state = Arc::new(AppState {
         settings: Mutex::new(settings),
@@ -1175,6 +1213,7 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_settings,
+            local_workspace_supported,
             update_settings,
             switch_workspace,
             create_workspace,
