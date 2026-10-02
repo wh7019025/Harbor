@@ -35,7 +35,7 @@ ssh <user>@<host>
 1. 点击 Workspace 旁的 `+`。
 2. 输入 Workspace 名称，模式选择 **remote**。
 3. 填写 SSH host、user 和 port。
-4. 选择 SSH key 或 sshpass 认证方式。
+4. 选择 SSH key 或密码认证方式。密码认证由 Harbor 通过系统 OpenSSH 完成，不需要安装 `sshpass`。
 5. 点击 **verify**，确认显示“SSH 验证成功”。
 6. 保存并切换到这个 Workspace。
 7. 点击 Workspace 旁的连接按钮。

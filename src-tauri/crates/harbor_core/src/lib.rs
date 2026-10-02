@@ -191,6 +191,7 @@ pub fn make_taskcard(settings: &Settings, remote_runtime: bool) -> Result<TaskCa
     taskcard.set_log_dir(
         workspace_data_dir(settings.current()?.id.as_str(), remote_runtime).join("log"),
     )?;
+    taskcard.set_log_storage_limit_mb(settings.log_storage_limit_mb);
     Ok(taskcard)
 }
 

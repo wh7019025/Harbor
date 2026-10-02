@@ -159,8 +159,9 @@ noVNC 桌面，并统一在 Harbor 固定端口 `23682` 发布页面。所有 VN
 
 TigerVNC 的 TCP 监听会被关闭，只通过 Harbor 运行时目录中的 Unix Socket 通信。
 
-远端机器需要安装 `tigervnc-standalone-server`、`novnc`、`websockify`、`openbox` 和
-`util-linux`。
+远端机器至少需要安装 `tigervnc-standalone-server`、`novnc`、`websockify` 和
+`util-linux`。Openbox 桌面还需要 `openbox`；GNOME 桌面需要 `ubuntu-session`、
+`gnome-session`、`gnome-shell`、`gnome-session-flashback` 和 `dbus-x11`。
 Harbor 会在启动 Task 前检查这些依赖；缺失时启动失败并直接返回缺失项以及适用于
 Debian/Ubuntu 的安装命令，同时把同一错误写入该次 Task Log。
 

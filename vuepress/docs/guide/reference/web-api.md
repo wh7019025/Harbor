@@ -5,7 +5,7 @@ createTime: 2026/09/20 00:44:43
 ---
 # Web API
 
-Core 默认监听端口 `29385`，当前 API revision 为 **25**，基础路径为：
+Core 默认监听端口 `29385`，当前 API revision 为 **29**，基础路径为：
 
 ```text
 http://<host>:29385/api/v1
@@ -30,6 +30,7 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 | `GET` | `/metrics/performance` | 获取 CPU、网络和 GPU 性能指标。 |
 | `GET` | `/metrics/resources` | 获取内存、Swap 和根磁盘资源指标。 |
 | `GET` | `/services` | 列出 Core 管理的 VNC 与 ttyd 基础服务状态。 |
+| `POST` | `/displays/virtual/ensure` | 启动或复用共享虚拟桌面与 noVNC 通路。 |
 | `POST` | `/displays/physical/ensure` | 启动或复用自动发现的已登录 X11 桌面抓取与 noVNC 通路。 |
 | `GET` | `/displays/clipboard?display=physical\|virtual` | 读取指定远端 X11 显示器的文本剪贴板。 |
 | `POST` | `/displays/clipboard` | 写入指定远端 X11 显示器的文本剪贴板。 |
@@ -44,9 +45,9 @@ Harbor GUI 会持有短时访问租约，用来协调唯一 Core 的版本管理
 
 指标由 Core 在请求时采集，因此远端 Workspace 显示的是远端机器，而不是运行 GUI 的机器。GUI 分别按照 `performance_metrics_interval_ms` 和 `resource_metrics_interval_ms` 请求性能指标与资源指标。
 
-`POST /displays/physical/ensure` 可能执行依赖检查和进程启动，因此客户端应使用比普通
-状态请求更长的超时。成功后返回 `{ "ok": true }`，GUI 随后从 Snapshot 缓存读取状态；依赖缺失、没有活动 X11 桌面或
-固定端口 `23683` 被占用时返回明确错误。
+两个 `POST /displays/*/ensure` 接口都可能执行依赖检查和进程启动，因此客户端应使用比普通
+状态请求更长的超时。成功后返回 `{ "ok": true }`，GUI 随后从 Snapshot 缓存读取状态；启动失败时返回完整错误，
+并把受限长度的错误保存到对应服务状态。虚拟桌面使用固定端口 `23682`；真实桌面还要求活动 X11 会话并使用 `23683`。
 
 剪贴板写入请求为 `{ "display": "physical|virtual", "text": "..." }`，成功返回
 `{ "ok": true }`；读取返回 `{ "text": "..." }`。Core 使用远端 `xclip` 直接操作 X11
@@ -96,7 +97,7 @@ supervisor/服务 PID、固定端口、监听地址和错误。它们随 `harbor
 | `GET` | `/logs/tasks` | 列出任务历史日志。 |
 | `GET` | `/logs/task` | 读取任务日志；传入 `offset` 时增量读取，`tail_lines` 可让首次读取直接定位到末尾指定行数。 |
 | `GET` | `/logs/core` | 读取 Core 日志。 |
-| `POST` | `/workspaces/switch` | 切换 Core 当前 Workspace。 |
+| `POST` | `/workspaces/switch` | 切换 Core 当前 Workspace，并同步 `log_storage_limit_mb`。 |
 | `GET/POST/DELETE` | `/workspaces/search-paths` | 列出、添加或删除当前 Workspace 搜索路径。 |
 | `GET` | `/paths/suggestions` | 获取路径补全候选。 |
 | `GET` | `/paths/config-base` | 获取配置基准路径。 |

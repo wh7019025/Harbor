@@ -30,6 +30,7 @@ const form = ref<Settings>({
   mobile_enabled: false,
   performance_metrics_interval_ms: 1000,
   resource_metrics_interval_ms: 10000,
+  log_storage_limit_mb: 1024,
 });
 const version = ref("");
 const coreStatus = ref<HarborCoreStatus | null>(null);
@@ -199,6 +200,19 @@ async function shutdownCoreAndExit() {
           min="1000"
           step="500"
         />
+      </label>
+      <label class="block">
+        <span class="kicker">Log Storage Limit (MB)</span>
+        <input
+          v-model.number="form.log_storage_limit_mb"
+          class="field mt-2"
+          type="number"
+          min="64"
+          step="64"
+        />
+        <span class="readout mt-1 block text-[11px] text-[var(--faint)]">
+          每个 Workspace 的历史 Task 日志上限；优先删除最旧的已停止日志。
+        </span>
       </label>
     </template>
     <section v-if="!loadingSettings" class="border border-[var(--line-soft)] bg-[var(--surface-2)] p-3">

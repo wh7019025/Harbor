@@ -180,12 +180,27 @@ enum ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
-            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
-            Self::NotFound(message) => (StatusCode::NOT_FOUND, message),
-            Self::Conflict(message) => (StatusCode::CONFLICT, message),
+        let message = self.message().to_string();
+        let status = match self {
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::Conflict(_) => StatusCode::CONFLICT,
         };
+        crate::app_log::core(&format!(
+            "API request failed ({}): {message}",
+            status.as_u16()
+        ));
         (status, Json(json!({ "error": message }))).into_response()
+    }
+}
+
+impl ApiError {
+    fn message(&self) -> &str {
+        match self {
+            Self::BadRequest(message) | Self::NotFound(message) | Self::Conflict(message) => {
+                message
+            }
+        }
     }
 }
 
@@ -255,6 +270,10 @@ pub fn router(state: WebApiState) -> Router {
         .route("/api/v1/metrics/performance", get(performance_metrics))
         .route("/api/v1/metrics/resources", get(resource_metrics))
         .route("/api/v1/services", get(list_core_services))
+        .route(
+            "/api/v1/displays/virtual/ensure",
+            post(ensure_virtual_display),
+        )
         .route(
             "/api/v1/displays/physical/ensure",
             post(ensure_physical_display),
@@ -502,6 +521,14 @@ async fn ensure_physical_display() -> Result<Json<Value>, ApiError> {
     tokio::task::spawn_blocking(crate::vnc_interface::ensure_physical_display)
         .await
         .map_err(|error| ApiError::BadRequest(format!("physical display worker failed: {error}")))?
+        .map_err(ApiError::BadRequest)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn ensure_virtual_display() -> Result<Json<Value>, ApiError> {
+    tokio::task::spawn_blocking(crate::vnc_interface::ensure_shared_display)
+        .await
+        .map_err(|error| ApiError::BadRequest(format!("virtual display worker failed: {error}")))?
         .map_err(ApiError::BadRequest)?;
     Ok(Json(json!({ "ok": true })))
 }
@@ -791,6 +818,7 @@ struct PathAction {
     id: Option<String>,
     name: Option<String>,
     search_paths: Option<Vec<String>>,
+    log_storage_limit_mb: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1063,16 +1091,28 @@ async fn switch_workspace(
     payload: Result<Json<PathAction>, JsonRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let action = json_path_action(payload)?;
+    let log_storage_limit_mb = action.log_storage_limit_mb;
     let mut settings = state.settings.lock().clone();
     let id = register_workspace_definition(&mut settings, action)?;
     settings.current_workspace = id.clone();
     settings.normalize();
+    if let Some(limit_mb) = log_storage_limit_mb {
+        if limit_mb < 64 {
+            return Err(ApiError::BadRequest(
+                "log_storage_limit_mb must be >= 64".into(),
+            ));
+        }
+        settings.log_storage_limit_mb = limit_mb;
+    }
     let paths = settings.current_search_paths().map_err(map_service_error)?;
     let taskcard = state.taskcard.lock();
     let discovery_cached = taskcard.activate_search_paths(paths);
     taskcard
         .set_log_dir(workspace_data_dir(id.as_str(), state.remote_runtime).join("log"))
         .map_err(map_service_error)?;
+    if let Some(limit_mb) = log_storage_limit_mb {
+        taskcard.set_log_storage_limit_mb(limit_mb);
+    }
     if !discovery_cached {
         taskcard.research();
     }
@@ -1465,17 +1505,6 @@ fn map_service_error(error: String) -> ApiError {
     }
 }
 
-#[allow(dead_code)]
-impl ApiError {
-    fn message(&self) -> &str {
-        match self {
-            Self::BadRequest(message) | Self::NotFound(message) | Self::Conflict(message) => {
-                message
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1830,7 +1859,8 @@ command:
                 json!({
                     "id": "default",
                     "name": "default",
-                    "search_paths": [next_project.to_string_lossy()]
+                    "search_paths": [next_project.to_string_lossy()],
+                    "log_storage_limit_mb": 2048
                 })
                 .to_string(),
             ))
@@ -1844,6 +1874,7 @@ command:
             state.settings.lock().current().unwrap().search_paths,
             vec![next_project.to_string_lossy().into_owned()]
         );
+        assert_eq!(state.settings.lock().log_storage_limit_mb, 2048);
         assert_eq!(
             state.taskcard.lock().search_paths(),
             vec![next_project.to_string_lossy().into_owned()]

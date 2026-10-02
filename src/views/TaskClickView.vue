@@ -53,6 +53,7 @@ import {
   fetchTaskCard,
   fetchTaskTemplate,
   fetchTaskYaml,
+  ensureVirtualDisplay,
   listPathSuggestions,
   openPanelWindow,
   interfaceUrls,
@@ -270,12 +271,12 @@ const workspaceFormValid = computed(() => {
   if (!workspaceName.value.trim()) return false;
   if (workspaceMode.value !== "remote") return localWorkspaceSupported.value !== false;
   if (!workspaceSsh.value.host.trim()) return false;
-  if (workspaceSsh.value.auth === "sshpass" && !workspaceSsh.value.password) return false;
+  if (workspaceSsh.value.auth === "password" && !workspaceSsh.value.password) return false;
   return true;
 });
 const workspaceSshCanVerify = computed(() => {
   if (workspaceMode.value !== "remote" || !workspaceSsh.value.host.trim()) return false;
-  if (workspaceSsh.value.auth === "sshpass" && !workspaceSsh.value.password) return false;
+  if (workspaceSsh.value.auth === "password" && !workspaceSsh.value.password) return false;
   return true;
 });
 const searchPathUpdating = computed(() =>
@@ -876,9 +877,7 @@ async function openMachineDisplay(kind: MachineDisplayKind) {
     if (!machineDisplayShortcut(kind)?.ready) {
       await connectRemoteWorkspaceCore();
       remoteWorkspaceConnected.value = true;
-      if (kind === "physical") {
-        await ensurePhysicalDisplay();
-      }
+      await (kind === "physical" ? ensurePhysicalDisplay() : ensureVirtualDisplay());
       for (let attempt = 0; attempt < 30; attempt += 1) {
         const nextSnapshot = await fetchTaskCard();
         snapshot.value = nextSnapshot;
@@ -1244,7 +1243,7 @@ function fillWorkspaceForm(workspace?: { name: string; mode?: WorkspaceMode; ssh
   workspaceSsh.value = {
     ...emptyWorkspaceSsh(),
     ...(workspace?.ssh ?? {}),
-    auth: workspace?.ssh?.auth === "sshpass" ? "sshpass" : "key",
+    auth: workspace?.ssh?.auth === "password" ? "password" : "key",
     port: workspace?.ssh?.port || 22,
   };
   workspaceSshVerifyMessage.value = null;
@@ -1284,7 +1283,7 @@ function workspaceSshPayload(): WorkspaceSsh | null {
   const port = Number(workspaceSsh.value.port);
   return {
     ...workspaceSsh.value,
-    auth: workspaceSsh.value.auth === "sshpass" ? "sshpass" : "key",
+    auth: workspaceSsh.value.auth === "password" ? "password" : "key",
     port: Number.isFinite(port) && port > 0 ? Math.min(65535, Math.trunc(port)) : 22,
   };
 }
@@ -2508,11 +2507,11 @@ onBeforeUnmount(() => {
                   </button>
                   <button
                     class="btn flex-1 !py-1"
-                    :class="workspaceSsh.auth === 'sshpass' ? 'btn-accent' : ''"
+                    :class="workspaceSsh.auth === 'password' ? 'btn-accent' : ''"
                     type="button"
-                    @click="setWorkspaceSshAuth('sshpass')"
+                    @click="setWorkspaceSshAuth('password')"
                   >
-                    sshpass
+                    password
                   </button>
                 </div>
               </div>

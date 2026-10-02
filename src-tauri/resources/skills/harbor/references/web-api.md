@@ -25,7 +25,7 @@ AI Agent 访问 `harbor_core` 必须拥有网络访问权限。沙箱通常会�
 
 ## 通用契约
 
-- 当前 `api_revision`：`25`。
+- 当前 `api_revision`：`29`。
 - GET 参数放 query；POST 请求使用 `Content-Type: application/json`。
 - 所有响应都带 `X-Harbor-Version` 与 `X-Harbor-Api-Revision`。
 - 成功通常返回 `200` JSON。动作成功统一包含 `{ "ok": true }`；列表响应使用具名数组字段。
@@ -53,6 +53,7 @@ AI Agent 访问 `harbor_core` 必须拥有网络访问权限。沙箱通常会�
 | GET | `/api/v1/metrics/performance` | - | CPU、网络与 GPU 性能指标 |
 | GET | `/api/v1/metrics/resources` | - | 内存、Swap 与根磁盘资源指标 |
 | GET | `/api/v1/services` | - | Core 托管的 Virtual VNC、Physical VNC 与 ttyd 状态；只读，不可单独停止 |
+| POST | `/api/v1/displays/virtual/ensure` | `{}` | `{ "ok": true }`；启动或复用共享虚拟桌面；失败时返回完整启动错误 |
 | POST | `/api/v1/displays/physical/ensure` | `{}` | `{ "ok": true }`；启动或复用自动发现的本机 X11 真实桌面通路 |
 | GET | `/api/v1/displays/clipboard?display=physical\|virtual` | - | `{ "text" }`；通过远端 `xclip` 读取目标 X11 剪贴板 |
 | POST | `/api/v1/displays/clipboard` | `{ "display", "text" }` | `{ "ok": true }`；通过远端 `xclip` 写入目标 X11 剪贴板，文本上限 1 MiB |
@@ -107,6 +108,8 @@ UUID 缺失由扫描过程自动生成并写回。UUID 重复时相关 Task/Grou
 | GET | `/api/v1/logs/core` | - | `{ "content" }`，core 本机 `~/.harbor/log/harbor.log` |
 
 `file` 只能是日志列表返回的安全文件名。按 `id` 读取时要求该 Task 当前正在运行并且当前 workspace 可见。
+
+`POST /api/v1/workspaces/switch` 会携带 `log_storage_limit_mb`，使本地与远端 Core 使用相同的每 Workspace 日志容量上限。Core 只清理最旧的非活动日志，不删除正在写入的日志。
 
 ## 路径
 

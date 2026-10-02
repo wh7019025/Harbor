@@ -436,10 +436,17 @@ pub fn snapshot(settings: &Settings) -> Result<TaskCardSnapshot, String> {
     core_get(settings, "/api/v1/snapshot")
 }
 
+pub fn ensure_virtual_display(settings: &Settings) -> Result<(), String> {
+    ensure_display(settings, "/api/v1/displays/virtual/ensure")
+}
+
 pub fn ensure_physical_display(settings: &Settings) -> Result<(), String> {
-    let path = "/api/v1/displays/physical/ensure";
+    ensure_display(settings, "/api/v1/displays/physical/ensure")
+}
+
+fn ensure_display(settings: &Settings, path: &str) -> Result<(), String> {
     let url = format!("{}{path}", core_base_url(settings)?);
-    let resp = http_agent(Duration::from_secs(15))
+    let resp = http_agent(Duration::from_secs(45))
         .post(url.as_str())
         .send_json(json!({}))
         .map_err(map_ureq)?;
@@ -858,6 +865,7 @@ pub fn switch_workspace(settings: &Settings, id: &str) -> Result<(), String> {
             "id": workspace.id,
             "name": workspace.name,
             "search_paths": workspace.search_paths,
+            "log_storage_limit_mb": settings.log_storage_limit_mb,
         }),
     )
 }

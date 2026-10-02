@@ -61,6 +61,13 @@ fn current_settings(state: &AppState) -> Settings {
     state.settings.lock().clone()
 }
 
+fn log_gui_result<T>(context: &str, result: Result<T, String>) -> Result<T, String> {
+    if let Err(error) = &result {
+        harbor_support::app_log::gui(&format!("{context} failed: {error}"));
+    }
+    result
+}
+
 fn workspace_settings(settings: &Settings, workspace_id: &str) -> Option<Settings> {
     if !settings
         .workspaces
@@ -229,6 +236,9 @@ async fn update_settings(
     if next.resource_metrics_interval_ms < 1000 {
         return Err("resource_metrics_interval_ms must be >= 1000".into());
     }
+    if next.log_storage_limit_mb < 64 {
+        return Err("log_storage_limit_mb must be >= 64".into());
+    }
 
     let current = state.settings.lock().clone();
     let mobile_changed = current.mobile_enabled != next.mobile_enabled;
@@ -238,15 +248,29 @@ async fn update_settings(
     saved.normalize();
     let saved = persist_settings(state.inner(), saved)?;
 
-    // --- 阶段 1：普通设置仅落盘，不打断 Core ---
+    // --- 阶段 1：将日志容量等运行参数同步到当前已连接 Core ---
+    let workspace = saved.current().ok().cloned();
+    let core_connected = workspace.as_ref().is_some_and(|workspace| {
+        workspace.mode == WorkspaceMode::Local
+            || remote_workspace_connected(state.inner(), workspace.id.as_str())
+    });
+    if core_connected {
+        let runtime_settings = saved.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let workspace_id = runtime_settings.current_workspace.clone();
+            core_client::switch_workspace(&runtime_settings, workspace_id.as_str())
+        })
+        .await
+        .map_err(|error| format!("sync harbor_core settings worker failed: {error}"))??;
+    }
+
+    // --- 阶段 2：普通设置仅落盘，不打断 Core ---
     if !mobile_changed {
         return Ok(saved);
     }
 
-    // --- 阶段 2：Mobile 开关变化时重启已连接的当前 Core，使端口立即生效 ---
-    let workspace = saved.current()?.clone();
-    let should_restart = workspace.mode == WorkspaceMode::Local
-        || remote_workspace_connected(state.inner(), workspace.id.as_str());
+    // --- 阶段 3：Mobile 开关变化时重启已连接的当前 Core，使端口立即生效 ---
+    let should_restart = core_connected;
     if should_restart {
         let job = saved.clone();
         tauri::async_runtime::spawn_blocking(move || core_process::restart_core(&job))
@@ -738,14 +762,16 @@ async fn read_display_clipboard(
     workspace_id: String,
     display: String,
 ) -> Result<String, String> {
+    let context = format!("read {display} clipboard for workspace {workspace_id}");
     let app_state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         with_workspace_core(&app_state, workspace_id.as_str(), |settings| {
             core_client::read_display_clipboard(settings, display.as_str())
         })
     })
     .await
-    .map_err(|error| format!("clipboard worker failed: {error}"))?
+    .map_err(|error| format!("clipboard worker failed: {error}"))?;
+    log_gui_result(context.as_str(), result)
 }
 
 #[tauri::command]
@@ -755,14 +781,16 @@ async fn write_display_clipboard(
     display: String,
     text: String,
 ) -> Result<(), String> {
+    let context = format!("write {display} clipboard for workspace {workspace_id}");
     let app_state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         with_workspace_core(&app_state, workspace_id.as_str(), |settings| {
             core_client::write_display_clipboard(settings, display.as_str(), text.as_str())
         })
     })
     .await
-    .map_err(|error| format!("clipboard worker failed: {error}"))?
+    .map_err(|error| format!("clipboard worker failed: {error}"))?;
+    log_gui_result(context.as_str(), result)
 }
 
 #[tauri::command]
@@ -771,6 +799,16 @@ async fn taskcard_snapshot(state: State<'_, Arc<AppState>>) -> Result<TaskCardSn
     tauri::async_runtime::spawn_blocking(move || with_core(&app_state, core_client::snapshot))
         .await
         .map_err(|error| format!("snapshot worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn ensure_virtual_display(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_core(&app_state, core_client::ensure_virtual_display)
+    })
+    .await
+    .map_err(|error| format!("virtual display worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1233,6 +1271,7 @@ pub fn run() {
             get_resource_metrics,
             get_mini_metrics,
             taskcard_snapshot,
+            ensure_virtual_display,
             ensure_physical_display,
             taskcard_research,
             taskcard_add_search_path,

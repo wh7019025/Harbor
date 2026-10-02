@@ -50,6 +50,13 @@ Workspace 配置只由运行 GUI 的电脑维护。远端 Core 接收当前 Work
 - `performance_metrics_interval_ms`：CPU、网络和 GPU 性能指标的刷新间隔，默认 `1000` 毫秒。
 - `resource_metrics_interval_ms`：内存、Swap 和磁盘指标的刷新间隔，默认 `10000` 毫秒。
 
+## 日志容量
+
+- `log_storage_limit_mb`：每个 Workspace 的 Task 日志保留上限，默认 `1024` MB，最小 `64` MB。
+- 本地限制由本机 Core 执行；远端 Workspace 连接后，GUI 会把同一设置同步给远端 Core。
+- 达到上限时删除最旧的已停止日志，正在写入的日志不会被删除。
+- 容量限制与最多保留 50 条日志的数量限制同时生效。
+
 ## 路径规则
 
 - 本地路径在本机解析。

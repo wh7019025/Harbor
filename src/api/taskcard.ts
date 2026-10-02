@@ -125,6 +125,10 @@ export function fetchTaskCard() {
   return invoke<TaskCardSnapshot>("taskcard_snapshot");
 }
 
+export function ensureVirtualDisplay() {
+  return invoke<void>("ensure_virtual_display");
+}
+
 export function ensurePhysicalDisplay() {
   return invoke<void>("ensure_physical_display");
 }

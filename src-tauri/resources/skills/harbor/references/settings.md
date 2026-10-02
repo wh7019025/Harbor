@@ -4,7 +4,7 @@
 
 Search Paths 属于**当前 workspace**。Agent 可以直接维护当前 workspace 的 `search_paths`，无需指导用户操作界面。
 
-Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其他 Harbor 设置必须保留原值，包括 `workspaces` 里的 `mode` / `ssh` / `localhost_only`、其余项、`current_workspace`、`mobile_enabled`、`performance_metrics_interval_ms` 和 `resource_metrics_interval_ms`。
+Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其他 Harbor 设置必须保留原值，包括 `workspaces` 里的 `mode` / `ssh` / `localhost_only`、其余项、`current_workspace`、`mobile_enabled`、`performance_metrics_interval_ms`、`resource_metrics_interval_ms` 和 `log_storage_limit_mb`。
 
 ```json
 {
@@ -22,7 +22,8 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
   ],
   "mobile_enabled": false,
   "performance_metrics_interval_ms": 1000,
-  "resource_metrics_interval_ms": 10000
+  "resource_metrics_interval_ms": 10000,
+  "log_storage_limit_mb": 1024
 }
 ```
 
@@ -31,10 +32,11 @@ Agent 只应修改 `current_workspace` 对应那一项的 `search_paths`；其�
 | `current_workspace` | string | 当前 workspace 的 `id`。Agent 不要改这个字段 |
 | `workspaces` | object[] | workspace 列表。每项含 `id`、`name`、`mode`、`search_paths`，remote 时还有 `ssh` |
 | `workspaces[].mode` | `"local"` / `"remote"` | 默认 `local`。Agent 不要改 |
-| `workspaces[].ssh` | object | remote workspace 的 SSH：`host`、`user`、`port`、`auth`（`key` / `sshpass`）、`identity_file`、`password`（sshpass 时保存）。Agent 不要改 |
+| `workspaces[].ssh` | object | remote workspace 的 SSH：`host`、`user`、`port`、`auth`（`key` / `password`）、`identity_file`、`password`（密码认证时保存）。密码认证使用 Harbor 内置 AskPass，不依赖 `sshpass`。Agent 不要改 |
 | `workspaces[].localhost_only` | bool | 启动该 workspace 对应 harbor_core 时是否只监听 127.0.0.1。local 默认 `true`，remote 默认 `false`。Agent 不要改 |
 | `workspaces[].search_paths` | string[] | 该 workspace 搜索项目配置的起点目录。路径相对于 **harbor_core 所在机器** |
 | `mobile_enabled` | bool | 是否在 `0.0.0.0:29387` 开启只读 Mobile 网页面板入口；默认 `false` |
+| `log_storage_limit_mb` | number | 每个 Workspace 的 Task 日志保留上限，默认 `1024` MB，最小 `64` MB。Agent 不要擅自修改 |
 
 文件不存在时，Harbor 从空 Workspace 列表开始，并在 GUI 中要求用户先创建 Workspace。
 Linux 支持 local 与 remote；Windows 和 macOS 只支持 remote，不会在本机启动

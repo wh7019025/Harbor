@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type WorkspaceMode = "local" | "remote";
-export type WorkspaceSshAuth = "key" | "sshpass";
+export type WorkspaceSshAuth = "key" | "password";
 
 export interface WorkspaceSsh {
   host: string;
@@ -27,6 +27,7 @@ export interface Settings {
   mobile_enabled: boolean;
   performance_metrics_interval_ms: number;
   resource_metrics_interval_ms: number;
+  log_storage_limit_mb: number;
 }
 
 export interface HarborCoreStatus {

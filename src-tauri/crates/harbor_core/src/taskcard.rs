@@ -162,6 +162,7 @@ pub struct TaskCardService {
     discovery_cache: Arc<Mutex<HashMap<Vec<PathBuf>, DiscoveryCache>>>,
     state: Arc<Mutex<RuntimeState>>,
     remote_runtime: Arc<Mutex<bool>>,
+    log_storage_limit_bytes: Arc<Mutex<u64>>,
     _instance_lock: Arc<File>,
 }
 
@@ -193,6 +194,7 @@ impl TaskCardService {
                     .collect(),
             })),
             remote_runtime: Arc::new(Mutex::new(false)),
+            log_storage_limit_bytes: Arc::new(Mutex::new(1024 * 1024 * 1024)),
             _instance_lock: Arc::new(instance_lock),
         };
         let _ = service.research();
@@ -218,6 +220,12 @@ impl TaskCardService {
             .map_err(|error| format!("create log dir {} failed: {error}", path.display()))?;
         *self.log_dir.lock() = path;
         Ok(())
+    }
+
+    pub fn set_log_storage_limit_mb(&self, limit_mb: u64) {
+        *self.log_storage_limit_bytes.lock() = limit_mb.saturating_mul(1024 * 1024);
+        self.refresh_processes();
+        let _ = self.prune_logs();
     }
 
     pub fn set_remote_runtime(&self, remote: bool) {
@@ -447,6 +455,8 @@ impl TaskCardService {
         let config = task.resolve_config(config_id)?;
         let selected_config_id = config.map(|item| item.id.clone());
         let runtime_key = task.uuid.clone();
+        let log_dir = self.current_log_dir();
+        let _ = self.prune_logs();
         let mut state = self.state.lock();
         if let Some(running) = state.running.get(runtime_key.as_str()) {
             if running.config_id == selected_config_id {
@@ -486,7 +496,6 @@ impl TaskCardService {
         } else {
             None
         };
-        let log_dir = self.current_log_dir();
         let (started_at_ms, log_file, mut stdout) =
             create_log_file(log_dir.as_path(), id, selected_config_id.as_deref())?;
         let log_path = log_dir.join(log_file.as_str());
@@ -1035,14 +1044,25 @@ impl TaskCardService {
 
     pub fn logs(&self) -> Vec<TaskLogSummary> {
         self.refresh_processes();
+        self.prune_logs()
+    }
+
+    fn prune_logs(&self) -> Vec<TaskLogSummary> {
         let log_dir = self.current_log_dir();
         let state = self.state.lock();
-        let active = state
+        let mut active = state
             .running
             .values()
             .filter(|task| task.log_dir == log_dir)
-            .map(|task| task.log_file.as_str())
+            .map(|task| task.log_file.clone())
             .collect::<std::collections::HashSet<_>>();
+        active.extend(
+            state
+                .managed
+                .values()
+                .filter(|record| process_group_alive(record))
+                .map(|record| record.log_file.clone()),
+        );
         let mut logs = fs::read_dir(&log_dir)
             .into_iter()
             .flatten()
@@ -1070,22 +1090,36 @@ impl TaskCardService {
                 })
             })
             .collect::<Vec<_>>();
+        drop(state);
+
+        // --- 阶段 1：按时间从旧到新选择可删除的非活动日志 ---
+        logs.sort_by_key(|log| log.modified_at_ms);
+        let max_bytes = *self.log_storage_limit_bytes.lock();
+        let mut retained_bytes = logs.iter().map(|log| log.bytes).sum::<u64>();
+        let mut retained_count = logs.len();
+        let mut removed = std::collections::HashSet::new();
+        for log in &logs {
+            if retained_bytes <= max_bytes && retained_count <= MAX_LOG_FILES {
+                break;
+            }
+            if log.active {
+                continue;
+            }
+            if fs::remove_file(log_dir.join(log.file.as_str())).is_ok() {
+                retained_bytes = retained_bytes.saturating_sub(log.bytes);
+                retained_count = retained_count.saturating_sub(1);
+                removed.insert(log.file.clone());
+            }
+        }
+        logs.retain(|log| !removed.contains(log.file.as_str()));
+
+        // --- 阶段 2：活动日志优先，其余日志按最近修改时间展示 ---
         logs.sort_by(|a, b| match (a.active, b.active) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             (true, true) => b.started_at_ms.cmp(&a.started_at_ms),
             (false, false) => b.modified_at_ms.cmp(&a.modified_at_ms),
         });
-        const MAX_LOGS: usize = 50;
-        if logs.len() > MAX_LOGS {
-            for old in logs.iter().skip(MAX_LOGS) {
-                if old.active {
-                    continue;
-                }
-                let _ = fs::remove_file(log_dir.join(old.file.as_str()));
-            }
-            logs.truncate(MAX_LOGS);
-        }
         logs
     }
 
@@ -2097,6 +2131,7 @@ fn process_leader_alive(record: &RunningTaskRecord) -> bool {
 const PROCESS_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const GRACEFUL_STOP_ATTEMPTS: usize = 10;
 const FORCED_STOP_ATTEMPTS: usize = 20;
+const MAX_LOG_FILES: usize = 50;
 
 fn wait_for_process_group_exit(record: &RunningTaskRecord, attempts: usize) -> bool {
     for _ in 0..attempts {
@@ -3024,6 +3059,26 @@ tasks:
     }
 
     #[test]
+    fn log_storage_limit_removes_oldest_inactive_logs() {
+        let root = unique_temp("harbor-log-storage-limit");
+        let service = TaskCardService::new(root.clone(), Vec::new()).unwrap();
+        let log_dir = root.join("log");
+        let first = format!("demo-{}.log", format_log_stamp(now_ms()));
+        fs::write(log_dir.join(first.as_str()), b"12345678").unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        let second = format!("demo-{}.log", format_log_stamp(now_ms() + 1000));
+        fs::write(log_dir.join(second.as_str()), b"abcdefgh").unwrap();
+        *service.log_storage_limit_bytes.lock() = 10;
+
+        let logs = service.logs();
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].file, second);
+        assert!(!log_dir.join(first).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn tail_start_offset_keeps_requested_lines() {
         let path = unique_temp("harbor-log-tail").with_extension("log");
         fs::write(&path, "one\ntwo\nthree\nfour\n").unwrap();
@@ -3797,6 +3852,10 @@ command:
         let task = &recovered.snapshot().tasks[0];
         assert_eq!(task.status, "running");
         assert_eq!(task.pid, Some(original_pid));
+        *recovered.log_storage_limit_bytes.lock() = 0;
+        let recovered_logs = recovered.logs();
+        assert_eq!(recovered_logs.len(), 1);
+        assert!(recovered_logs[0].active);
         recovered
             .start_task(prefix.as_str(), "background", None, &HashMap::new(), None)
             .unwrap();

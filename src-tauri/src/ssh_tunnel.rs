@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-use harbor_common::settings::{ssh_exec_command_with_args, WorkspaceSsh};
+use harbor_common::settings::{configure_ssh_process, ssh_exec_command_with_args, WorkspaceSsh};
 
 pub fn available_local_port(context: &str) -> Result<u16, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -75,13 +75,7 @@ fn spawn_ssh_command(
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
-    if ssh_command.sshpass {
-        if ssh.password.is_empty() {
-            return Err("sshpass requires a password".into());
-        }
-        command.env("SSHPASS", ssh.password.as_str());
-        command.env_remove("SSH_ASKPASS");
-    }
+    configure_ssh_process(&mut command, ssh)?;
     command
         .spawn()
         .map_err(|error| format!("start SSH tunnel failed: {error}"))

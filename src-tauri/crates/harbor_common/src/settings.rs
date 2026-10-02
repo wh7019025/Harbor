@@ -22,7 +22,8 @@ pub enum WorkspaceMode {
 pub enum WorkspaceSshAuth {
     #[default]
     Key,
-    Sshpass,
+    #[serde(alias = "sshpass")]
+    Password,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,6 +97,8 @@ pub struct Settings {
         alias = "metrics_slow_ms"
     )]
     pub resource_metrics_interval_ms: u64,
+    #[serde(default = "default_log_storage_limit_mb")]
+    pub log_storage_limit_mb: u64,
 }
 
 fn default_performance_metrics_interval_ms() -> u64 {
@@ -104,6 +107,10 @@ fn default_performance_metrics_interval_ms() -> u64 {
 
 fn default_resource_metrics_interval_ms() -> u64 {
     10000
+}
+
+fn default_log_storage_limit_mb() -> u64 {
+    1024
 }
 
 pub fn normalize_workspace_ssh(
@@ -132,7 +139,7 @@ pub fn normalize_workspace_ssh(
         } else {
             String::new()
         },
-        password: if auth == WorkspaceSshAuth::Sshpass {
+        password: if auth == WorkspaceSshAuth::Password {
             ssh.password
         } else {
             String::new()
@@ -144,7 +151,44 @@ pub fn normalize_workspace_ssh(
 pub struct SshVerifyCommand {
     pub program: String,
     pub args: Vec<String>,
-    pub sshpass: bool,
+}
+
+const SSH_ASKPASS_MODE_ENV: &str = "HARBOR_SSH_ASKPASS";
+const SSH_ASKPASS_PASSWORD_ENV: &str = "HARBOR_SSH_ASKPASS_PASSWORD";
+
+pub fn handle_ssh_askpass() -> bool {
+    if std::env::var_os(SSH_ASKPASS_MODE_ENV).is_none() {
+        return false;
+    }
+    if let Ok(password) = std::env::var(SSH_ASKPASS_PASSWORD_ENV) {
+        let _ = writeln!(std::io::stdout(), "{password}");
+    }
+    true
+}
+
+pub fn configure_ssh_process(process: &mut Command, ssh: &WorkspaceSsh) -> Result<(), String> {
+    if ssh.auth != WorkspaceSshAuth::Password {
+        process
+            .env_remove("SSH_ASKPASS")
+            .env_remove("SSH_ASKPASS_REQUIRE")
+            .env_remove(SSH_ASKPASS_MODE_ENV)
+            .env_remove(SSH_ASKPASS_PASSWORD_ENV);
+        return Ok(());
+    }
+    if ssh.password.is_empty() {
+        return Err("SSH password is required".into());
+    }
+    let helper = std::env::current_exe()
+        .map_err(|error| format!("locate Harbor SSH AskPass helper failed: {error}"))?;
+    process
+        .env("SSH_ASKPASS", helper)
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .env(SSH_ASKPASS_MODE_ENV, "1")
+        .env(SSH_ASKPASS_PASSWORD_ENV, ssh.password.as_str());
+    if std::env::var_os("DISPLAY").is_none() {
+        process.env("DISPLAY", "harbor-askpass");
+    }
+    Ok(())
 }
 
 fn ssh_target(ssh: &WorkspaceSsh) -> String {
@@ -207,10 +251,9 @@ pub fn ssh_exec_command_with_args(
             Ok(SshVerifyCommand {
                 program: "ssh".into(),
                 args: ssh_args,
-                sshpass: false,
             })
         }
-        WorkspaceSshAuth::Sshpass => {
+        WorkspaceSshAuth::Password => {
             ssh_args.splice(
                 0..0,
                 [
@@ -228,12 +271,9 @@ pub fn ssh_exec_command_with_args(
             if !remote.is_empty() {
                 ssh_args.push(remote.to_string());
             }
-            let mut args = vec!["-e".to_string(), "ssh".to_string()];
-            args.extend(ssh_args);
             Ok(SshVerifyCommand {
-                program: "sshpass".into(),
-                args,
-                sshpass: true,
+                program: "ssh".into(),
+                args: ssh_args,
             })
         }
     }
@@ -244,19 +284,13 @@ pub fn ssh_verify_command(ssh: &WorkspaceSsh) -> Result<SshVerifyCommand, String
 }
 
 fn run_ssh_command(ssh: &WorkspaceSsh, command: &SshVerifyCommand) -> Result<String, String> {
-    if command.sshpass && ssh.password.is_empty() {
-        return Err("sshpass requires a password".into());
-    }
     let mut process = Command::new(&command.program);
     process
         .args(&command.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if command.sshpass {
-        process.env("SSHPASS", ssh.password.as_str());
-        process.env_remove("SSH_ASKPASS");
-    }
+    configure_ssh_process(&mut process, ssh)?;
     let output = process.output().map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("{} is not installed", command.program)
@@ -329,11 +363,10 @@ pub fn scp_file(ssh: &WorkspaceSsh, local: &Path, remote_path: &str) -> Result<(
             let command = SshVerifyCommand {
                 program: "scp".into(),
                 args,
-                sshpass: false,
             };
             run_ssh_command(&ssh, &command).map(|_| ())
         }
-        WorkspaceSshAuth::Sshpass => {
+        WorkspaceSshAuth::Password => {
             args.splice(
                 0..0,
                 [
@@ -349,12 +382,9 @@ pub fn scp_file(ssh: &WorkspaceSsh, local: &Path, remote_path: &str) -> Result<(
             );
             args.push(local.display().to_string());
             args.push(target);
-            let mut wrapped = vec!["-e".to_string(), "scp".to_string()];
-            wrapped.extend(args);
             let command = SshVerifyCommand {
-                program: "sshpass".into(),
-                args: wrapped,
-                sshpass: true,
+                program: "scp".into(),
+                args,
             };
             run_ssh_command(&ssh, &command).map(|_| ())
         }
@@ -370,9 +400,6 @@ pub fn ssh_send_file(
     let ssh = normalize_workspace_ssh(&WorkspaceMode::Remote, Some(ssh.clone()))?
         .ok_or_else(|| "remote workspace requires SSH settings".to_string())?;
     let command = ssh_exec_command(&ssh, &format!("cat > {remote_shell_dest}"))?;
-    if command.sshpass && ssh.password.is_empty() {
-        return Err("sshpass requires a password".into());
-    }
     let total = fs::metadata(local)
         .map_err(|error| format!("stat {} failed: {error}", local.display()))?
         .len();
@@ -384,10 +411,7 @@ pub fn ssh_send_file(
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    if command.sshpass {
-        process.env("SSHPASS", ssh.password.as_str());
-        process.env_remove("SSH_ASKPASS");
-    }
+    configure_ssh_process(&mut process, &ssh)?;
     let mut child = process.spawn().map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("{} is not installed", command.program)
@@ -479,6 +503,7 @@ impl Default for Settings {
             mobile_enabled: false,
             performance_metrics_interval_ms: default_performance_metrics_interval_ms(),
             resource_metrics_interval_ms: default_resource_metrics_interval_ms(),
+            log_storage_limit_mb: default_log_storage_limit_mb(),
         }
     }
 }
@@ -627,6 +652,10 @@ fn recover_settings(raw: &str) -> Option<Settings> {
         .or_else(|| value.get("metrics_slow_ms"))
         .and_then(|item| item.as_u64())
         .unwrap_or_else(default_resource_metrics_interval_ms);
+    settings.log_storage_limit_mb = value
+        .get("log_storage_limit_mb")
+        .and_then(|item| item.as_u64())
+        .unwrap_or_else(default_log_storage_limit_mb);
     Some(settings)
 }
 
@@ -894,6 +923,7 @@ mod tests {
         assert!(settings.current().is_err());
         assert!(settings.current_workspace.is_empty());
         assert!(settings.workspaces.is_empty());
+        assert_eq!(settings.log_storage_limit_mb, 1024);
     }
 
     #[test]
@@ -972,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_verify_command_uses_key_or_sshpass() {
+    fn ssh_verify_command_uses_key_or_password() {
         let key = WorkspaceSsh {
             host: "box.example".into(),
             user: "se".into(),
@@ -983,23 +1013,25 @@ mod tests {
         };
         let command = ssh_verify_command(&key).unwrap();
         assert_eq!(command.program, "ssh");
-        assert!(!command.sshpass);
         assert!(command.args.contains(&"se@box.example".to_string()));
         assert!(command.args.contains(&"2222".to_string()));
 
-        let sshpass = WorkspaceSsh {
-            auth: WorkspaceSshAuth::Sshpass,
+        let password = WorkspaceSsh {
+            auth: WorkspaceSshAuth::Password,
+            password: "secret".into(),
             ..key
         };
-        let command = ssh_verify_command(&sshpass).unwrap();
-        assert_eq!(command.program, "sshpass");
-        assert!(command.sshpass);
-        assert_eq!(command.args[0], "-e");
-        assert_eq!(command.args[1], "ssh");
+        let command = ssh_verify_command(&password).unwrap();
+        assert_eq!(command.program, "ssh");
         assert!(!command
             .args
             .windows(2)
             .any(|pair| pair[0] == "-p" && pair[1] != "2222"));
+        let mut process = Command::new(&command.program);
+        configure_ssh_process(&mut process, &password).unwrap();
+        assert!(process.get_envs().any(|(key, value)| {
+            key == "SSH_ASKPASS_REQUIRE" && value == Some(std::ffi::OsStr::new("force"))
+        }));
     }
 
     #[test]
@@ -1053,12 +1085,12 @@ mod tests {
     }
 
     #[test]
-    fn verify_sshpass_requires_password() {
+    fn verify_password_auth_requires_password() {
         let error = verify_workspace_ssh(WorkspaceSsh {
             host: "box.example".into(),
             user: "se".into(),
             port: 22,
-            auth: WorkspaceSshAuth::Sshpass,
+            auth: WorkspaceSshAuth::Password,
             identity_file: String::new(),
             password: String::new(),
         })
@@ -1070,7 +1102,7 @@ mod tests {
                 host: "box.example".into(),
                 user: "se".into(),
                 port: 22,
-                auth: WorkspaceSshAuth::Sshpass,
+                auth: WorkspaceSshAuth::Password,
                 identity_file: String::new(),
                 password: " secret ".into(),
             }),
@@ -1114,6 +1146,7 @@ mod tests {
         assert!(settings.current().is_err());
         assert_eq!(settings.performance_metrics_interval_ms, 500);
         assert_eq!(settings.resource_metrics_interval_ms, 2000);
+        assert_eq!(settings.log_storage_limit_mb, 1024);
     }
 
     #[test]
@@ -1134,6 +1167,7 @@ mod tests {
         assert_eq!(settings.workspaces[0].id, "lab");
         assert_eq!(settings.performance_metrics_interval_ms, 1000);
         assert_eq!(settings.resource_metrics_interval_ms, 10000);
+        assert_eq!(settings.log_storage_limit_mb, 1024);
     }
 
     #[test]

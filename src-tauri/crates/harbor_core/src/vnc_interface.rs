@@ -13,6 +13,8 @@ pub use harbor_protocol::web_api::{PHYSICAL_VNC_PORT, VIRTUAL_VNC_PORT as VNC_PO
 const DISPLAY_NUMBER: u16 = 82;
 const X11_SOCKET_DIR: &str = "/tmp/.X11-unix";
 const CLIPBOARD_LIMIT_BYTES: usize = 1024 * 1024;
+const STARTUP_ERROR_FILE: &str = "startup.error";
+const DISPLAY_ERROR_LIMIT_CHARS: usize = 8192;
 
 fn runtime_dir() -> PathBuf {
     let runtime_base = std::env::var_os("XDG_RUNTIME_DIR")
@@ -51,17 +53,7 @@ pub fn physical_error() -> Option<String> {
     if physical_display_name().is_none() {
         return Some("真实桌面不可用：未检测到活动的本机 X11 DISPLAY".into());
     }
-    let log_path = physical_runtime_dir().join("infrastructure.log");
-    std::fs::read_to_string(log_path)
-        .ok()
-        .and_then(|content| {
-            content
-                .lines()
-                .rev()
-                .find(|line| !line.trim().is_empty())
-                .map(str::to_string)
-        })
-        .map(|line| format!("真实桌面启动失败：{line}"))
+    display_startup_error("真实桌面启动失败", physical_runtime_dir().as_path())
 }
 
 pub fn shared_error() -> Option<String> {
@@ -71,17 +63,39 @@ pub fn shared_error() -> Option<String> {
     if let Err(error) = validate_dependencies() {
         return Some(error);
     }
-    let log_path = runtime_dir().join("infrastructure.log");
-    fs::read_to_string(log_path)
-        .ok()
-        .and_then(|content| {
-            content
-                .lines()
-                .rev()
-                .find(|line| !line.trim().is_empty())
-                .map(str::to_string)
-        })
-        .map(|line| format!("虚拟桌面启动失败：{line}"))
+    display_startup_error("虚拟桌面启动失败", runtime_dir().as_path())
+}
+
+fn display_startup_error(label: &str, runtime_dir: &Path) -> Option<String> {
+    for file_name in [STARTUP_ERROR_FILE, "infrastructure.log"] {
+        let Ok(content) = fs::read_to_string(runtime_dir.join(file_name)) else {
+            continue;
+        };
+        let detail = tail_chars(content.trim(), DISPLAY_ERROR_LIMIT_CHARS);
+        if !detail.is_empty() {
+            return Some(format!("{label}：{detail}"));
+        }
+    }
+    None
+}
+
+fn tail_chars(content: &str, limit: usize) -> String {
+    let mut chars = content.chars().rev().take(limit).collect::<Vec<_>>();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
+fn persist_startup_result(runtime_dir: &Path, result: &Result<(), String>) {
+    let error_path = runtime_dir.join(STARTUP_ERROR_FILE);
+    match result {
+        Ok(()) => {
+            let _ = fs::remove_file(error_path);
+        }
+        Err(error) => {
+            let _ = fs::create_dir_all(runtime_dir);
+            let _ = fs::write(error_path, tail_chars(error, DISPLAY_ERROR_LIMIT_CHARS));
+        }
+    }
 }
 
 pub fn service_statuses() -> Vec<CoreServiceStatus> {
@@ -150,71 +164,81 @@ fn supervisor_pid(runtime_dir: &Path, process_marker: &str) -> Option<u32> {
 }
 
 pub fn ensure_shared_display() -> Result<(), String> {
-    validate_dependencies()?;
     let runtime_dir = runtime_dir();
-    let (ensure_script, server_script) = write_runtime_scripts(
-        runtime_dir.as_path(),
-        "harbor-vnc-ensure.sh",
-        ENSURE_DISPLAY_SCRIPT,
-        "harbor-vnc-server.sh",
-        SHARED_DISPLAY_SCRIPT,
-    )?;
-    write_novnc_index(runtime_dir.as_path(), "Harbor Display", true)?;
-    let output = Command::new("bash")
-        .arg(ensure_script)
-        .arg(VNC_PORT.to_string())
-        .arg(DISPLAY_NUMBER.to_string())
-        .arg(server_script)
-        .arg("true")
-        .output()
-        .map_err(|error| format!("start shared Harbor VNC desktop failed: {error}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    Err(if stderr.is_empty() {
-        format!(
-            "start shared Harbor VNC desktop failed with status {}",
-            output.status
-        )
-    } else {
-        stderr
-    })
+    let _ = fs::remove_file(runtime_dir.join(STARTUP_ERROR_FILE));
+    let result = (|| {
+        validate_dependencies()?;
+        let (ensure_script, server_script) = write_runtime_scripts(
+            runtime_dir.as_path(),
+            "harbor-vnc-ensure.sh",
+            ENSURE_DISPLAY_SCRIPT,
+            "harbor-vnc-server.sh",
+            SHARED_DISPLAY_SCRIPT,
+        )?;
+        write_novnc_index(runtime_dir.as_path(), "Harbor Display", true)?;
+        let output = Command::new("bash")
+            .arg(ensure_script)
+            .arg(VNC_PORT.to_string())
+            .arg(DISPLAY_NUMBER.to_string())
+            .arg(server_script)
+            .arg("true")
+            .output()
+            .map_err(|error| format!("start shared Harbor VNC desktop failed: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            format!(
+                "start shared Harbor VNC desktop failed with status {}",
+                output.status
+            )
+        } else {
+            stderr
+        })
+    })();
+    persist_startup_result(runtime_dir.as_path(), &result);
+    result
 }
 
 pub fn ensure_physical_display() -> Result<(), String> {
-    validate_physical_dependencies()?;
-    let display_name = physical_display_name().ok_or_else(|| {
-        "physical display unavailable; active local X11 DISPLAY not found".to_string()
-    })?;
     let runtime_dir = physical_runtime_dir();
-    let (ensure_script, server_script) = write_runtime_scripts(
-        runtime_dir.as_path(),
-        "harbor-vnc-physical-ensure.sh",
-        ENSURE_PHYSICAL_DISPLAY_SCRIPT,
-        "harbor-vnc-physical-server.sh",
-        PHYSICAL_DISPLAY_SCRIPT,
-    )?;
-    write_novnc_index(runtime_dir.as_path(), "Harbor Physical Display", false)?;
-    let output = Command::new("bash")
-        .arg(ensure_script)
-        .arg(PHYSICAL_VNC_PORT.to_string())
-        .arg(display_name)
-        .arg(server_script)
-        .output()
-        .map_err(|error| format!("start physical Harbor VNC display failed: {error}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    Err(if stderr.is_empty() {
-        format!(
-            "start physical Harbor VNC display failed with status {}",
-            output.status
-        )
-    } else {
-        stderr
-    })
+    let _ = fs::remove_file(runtime_dir.join(STARTUP_ERROR_FILE));
+    let result = (|| {
+        validate_physical_dependencies()?;
+        let display_name = physical_display_name().ok_or_else(|| {
+            "physical display unavailable; active local X11 DISPLAY not found".to_string()
+        })?;
+        let (ensure_script, server_script) = write_runtime_scripts(
+            runtime_dir.as_path(),
+            "harbor-vnc-physical-ensure.sh",
+            ENSURE_PHYSICAL_DISPLAY_SCRIPT,
+            "harbor-vnc-physical-server.sh",
+            PHYSICAL_DISPLAY_SCRIPT,
+        )?;
+        write_novnc_index(runtime_dir.as_path(), "Harbor Physical Display", false)?;
+        let output = Command::new("bash")
+            .arg(ensure_script)
+            .arg(PHYSICAL_VNC_PORT.to_string())
+            .arg(display_name)
+            .arg(server_script)
+            .output()
+            .map_err(|error| format!("start physical Harbor VNC display failed: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            format!(
+                "start physical Harbor VNC display failed with status {}",
+                output.status
+            )
+        } else {
+            stderr
+        })
+    })();
+    persist_startup_result(runtime_dir.as_path(), &result);
+    result
 }
 
 pub fn read_clipboard(display: &str) -> Result<String, String> {
@@ -708,8 +732,10 @@ if [[ "${shared_display_ready}" != true ]]; then
     "${runtime_dir}" "${display_number}" "${panel_port}" \
     9>&- </dev/null >>"${infrastructure_log}" 2>&1 &
 
-  for _ in {1..100}; do
+  startup_observed=false
+  for _ in {1..300}; do
     if [[ -f "${supervisor_file}" && -S "${vnc_socket}" && -f "${ready_file}" ]]; then
+      startup_observed=true
       supervisor_pid="$(cat "${supervisor_file}" 2>/dev/null || true)"
       if [[ "${supervisor_pid}" =~ ^[0-9]+$ ]] \
         && kill -0 "${supervisor_pid}" 2>/dev/null \
@@ -717,6 +743,10 @@ if [[ "${shared_display_ready}" != true ]]; then
         shared_display_ready=true
         break
       fi
+    elif [[ -f "${supervisor_file}" ]]; then
+      startup_observed=true
+    elif [[ "${startup_observed}" == true ]]; then
+      break
     fi
     sleep 0.1
   done
@@ -948,7 +978,7 @@ const NOVNC_ASSETS: &str = "/usr/share/novnc";
 const INSTALL_HINT: &str =
     "sudo apt install tigervnc-standalone-server novnc websockify openbox util-linux";
 const GNOME_INSTALL_HINT: &str =
-    "sudo apt install ubuntu-session gnome-session gnome-shell gnome-session-flashback dbus-x11";
+    "sudo apt install tigervnc-standalone-server novnc websockify util-linux ubuntu-session gnome-session gnome-shell gnome-session-flashback dbus-x11";
 
 fn validate_physical_dependencies() -> Result<(), String> {
     let mut missing = ["X0tigervnc", "websockify", "flock", "setsid"]
@@ -1137,6 +1167,8 @@ mod tests {
         assert!(SHARED_DISPLAY_SCRIPT.contains("openbox --sm-disable"));
         assert!(ENSURE_DISPLAY_SCRIPT.contains("flock 9"));
         assert!(ENSURE_DISPLAY_SCRIPT.contains("9>&- </dev/null"));
+        assert!(ENSURE_DISPLAY_SCRIPT.contains("for _ in {1..300}"));
+        assert!(ENSURE_DISPLAY_SCRIPT.contains("startup_observed"));
         assert!(ENSURE_DISPLAY_SCRIPT.contains("exec \"$@\""));
     }
 
@@ -1167,6 +1199,33 @@ mod tests {
             clipboard_display("unknown").unwrap_err(),
             "unknown display clipboard target: unknown"
         );
+    }
+
+    #[test]
+    fn virtual_display_install_hints_include_vnc_dependencies() {
+        for hint in [INSTALL_HINT, GNOME_INSTALL_HINT] {
+            assert!(hint.contains("tigervnc-standalone-server"));
+            assert!(hint.contains("novnc"));
+            assert!(hint.contains("websockify"));
+            assert!(hint.contains("util-linux"));
+        }
+        assert!(GNOME_INSTALL_HINT.contains("ubuntu-session"));
+        assert!(GNOME_INSTALL_HINT.contains("gnome-session-flashback"));
+    }
+
+    #[test]
+    fn display_startup_error_persists_full_failure_detail() {
+        let runtime_dir =
+            std::env::temp_dir().join(format!("harbor-vnc-error-test-{}", uuid::Uuid::new_v4()));
+        let failure = Err("TigerVNC failed\nwebsockify port 23682 is occupied".to_string());
+        persist_startup_result(runtime_dir.as_path(), &failure);
+        let error = display_startup_error("虚拟桌面启动失败", runtime_dir.as_path()).unwrap();
+        assert!(error.contains("TigerVNC failed"));
+        assert!(error.contains("websockify port 23682 is occupied"));
+
+        persist_startup_result(runtime_dir.as_path(), &Ok(()));
+        assert!(display_startup_error("虚拟桌面启动失败", runtime_dir.as_path()).is_none());
+        let _ = fs::remove_dir_all(runtime_dir);
     }
 
     #[test]

@@ -19,6 +19,9 @@ fn wants_core() -> bool {
 }
 
 fn main() {
+    if harbor_common::settings::handle_ssh_askpass() {
+        return;
+    }
     #[cfg(target_os = "linux")]
     {
         if wants_core() {
