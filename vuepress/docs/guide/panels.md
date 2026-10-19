@@ -74,6 +74,15 @@ Harbor 仓库提供了可以直接运行的 [Robot Panel 完整示例](https://g
 - [Python / ROS 2 / WebSocket 后端](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/robot_panel.py)
 - [示例运行说明](https://github.com/wh7019025/Harbor/blob/main/examples/webpage_view/README.md)
 
+## 手机访问面板
+
+在设置中开启 **Mobile** 并保存，然后用手机扫描显示的二维码。手机页面列出正在运行、允许网络访问的 WebView，点击即可进入程序面板。
+
+- 手机需要与运行面板的主机网络互通。
+- 面板必须设置 `localhost_only: false`，且对应的 WebView 端口可以从手机访问。
+- Mobile 提供面板列表，不提供 Task 或 Group 的启动、停止操作。面板内部可执行的操作由程序自身决定。
+- 面板列表使用独立的 `29387` 端口，不会因此开放 Core 管理 API。
+
 ## WebView 如何工作
 
 ```text
